@@ -233,6 +233,8 @@ export type Database = {
       }
       orders: {
         Row: {
+          albaran_at: string | null
+          client_token: string | null
           company_id: string
           confirmed_at: string | null
           created_at: string
@@ -250,6 +252,8 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          albaran_at?: string | null
+          client_token?: string | null
           company_id: string
           confirmed_at?: string | null
           created_at?: string
@@ -267,6 +271,8 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          albaran_at?: string | null
+          client_token?: string | null
           company_id?: string
           confirmed_at?: string | null
           created_at?: string
@@ -494,14 +500,19 @@ export type Database = {
       bridge_fetch_confirmed: { Args: never; Returns: Json }
       bridge_mark_albaran: {
         Args: { p_numalb: number; p_order_id: string }
-        Returns: undefined
+        Returns: boolean
       }
       bridge_mark_injected: {
         Args: { p_numped: number; p_order_id: string }
-        Returns: undefined
+        Returns: boolean
       }
       create_order: {
-        Args: { p_delivery_date?: string; p_lines: Json; p_note?: string }
+        Args: {
+          p_client_token?: string
+          p_delivery_date?: string
+          p_lines: Json
+          p_note?: string
+        }
         Returns: Json
       }
       is_staff: { Args: never; Returns: boolean }
