@@ -16,22 +16,31 @@ export type Database = {
     Tables: {
       categories: {
         Row: {
+          created_at: string
+          erp_code: string | null
           id: number
           is_active: boolean
           name: Json
           sort_order: number
+          updated_at: string
         }
         Insert: {
+          created_at?: string
+          erp_code?: string | null
           id?: never
           is_active?: boolean
-          name?: Json
+          name: Json
           sort_order?: number
+          updated_at?: string
         }
         Update: {
+          created_at?: string
+          erp_code?: string | null
           id?: never
           is_active?: boolean
           name?: Json
           sort_order?: number
+          updated_at?: string
         }
         Relationships: []
       }
@@ -111,6 +120,13 @@ export type Database = {
             referencedRelation: "products"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "favorites_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products_priced"
+            referencedColumns: ["id"]
+          },
         ]
       }
       portal_users: {
@@ -163,6 +179,7 @@ export type Database = {
           is_available: boolean
           is_current_variant: boolean
           is_erp_excluded: boolean
+          is_orderable: boolean | null
           is_weighed: boolean
           iva_rate: number
           name: Json
@@ -172,6 +189,7 @@ export type Database = {
           price_4_cents: number | null
           price_5_cents: number | null
           price_6_cents: number | null
+          sort_order: number
           unit: string
           units_per_case: number | null
           updated_at: string
@@ -188,6 +206,7 @@ export type Database = {
           is_available?: boolean
           is_current_variant?: boolean
           is_erp_excluded?: boolean
+          is_orderable?: boolean | null
           is_weighed?: boolean
           iva_rate?: number
           name: Json
@@ -197,6 +216,7 @@ export type Database = {
           price_4_cents?: number | null
           price_5_cents?: number | null
           price_6_cents?: number | null
+          sort_order?: number
           unit?: string
           units_per_case?: number | null
           updated_at?: string
@@ -213,6 +233,7 @@ export type Database = {
           is_available?: boolean
           is_current_variant?: boolean
           is_erp_excluded?: boolean
+          is_orderable?: boolean | null
           is_weighed?: boolean
           iva_rate?: number
           name?: Json
@@ -222,6 +243,7 @@ export type Database = {
           price_4_cents?: number | null
           price_5_cents?: number | null
           price_6_cents?: number | null
+          sort_order?: number
           unit?: string
           units_per_case?: number | null
           updated_at?: string
@@ -266,7 +288,34 @@ export type Database = {
       }
     }
     Views: {
-      [_ in never]: never
+      products_priced: {
+        Row: {
+          base_sku: string | null
+          category_id: number | null
+          codart: string | null
+          id: string | null
+          image_url: string | null
+          is_erp_excluded: boolean | null
+          is_orderable: boolean | null
+          is_weighed: boolean | null
+          iva_rate: number | null
+          name: Json | null
+          price_cents: number | null
+          sort_order: number | null
+          unit: string | null
+          units_per_case: number | null
+          variant_suffix: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "products_category_id_fkey"
+            columns: ["category_id"]
+            isOneToOne: false
+            referencedRelation: "categories"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Functions: {
       is_staff: { Args: never; Returns: boolean }
