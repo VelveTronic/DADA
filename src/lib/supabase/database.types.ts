@@ -14,6 +14,27 @@ export type Database = {
   }
   public: {
     Tables: {
+      categories: {
+        Row: {
+          id: number
+          is_active: boolean
+          name: Json
+          sort_order: number
+        }
+        Insert: {
+          id?: never
+          is_active?: boolean
+          name?: Json
+          sort_order?: number
+        }
+        Update: {
+          id?: never
+          is_active?: boolean
+          name?: Json
+          sort_order?: number
+        }
+        Relationships: []
+      }
       companies: {
         Row: {
           address: string | null
@@ -59,6 +80,39 @@ export type Database = {
         }
         Relationships: []
       }
+      favorites: {
+        Row: {
+          company_id: string
+          created_at: string
+          product_id: string
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+          product_id: string
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+          product_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "favorites_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "favorites_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       portal_users: {
         Row: {
           company_id: string
@@ -67,6 +121,7 @@ export type Database = {
           id: string
           is_active: boolean
           locale: string
+          updated_at: string
         }
         Insert: {
           company_id: string
@@ -75,6 +130,7 @@ export type Database = {
           id: string
           is_active?: boolean
           locale?: string
+          updated_at?: string
         }
         Update: {
           company_id?: string
@@ -83,6 +139,7 @@ export type Database = {
           id?: string
           is_active?: boolean
           locale?: string
+          updated_at?: string
         }
         Relationships: [
           {
@@ -94,6 +151,92 @@ export type Database = {
           },
         ]
       }
+      products: {
+        Row: {
+          base_sku: string
+          category_id: number | null
+          codart: string
+          created_at: string
+          erp_synced_at: string | null
+          id: string
+          image_url: string | null
+          is_available: boolean
+          is_current_variant: boolean
+          is_erp_excluded: boolean
+          is_weighed: boolean
+          iva_rate: number
+          name: Json
+          price_1_cents: number | null
+          price_2_cents: number | null
+          price_3_cents: number | null
+          price_4_cents: number | null
+          price_5_cents: number | null
+          price_6_cents: number | null
+          unit: string
+          units_per_case: number | null
+          updated_at: string
+          variant_suffix: string
+        }
+        Insert: {
+          base_sku: string
+          category_id?: number | null
+          codart: string
+          created_at?: string
+          erp_synced_at?: string | null
+          id?: string
+          image_url?: string | null
+          is_available?: boolean
+          is_current_variant?: boolean
+          is_erp_excluded?: boolean
+          is_weighed?: boolean
+          iva_rate?: number
+          name: Json
+          price_1_cents?: number | null
+          price_2_cents?: number | null
+          price_3_cents?: number | null
+          price_4_cents?: number | null
+          price_5_cents?: number | null
+          price_6_cents?: number | null
+          unit?: string
+          units_per_case?: number | null
+          updated_at?: string
+          variant_suffix?: string
+        }
+        Update: {
+          base_sku?: string
+          category_id?: number | null
+          codart?: string
+          created_at?: string
+          erp_synced_at?: string | null
+          id?: string
+          image_url?: string | null
+          is_available?: boolean
+          is_current_variant?: boolean
+          is_erp_excluded?: boolean
+          is_weighed?: boolean
+          iva_rate?: number
+          name?: Json
+          price_1_cents?: number | null
+          price_2_cents?: number | null
+          price_3_cents?: number | null
+          price_4_cents?: number | null
+          price_5_cents?: number | null
+          price_6_cents?: number | null
+          unit?: string
+          units_per_case?: number | null
+          updated_at?: string
+          variant_suffix?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "products_category_id_fkey"
+            columns: ["category_id"]
+            isOneToOne: false
+            referencedRelation: "categories"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       staff_users: {
         Row: {
           created_at: string
@@ -101,6 +244,7 @@ export type Database = {
           id: string
           is_active: boolean
           role: string
+          updated_at: string
         }
         Insert: {
           created_at?: string
@@ -108,6 +252,7 @@ export type Database = {
           id: string
           is_active?: boolean
           role?: string
+          updated_at?: string
         }
         Update: {
           created_at?: string
@@ -115,6 +260,7 @@ export type Database = {
           id?: string
           is_active?: boolean
           role?: string
+          updated_at?: string
         }
         Relationships: []
       }
@@ -125,6 +271,13 @@ export type Database = {
     Functions: {
       is_staff: { Args: never; Returns: boolean }
       my_company_id: { Args: never; Returns: string }
+      price_cents_for: {
+        Args: {
+          p: Database["public"]["Tables"]["products"]["Row"]
+          tier: number
+        }
+        Returns: number
+      }
     }
     Enums: {
       [_ in never]: never
