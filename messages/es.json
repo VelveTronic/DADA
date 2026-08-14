@@ -1,0 +1,14 @@
+{
+  "common": { "appName": "DADA Pedidos", "loading": "Cargando…", "logout": "Cerrar sesión" },
+  "login": {
+    "title": "Iniciar sesión",
+    "email": "Correo",
+    "password": "Contraseña",
+    "submit": "Entrar",
+    "errorInvalid": "Correo o contraseña incorrectos",
+    "errorInactive": "Cuenta inactiva, contacte con DADA"
+  },
+  "nav": { "catalog": "Catálogo", "orders": "Mis pedidos", "staff": "Panel interno" },
+  "catalog": { "title": "Catálogo", "empty": "Catálogo en preparación" },
+  "staff": { "title": "Panel interno", "ordersQueue": "Cola de confirmación" }
+}

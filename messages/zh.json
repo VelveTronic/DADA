@@ -1,0 +1,14 @@
+{
+  "common": { "appName": "DADA 订货平台", "loading": "加载中…", "logout": "退出登录" },
+  "login": {
+    "title": "登录",
+    "email": "邮箱",
+    "password": "密码",
+    "submit": "登录",
+    "errorInvalid": "邮箱或密码不正确",
+    "errorInactive": "账号未激活，请联系 DADA"
+  },
+  "nav": { "catalog": "商品目录", "orders": "我的订单", "staff": "员工后台" },
+  "catalog": { "title": "商品目录", "empty": "目录准备中" },
+  "staff": { "title": "员工后台", "ordersQueue": "订单确认队列" }
+}
