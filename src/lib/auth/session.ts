@@ -11,15 +11,25 @@ import { createServerSupabase } from "@/lib/supabase/server";
  * never a throw. A helper that could throw would be able to fail an order that
  * was otherwise fine.
  *
+ * Both failure paths log, because `null` is otherwise indistinguishable from a
+ * signed-out visitor — and a misconfigured URL/key would silently sign the whole
+ * portal out rather than fail loudly. A plain "no session" is NOT an error here:
+ * `getUser()` reports that as `error` too, so the log is noisy by design and
+ * meant to be read alongside the request, not alerted on.
+ *
  * Returns the authenticated user or null. Never throws.
  */
 export async function getSessionUser() {
   try {
     const supabase = await createServerSupabase();
     const { data, error } = await supabase.auth.getUser();
-    if (error) return null;
+    if (error) {
+      console.error("getSessionUser:", error);
+      return null;
+    }
     return data.user ?? null;
-  } catch {
+  } catch (e) {
+    console.error("getSessionUser:", e);
     return null;
   }
 }
