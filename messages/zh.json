@@ -1,7 +1,7 @@
 {
   "common": {
     "appName": "DADA 订货平台",
-    "metaDescription": "DADA 餐厅订货平台",
+    "metaDescription": "DADA Distribución 餐厅食品订货平台——在线下单、按您的价目表实时报价",
     "loading": "加载中…",
     "logout": "退出登录"
   },

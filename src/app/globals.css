@@ -20,6 +20,6 @@
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: "PingFang SC", "Microsoft YaHei", "Noto Sans SC", Arial, Helvetica,
+  font-family: Arial, Helvetica, "PingFang SC", "Microsoft YaHei", "Noto Sans SC",
     sans-serif;
 }
