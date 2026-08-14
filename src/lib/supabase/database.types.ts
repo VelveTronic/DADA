@@ -17,7 +17,7 @@ export type Database = {
       categories: {
         Row: {
           created_at: string
-          erp_code: string | null
+          erp_code: string
           id: number
           is_active: boolean
           name: Json
@@ -26,7 +26,7 @@ export type Database = {
         }
         Insert: {
           created_at?: string
-          erp_code?: string | null
+          erp_code: string
           id?: never
           is_active?: boolean
           name: Json
@@ -35,7 +35,7 @@ export type Database = {
         }
         Update: {
           created_at?: string
-          erp_code?: string | null
+          erp_code?: string
           id?: never
           is_active?: boolean
           name?: Json
@@ -295,6 +295,8 @@ export type Database = {
           codart: string | null
           id: string | null
           image_url: string | null
+          is_available: boolean | null
+          is_current_variant: boolean | null
           is_erp_excluded: boolean | null
           is_orderable: boolean | null
           is_weighed: boolean | null
