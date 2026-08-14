@@ -10,3 +10,6 @@ B2B ordering portal for DADA Distribución (Spanish food wholesaler; customers a
 - DB migrations: SQL files in `supabase/migrations/` (source of truth), applied to cloud project `gudiykhngonoqsjoigza` via Supabase MCP `apply_migration`. Never `db push`.
 - Package manager: pnpm. Gate before commit: `pnpm lint; pnpm typecheck; pnpm test; pnpm build`.
 - ERP glossary: codart=SKU, codcli=customer no., tarcli=price tier, numped/numalb=ERP doc numbers (bridge writes them back).
+
+## Framework note
+Next.js 16 has breaking changes vs training data. Before writing framework-level code (routing, middleware/proxy, config), read @AGENTS.md and the relevant guide under node_modules/next/dist/docs/.
