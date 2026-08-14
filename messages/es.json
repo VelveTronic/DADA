@@ -1,14 +1,19 @@
 {
-  "common": { "appName": "DADA Pedidos", "loading": "Cargando…", "logout": "Cerrar sesión" },
+  "common": {
+    "appName": "DADA Pedidos",
+    "metaDescription": "Portal de pedidos B2B de DADA Distribución",
+    "loading": "Cargando…",
+    "logout": "Cerrar sesión"
+  },
   "login": {
     "title": "Iniciar sesión",
-    "email": "Correo",
+    "email": "Correo electrónico",
     "password": "Contraseña",
     "submit": "Entrar",
     "errorInvalid": "Correo o contraseña incorrectos",
-    "errorInactive": "Cuenta inactiva, contacte con DADA"
+    "errorInactive": "Cuenta inactiva. Contacte con DADA."
   },
   "nav": { "catalog": "Catálogo", "orders": "Mis pedidos", "staff": "Panel interno" },
   "catalog": { "title": "Catálogo", "empty": "Catálogo en preparación" },
-  "staff": { "title": "Panel interno", "ordersQueue": "Cola de confirmación" }
+  "staff": { "title": "Panel interno", "ordersQueue": "Cola de confirmación de pedidos" }
 }

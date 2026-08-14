@@ -1,5 +1,10 @@
 {
-  "common": { "appName": "DADA 订货平台", "loading": "加载中…", "logout": "退出登录" },
+  "common": {
+    "appName": "DADA 订货平台",
+    "metaDescription": "DADA 餐厅订货平台",
+    "loading": "加载中…",
+    "logout": "退出登录"
+  },
   "login": {
     "title": "登录",
     "email": "邮箱",
