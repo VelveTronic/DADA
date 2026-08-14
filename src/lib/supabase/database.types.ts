@@ -14,13 +14,117 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      companies: {
+        Row: {
+          address: string | null
+          cif: string | null
+          codcli: number | null
+          created_at: string
+          id: string
+          is_active: boolean
+          name: string
+          notes: string | null
+          phone: string | null
+          postal_code: string | null
+          tarcli: number
+          updated_at: string
+        }
+        Insert: {
+          address?: string | null
+          cif?: string | null
+          codcli?: number | null
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          name: string
+          notes?: string | null
+          phone?: string | null
+          postal_code?: string | null
+          tarcli?: number
+          updated_at?: string
+        }
+        Update: {
+          address?: string | null
+          cif?: string | null
+          codcli?: number | null
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          name?: string
+          notes?: string | null
+          phone?: string | null
+          postal_code?: string | null
+          tarcli?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      portal_users: {
+        Row: {
+          company_id: string
+          created_at: string
+          display_name: string | null
+          id: string
+          is_active: boolean
+          locale: string
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+          display_name?: string | null
+          id: string
+          is_active?: boolean
+          locale?: string
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+          display_name?: string | null
+          id?: string
+          is_active?: boolean
+          locale?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "portal_users_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      staff_users: {
+        Row: {
+          created_at: string
+          display_name: string | null
+          id: string
+          is_active: boolean
+          role: string
+        }
+        Insert: {
+          created_at?: string
+          display_name?: string | null
+          id: string
+          is_active?: boolean
+          role?: string
+        }
+        Update: {
+          created_at?: string
+          display_name?: string | null
+          id?: string
+          is_active?: boolean
+          role?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      is_staff: { Args: never; Returns: boolean }
+      my_company_id: { Args: never; Returns: string }
     }
     Enums: {
       [_ in never]: never
