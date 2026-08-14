@@ -129,6 +129,177 @@ export type Database = {
           },
         ]
       }
+      order_events: {
+        Row: {
+          actor: string | null
+          created_at: string
+          detail: Json | null
+          event: string
+          id: number
+          order_id: string
+        }
+        Insert: {
+          actor?: string | null
+          created_at?: string
+          detail?: Json | null
+          event: string
+          id?: never
+          order_id: string
+        }
+        Update: {
+          actor?: string | null
+          created_at?: string
+          detail?: Json | null
+          event?: string
+          id?: never
+          order_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "order_events_order_id_fkey"
+            columns: ["order_id"]
+            isOneToOne: false
+            referencedRelation: "orders"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      order_items: {
+        Row: {
+          codart: string
+          id: number
+          is_erp_excluded: boolean
+          is_weighed: boolean
+          line_total_cents: number
+          name: Json
+          order_id: string
+          product_id: string | null
+          qty: number
+          sort_order: number
+          unit: string
+          unit_price_cents: number
+        }
+        Insert: {
+          codart: string
+          id?: never
+          is_erp_excluded?: boolean
+          is_weighed?: boolean
+          line_total_cents: number
+          name: Json
+          order_id: string
+          product_id?: string | null
+          qty: number
+          sort_order?: number
+          unit: string
+          unit_price_cents: number
+        }
+        Update: {
+          codart?: string
+          id?: never
+          is_erp_excluded?: boolean
+          is_weighed?: boolean
+          line_total_cents?: number
+          name?: Json
+          order_id?: string
+          product_id?: string | null
+          qty?: number
+          sort_order?: number
+          unit?: string
+          unit_price_cents?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "order_items_order_id_fkey"
+            columns: ["order_id"]
+            isOneToOne: false
+            referencedRelation: "orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "order_items_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "order_items_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products_priced"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      orders: {
+        Row: {
+          company_id: string
+          confirmed_at: string | null
+          created_at: string
+          customer_note: string | null
+          delivery_date: string | null
+          id: string
+          injected_at: string | null
+          numalb: number | null
+          numped: number | null
+          order_number: number
+          placed_by: string | null
+          staff_note: string | null
+          status: string
+          subtotal_cents: number
+          updated_at: string
+        }
+        Insert: {
+          company_id: string
+          confirmed_at?: string | null
+          created_at?: string
+          customer_note?: string | null
+          delivery_date?: string | null
+          id?: string
+          injected_at?: string | null
+          numalb?: number | null
+          numped?: number | null
+          order_number?: number
+          placed_by?: string | null
+          staff_note?: string | null
+          status?: string
+          subtotal_cents?: number
+          updated_at?: string
+        }
+        Update: {
+          company_id?: string
+          confirmed_at?: string | null
+          created_at?: string
+          customer_note?: string | null
+          delivery_date?: string | null
+          id?: string
+          injected_at?: string | null
+          numalb?: number | null
+          numped?: number | null
+          order_number?: number
+          placed_by?: string | null
+          staff_note?: string | null
+          status?: string
+          subtotal_cents?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "orders_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "orders_placed_by_fkey"
+            columns: ["placed_by"]
+            isOneToOne: false
+            referencedRelation: "portal_users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       portal_users: {
         Row: {
           company_id: string
@@ -320,6 +491,19 @@ export type Database = {
       }
     }
     Functions: {
+      bridge_fetch_confirmed: { Args: never; Returns: Json }
+      bridge_mark_albaran: {
+        Args: { p_numalb: number; p_order_id: string }
+        Returns: undefined
+      }
+      bridge_mark_injected: {
+        Args: { p_numped: number; p_order_id: string }
+        Returns: undefined
+      }
+      create_order: {
+        Args: { p_delivery_date?: string; p_lines: Json; p_note?: string }
+        Returns: Json
+      }
       is_staff: { Args: never; Returns: boolean }
       my_company_id: { Args: never; Returns: string }
       price_cents_for: {
