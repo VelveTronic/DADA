@@ -82,17 +82,19 @@ async function upsertChunk(
   chunk: typeof deduped,
   demote: boolean,
 ): Promise<void> {
+  // unit, units_per_case and erp_synced_at are deliberately ABSENT, like the
+  // price columns: on first insert the DB defaults give unit='UNIDAD' and NULLs
+  // anyway, and leaving them out of the payload means a later re-import cannot
+  // clobber the real values written by the Wingest price/unit merge.
   const payload = chunk.map((record) => ({
     codart: record.codart,
     base_sku: record.base_sku,
     variant_suffix: record.variant_suffix,
     is_current_variant: demote ? false : record.is_current_variant,
     name: record.name,
-    unit: record.unit,
     is_weighed: record.is_weighed,
     is_available: record.is_available,
     iva_rate: record.iva_rate,
-    erp_synced_at: null,
   }));
   const { error } = await db
     .from("products")

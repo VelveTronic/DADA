@@ -51,43 +51,56 @@ if (
 const admin = createClient<Database>(url, key, {
   auth: { persistSession: false, autoRefreshToken: false },
 });
-const { data: created, error: authError } = await admin.auth.admin.createUser({
-  email,
-  password,
-  email_confirm: true,
-});
-if (authError) throw authError;
+/**
+ * The awaiting body lives in a function because the package is CJS (no "type":
+ * "module"), and tsx/esbuild refuse to emit top-level await into CJS output —
+ * it is a transform-time error, so bare `await` here made the whole script
+ * unrunnable, argument validation included.
+ */
+async function main(): Promise<void> {
+  const { data: created, error: authError } = await admin.auth.admin.createUser({
+    email,
+    password,
+    email_confirm: true,
+  });
+  if (authError) throw authError;
 
-const userId = created.user.id;
-let companyId: string | null = null;
-try {
-  if (kind === "staff") {
-    const { error } = await admin.from("staff_users").insert({
-      id: userId,
-      role,
-      display_name: displayName,
-    });
-    if (error) throw error;
-    console.log(`Created staff ${email} (${role}), uid=${userId}`);
-  } else {
-    const { data: company, error: companyError } = await admin
-      .from("companies")
-      .insert({ name: companyName!, codcli, tarcli })
-      .select("id")
-      .single();
-    if (companyError) throw companyError;
-    companyId = company.id;
+  const userId = created.user.id;
+  let companyId: string | null = null;
+  try {
+    if (kind === "staff") {
+      const { error } = await admin.from("staff_users").insert({
+        id: userId,
+        role,
+        display_name: displayName,
+      });
+      if (error) throw error;
+      console.log(`Created staff ${email} (${role}), uid=${userId}`);
+    } else {
+      const { data: company, error: companyError } = await admin
+        .from("companies")
+        .insert({ name: companyName!, codcli, tarcli })
+        .select("id")
+        .single();
+      if (companyError) throw companyError;
+      companyId = company.id;
 
-    const { error } = await admin.from("portal_users").insert({
-      id: userId,
-      company_id: companyId,
-      display_name: displayName,
-    });
-    if (error) throw error;
-    console.log(`Created customer ${email} for ${companyName}, uid=${userId}`);
+      const { error } = await admin.from("portal_users").insert({
+        id: userId,
+        company_id: companyId,
+        display_name: displayName,
+      });
+      if (error) throw error;
+      console.log(`Created customer ${email} for ${companyName}, uid=${userId}`);
+    }
+  } catch (error) {
+    await admin.auth.admin.deleteUser(userId);
+    if (companyId) await admin.from("companies").delete().eq("id", companyId);
+    throw error;
   }
-} catch (error) {
-  await admin.auth.admin.deleteUser(userId);
-  if (companyId) await admin.from("companies").delete().eq("id", companyId);
-  throw error;
 }
+
+main().catch((error: unknown) => {
+  console.error(error instanceof Error ? error.message : String(error));
+  process.exit(1);
+});
