@@ -1,6 +1,7 @@
 "use client";
 
 import { signIn } from "@/app/actions/auth";
+import { BTN_PRIMARY, FIELD } from "@/components/ui";
 
 export function LoginForm({
   locale,
@@ -19,7 +20,7 @@ export function LoginForm({
           type="email"
           required
           autoComplete="email"
-          className="rounded border px-3 py-2"
+          className={FIELD}
         />
       </label>
       <label className="flex flex-col gap-1 text-sm">
@@ -29,10 +30,10 @@ export function LoginForm({
           type="password"
           required
           autoComplete="current-password"
-          className="rounded border px-3 py-2"
+          className={FIELD}
         />
       </label>
-      <button type="submit" className="rounded bg-black px-3 py-2 text-white">
+      <button type="submit" className={BTN_PRIMARY}>
         {labels.submit}
       </button>
     </form>

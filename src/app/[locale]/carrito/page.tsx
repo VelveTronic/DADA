@@ -1,9 +1,16 @@
 import type { Locale } from "next-intl";
 import { getTranslations, setRequestLocale } from "next-intl/server";
 import { cookies } from "next/headers";
-import Link from "next/link";
 import { setCartQty } from "@/app/actions/cart";
 import { submitOrder } from "@/app/actions/checkout";
+import { AppShell } from "@/components/app-shell";
+import {
+  BTN_PRIMARY,
+  BTN_QUIET,
+  FIELD,
+  FIELD_SM,
+  GLASS_CARD,
+} from "@/components/ui";
 import { requireCompanyUser } from "@/lib/auth/guards";
 import { CART_COOKIE, parseCart } from "@/lib/cart";
 import { localizedName } from "@/lib/catalog/display";
@@ -51,12 +58,11 @@ export default async function CartPage({
     cartError: rawCartError,
   } = await searchParams;
   setRequestLocale(locale);
-  await requireCompanyUser(locale);
+  const { portalUser } = await requireCompanyUser(locale);
   const t = await getTranslations("cart");
   // The badges and the price-pending wording are catalog vocabulary; reused
   // rather than duplicated into a second namespace.
   const tCatalog = await getTranslations("catalog");
-  const tNav = await getTranslations("nav");
 
   // Both query strings are user-editable, so both are validated before they can
   // put a single character on the page.
@@ -141,18 +147,17 @@ export default async function CartPage({
   const clientToken = crypto.randomUUID();
 
   return (
-    <main className="mx-auto max-w-3xl p-4 sm:p-6">
-      <div className="flex items-center justify-between gap-4">
-        <h1 className="text-2xl font-bold">{t("title")}</h1>
-        <Link className="text-sm underline" href={`/${locale}/catalogo`}>
-          ← {tNav("catalog")}
-        </Link>
-      </div>
+    <AppShell
+      locale={locale}
+      nav="customer"
+      user={{ name: portalUser.display_name ?? portalUser.companies.name }}
+    >
+      <h1 className="mt-8 text-2xl font-bold tracking-tight">{t("title")}</h1>
 
       {error && (
         <p
           role="alert"
-          className="mt-4 rounded bg-red-50 px-3 py-2 text-sm text-red-700"
+          className="mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700"
         >
           {t(`errors.${error}`)}
           {detail && (
@@ -164,17 +169,21 @@ export default async function CartPage({
       {cartError && (
         <p
           role="alert"
-          className="mt-4 rounded bg-red-50 px-3 py-2 text-sm text-red-700"
+          className="mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700"
         >
           {cartError === "full" ? t("full") : t("badQty")}
         </p>
       )}
 
       {rows.length === 0 ? (
-        <p className="mt-10 text-center text-gray-400">{t("empty")}</p>
+        <p className={`${GLASS_CARD} mt-4 p-10 text-center text-muted`}>
+          {t("empty")}
+        </p>
       ) : (
         <>
-          <ul className="mt-4 divide-y">
+          <ul
+            className={`${GLASS_CARD} mt-4 divide-y divide-border px-4 sm:px-5`}
+          >
             {rows.map((row) => {
               const name = localizedName(row.product?.name, locale);
               const orderable = row.product?.is_orderable === true;
@@ -191,7 +200,7 @@ export default async function CartPage({
                         meta line below, where a long name can never clip them
                         out of view on a narrow phone. */}
                     <p className="truncate font-medium">{name || "—"}</p>
-                    <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-gray-500">
+                    <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted">
                       {/* A vanished product has no codart to show and its uuid
                           means nothing to a restaurant, so the line says what
                           the customer needs to know instead. The remove button
@@ -202,14 +211,14 @@ export default async function CartPage({
                           : tCatalog("unavailable")}
                       </span>
                       {weighed && (
-                        <span className="rounded bg-amber-100 px-1.5 py-0.5 text-amber-800">
+                        <span className="rounded-md bg-amber-100 px-1.5 py-0.5 text-amber-800">
                           {tCatalog("weighed")}
                         </span>
                       )}
                       {/* …which is also why the badge is for PAUSED products
                           only: on a vanished line it would just say it twice. */}
                       {!orderable && row.product && (
-                        <span className="rounded bg-gray-200 px-1.5 py-0.5 text-gray-600">
+                        <span className="rounded-md bg-gray-200 px-1.5 py-0.5 text-gray-600">
                           {tCatalog("unavailable")}
                         </span>
                       )}
@@ -245,12 +254,9 @@ export default async function CartPage({
                         // reader, so the name goes in the label — unless the
                         // product carries none in either language.
                         aria-label={name ? t("qtyFor", { name }) : t("qty")}
-                        className="w-24 rounded border px-2 py-1 text-right"
+                        className={`w-24 ${FIELD_SM} text-right`}
                       />
-                      <button
-                        type="submit"
-                        className="rounded border px-2 py-1 text-xs"
-                      >
+                      <button type="submit" className={BTN_QUIET}>
                         {t("update")}
                       </button>
                     </form>
@@ -264,7 +270,7 @@ export default async function CartPage({
                     {row.totalCents != null ? (
                       formatEuros(row.totalCents, locale)
                     ) : (
-                      <span className="font-normal text-gray-400">
+                      <span className="font-normal text-muted">
                         {tCatalog("noPrice")}
                       </span>
                     )}
@@ -283,7 +289,7 @@ export default async function CartPage({
                     <button
                       type="submit"
                       aria-label={name ? t("removeFor", { name }) : t("remove")}
-                      className="px-2 text-lg leading-none text-gray-400"
+                      className="px-2 text-lg leading-none text-muted transition-colors hover:text-brand-ink"
                     >
                       ×
                     </button>
@@ -293,13 +299,13 @@ export default async function CartPage({
             })}
           </ul>
 
-          <div className="mt-4 flex items-center justify-between border-t pt-4">
-            <span className="text-sm text-gray-600">{t("subtotal")}</span>
+          <div className="mt-4 flex items-center justify-between px-4 sm:px-5">
+            <span className="text-sm text-muted">{t("subtotal")}</span>
             <span className="text-lg font-semibold">
               {priceable ? (
                 formatEuros(subtotalCents, locale)
               ) : (
-                <span className="font-normal text-gray-400">—</span>
+                <span className="font-normal text-muted">—</span>
               )}
             </span>
           </div>
@@ -307,7 +313,7 @@ export default async function CartPage({
           {blockedMessage && (
             <p
               role="status"
-              className="mt-4 rounded bg-amber-50 px-3 py-2 text-sm text-amber-800"
+              className="mt-4 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800"
             >
               {blockedMessage}
             </p>
@@ -315,7 +321,10 @@ export default async function CartPage({
 
           {/* No line inputs: submitOrder reads them from the httpOnly cookie, so
               nothing here can add a product or set a price. */}
-          <form action={submitOrder} className="mt-6 border-t pt-6">
+          <form
+            action={submitOrder}
+            className={`${GLASS_CARD} mt-6 p-4 sm:p-5`}
+          >
             <input type="hidden" name="locale" value={locale} />
             <input type="hidden" name="client_token" value={clientToken} />
             <h2 className="text-lg font-semibold">{t("checkout")}</h2>
@@ -324,7 +333,7 @@ export default async function CartPage({
               <div>
                 <label
                   htmlFor="delivery_date"
-                  className="block text-sm text-gray-600"
+                  className="block text-sm text-muted"
                 >
                   {t("deliveryDate")}
                 </label>
@@ -336,11 +345,11 @@ export default async function CartPage({
                   // calendar rather than the browser's.
                   min={today}
                   max={addDays(today, DELIVERY_WINDOW_DAYS)}
-                  className="mt-1 w-full rounded border px-3 py-2"
+                  className={`mt-1 w-full ${FIELD}`}
                 />
               </div>
               <div>
-                <label htmlFor="note" className="block text-sm text-gray-600">
+                <label htmlFor="note" className="block text-sm text-muted">
                   {t("note")}
                 </label>
                 <textarea
@@ -350,7 +359,7 @@ export default async function CartPage({
                   // create_order rejects anything longer (NOTE_TOO_LONG).
                   maxLength={2000}
                   placeholder={t("notePlaceholder")}
-                  className="mt-1 w-full rounded border px-3 py-2"
+                  className={`mt-1 w-full ${FIELD}`}
                 />
               </div>
             </div>
@@ -359,13 +368,13 @@ export default async function CartPage({
               type="submit"
               disabled={!priceable}
               title={blockedMessage ?? undefined}
-              className="mt-4 rounded bg-black px-4 py-2 text-white disabled:cursor-not-allowed disabled:opacity-40"
+              className={`mt-4 ${BTN_PRIMARY}`}
             >
               {t("submitOrder")}
             </button>
           </form>
         </>
       )}
-    </main>
+    </AppShell>
   );
 }

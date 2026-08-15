@@ -5,6 +5,8 @@ import {
   setCurrentVariant,
   setProductAvailability,
 } from "@/app/actions/staff-products";
+import { AppShell } from "@/components/app-shell";
+import { BTN_PRIMARY, BTN_QUIET, FIELD, GLASS_CARD } from "@/components/ui";
 import { requireStaff } from "@/lib/auth/guards";
 import { localizedName, sanitizeSearch } from "@/lib/catalog/display";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -61,7 +63,7 @@ export default async function StaffProductsPage({
   const { locale } = await params;
   const { q: rawQ, page: rawPage } = await searchParams;
   setRequestLocale(locale);
-  await requireStaff(locale);
+  const { staffUser } = await requireStaff(locale);
   const t = await getTranslations("staff");
   // Shared catalog vocabulary — control labels, the weighed badge, the pager —
   // reused rather than duplicated into the staff namespace.
@@ -107,13 +109,17 @@ export default async function StaffProductsPage({
   };
 
   return (
-    <main className="mx-auto max-w-5xl p-4 sm:p-6">
-      <div className="flex items-center justify-between gap-4">
-        <h1 className="text-2xl font-bold">{t("productsTitle")}</h1>
-        <Link className="text-sm underline" href={`/${locale}/staff`}>
-          ← {t("title")}
-        </Link>
-      </div>
+    <AppShell
+      locale={locale}
+      nav="staff"
+      user={{
+        name: staffUser.display_name ?? staffUser.id,
+        detail: staffUser.role,
+      }}
+    >
+      <h1 className="mt-8 text-2xl font-bold tracking-tight">
+        {t("productsTitle")}
+      </h1>
 
       <form method="get" className="mt-4 flex gap-2">
         <input
@@ -121,26 +127,26 @@ export default async function StaffProductsPage({
           defaultValue={q}
           aria-label={t("searchPlaceholder")}
           placeholder={t("searchPlaceholder")}
-          className="w-full rounded border px-3 py-2"
+          className={`w-full ${FIELD}`}
         />
         <button
           type="submit"
           aria-label={tCatalog("searchButton")}
-          className="rounded bg-black px-4 py-2 text-white"
+          className={BTN_PRIMARY}
         >
           🔍
         </button>
       </form>
 
       {products.length === 0 ? (
-        <p className="mt-10 text-center text-gray-400">
+        <p className={`${GLASS_CARD} mt-4 p-10 text-center text-muted`}>
           {tCatalog("noResults")}
         </p>
       ) : (
-        <div className="mt-4 overflow-x-auto">
+        <div className={`${GLASS_CARD} mt-4 overflow-x-auto p-4 sm:p-5`}>
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b text-left text-xs text-gray-500">
+              <tr className="border-b border-border text-left text-xs text-muted">
                 <th className="py-2">{t("colProduct")}</th>
                 <th>{t("colFlags")}</th>
                 <th>{t("colPrices")}</th>
@@ -151,7 +157,7 @@ export default async function StaffProductsPage({
                 </th>
               </tr>
             </thead>
-            <tbody className="divide-y">
+            <tbody className="divide-y divide-border">
               {products.map((p) => {
                 const groupSize = groupSizes.get(p.base_sku) ?? 1;
                 const inGroup = groupSize > 1 || p.variant_suffix !== "";
@@ -167,12 +173,12 @@ export default async function StaffProductsPage({
                       <p className="font-medium">
                         {localizedName(p.name, locale)}
                       </p>
-                      <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-gray-500">
+                      <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted">
                         <span>
                           {p.codart} · {p.unit}
                         </span>
                         {p.is_weighed && (
-                          <span className="rounded bg-amber-100 px-1.5 py-0.5 text-amber-800">
+                          <span className="rounded-md bg-amber-100 px-1.5 py-0.5 text-amber-800">
                             {tCatalog("weighed")}
                           </span>
                         )}
@@ -190,13 +196,13 @@ export default async function StaffProductsPage({
                       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                         <span
                           className={
-                            p.is_available ? "text-green-700" : "text-gray-500"
+                            p.is_available ? "text-green-700" : "text-muted"
                           }
                         >
                           {p.is_available ? t("available") : t("unavailable")}
                         </span>
                         {p.is_current_variant && (
-                          <span className="rounded bg-blue-100 px-1.5 py-0.5 text-xs text-blue-800">
+                          <span className="rounded-md bg-blue-100 px-1.5 py-0.5 text-xs text-blue-800">
                             {t("current")}
                           </span>
                         )}
@@ -213,10 +219,7 @@ export default async function StaffProductsPage({
                             name="available"
                             value={p.is_available ? "0" : "1"}
                           />
-                          <button
-                            type="submit"
-                            className="rounded border px-2 py-1 text-xs"
-                          >
+                          <button type="submit" className={BTN_QUIET}>
                             {p.is_available
                               ? t("makeUnavailable")
                               : t("makeAvailable")}
@@ -235,10 +238,7 @@ export default async function StaffProductsPage({
                               value={p.base_sku}
                             />
                             <input type="hidden" name="locale" value={locale} />
-                            <button
-                              type="submit"
-                              className="rounded border px-2 py-1 text-xs"
-                            >
+                            <button type="submit" className={BTN_QUIET}>
                               {t("makeCurrent")}
                             </button>
                           </form>
@@ -257,19 +257,19 @@ export default async function StaffProductsPage({
         <nav className="mt-6 flex items-center justify-center gap-4 text-sm">
           {page > 1 && (
             <Link
-              className="underline"
+              className="text-brand-ink hover:underline"
               aria-label={tCatalog("prev")}
               href={pageHref(page - 1)}
             >
               ←
             </Link>
           )}
-          <span className="text-gray-500">
+          <span className="text-muted">
             {tCatalog("pageOf", { page, total: totalPages })}
           </span>
           {page < totalPages && (
             <Link
-              className="underline"
+              className="text-brand-ink hover:underline"
               aria-label={tCatalog("next")}
               href={pageHref(page + 1)}
             >
@@ -278,6 +278,6 @@ export default async function StaffProductsPage({
           )}
         </nav>
       )}
-    </main>
+    </AppShell>
   );
 }

@@ -1,7 +1,8 @@
 import type { Locale } from "next-intl";
 import { getTranslations, setRequestLocale } from "next-intl/server";
 import Link from "next/link";
-import { signOut } from "@/app/actions/auth";
+import { AppShell } from "@/components/app-shell";
+import { GLASS_CARD } from "@/components/ui";
 import { requireStaff } from "@/lib/auth/guards";
 
 export const dynamic = "force-dynamic";
@@ -15,36 +16,39 @@ export default async function StaffHome({
   setRequestLocale(locale);
   const { staffUser } = await requireStaff(locale);
   const t = await getTranslations("staff");
-  const tc = await getTranslations("common");
+
+  const sections = [
+    { href: `/${locale}/staff/pedidos`, label: t("ordersQueue") },
+    { href: `/${locale}/staff/productos`, label: t("products") },
+  ];
 
   return (
-    <main className="mx-auto max-w-4xl p-6">
-      <div className="flex items-center justify-between gap-4">
-        <h1 className="text-2xl font-bold">{t("title")}</h1>
-        <form action={signOut}>
-          <input type="hidden" name="locale" value={locale} />
-          <button type="submit" className="text-sm underline">
-            {tc("logout")}
-          </button>
-        </form>
-      </div>
-      <p className="mt-2 text-sm text-gray-500">
-        {staffUser.display_name ?? staffUser.id} · {staffUser.role}
-      </p>
-      <nav className="mt-8">
-        <ul className="space-y-2 text-sm">
-          <li>
-            <Link className="underline" href={`/${locale}/staff/pedidos`}>
-              {t("ordersQueue")}
-            </Link>
-          </li>
-          <li>
-            <Link className="underline" href={`/${locale}/staff/productos`}>
-              {t("products")}
-            </Link>
-          </li>
+    <AppShell
+      locale={locale}
+      nav="staff"
+      user={{
+        name: staffUser.display_name ?? staffUser.id,
+        detail: staffUser.role,
+      }}
+    >
+      <h1 className="mt-8 text-2xl font-bold tracking-tight">{t("title")}</h1>
+      <nav className="mt-6">
+        <ul className="grid gap-4 sm:grid-cols-2">
+          {sections.map((section) => (
+            <li key={section.href}>
+              <Link
+                href={section.href}
+                className={`${GLASS_CARD} flex items-center justify-between gap-4 p-5 font-medium transition-colors hover:border-brand hover:text-brand-ink`}
+              >
+                {section.label}
+                <span aria-hidden="true" className="text-brand-ink">
+                  →
+                </span>
+              </Link>
+            </li>
+          ))}
         </ul>
       </nav>
-    </main>
+    </AppShell>
   );
 }

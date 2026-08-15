@@ -3,10 +3,11 @@
 /**
  * DADA is a SINGLE LIGHT THEME, deliberately.
  *
- * The half-implemented `prefers-color-scheme: dark` block that used to live here
- * was deleted: nothing in the portal honoured it, so a customer on a dark-mode
- * phone got dark-flipped `--background`/`--foreground` under components written
- * against light greys (`text-gray-500` on near-black), which failed AA. The look
+ * The half-implemented dark block that used to live here — a media query on the
+ * visitor's OS colour preference — was deleted: nothing in the portal honoured
+ * it, so a customer on a dark-mode phone got a flipped ground and ink under
+ * components written against light greys (grey-500 on near-black), which failed
+ * AA — the reviewer flagged exactly that. The look
  * the owner asked for is the white frosted-glass one below, and it is painted
  * explicitly — ground, ink and `color-scheme` — so it holds whatever the host OS
  * prefers. Reintroducing a dark theme means restyling every page, not toggling
@@ -37,7 +38,14 @@
   --color-border: rgb(30 32 30 / 0.08);
   --color-ink: #1d2021;
   --color-muted: #6b7075;
+  /* The sphere's own red. It is a FILL colour: white on it clears AA (4.6:1),
+     but it as text on glass does not (4.4:1). */
   --color-brand: #e8192c;
+  /* …so the accent has a second, darker shade for TEXT — brand-red wording,
+     links and hovers on a light ground clear AA at 5.7:1 with this one. Same
+     hue, same accent, one of the two per context: fills take `--color-brand`,
+     letters take this. */
+  --color-brand-ink: #c8102e;
   --color-brand-soft: #fdecee;
   --radius-card: 16px;
 }

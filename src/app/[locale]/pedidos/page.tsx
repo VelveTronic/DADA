@@ -1,7 +1,8 @@
 import type { Locale } from "next-intl";
 import { getTranslations, setRequestLocale } from "next-intl/server";
-import Link from "next/link";
+import { AppShell } from "@/components/app-shell";
 import { OrderStatusBadge } from "@/components/order-status-badge";
+import { GLASS_CARD } from "@/components/ui";
 import { requireCompanyUser } from "@/lib/auth/guards";
 import { formatEuros } from "@/lib/money";
 import { formatOrderDate, parseOrderNumber } from "@/lib/orders";
@@ -26,10 +27,9 @@ export default async function OrdersPage({
   setRequestLocale(locale);
   const { portalUser } = await requireCompanyUser(locale);
   const t = await getTranslations("orders");
-  // The money and date vocabulary is the cart's; the nav labels are the header's.
-  // Reused rather than duplicated into a second namespace.
+  // The money and date vocabulary is the cart's, reused rather than duplicated
+  // into a second namespace.
   const tCart = await getTranslations("cart");
-  const tNav = await getTranslations("nav");
 
   // `?created=` is user-editable and goes straight into the banner, so it is a
   // plain order number or no banner at all.
@@ -50,27 +50,28 @@ export default async function OrdersPage({
   const orders: PublicOrder[] = data ?? [];
 
   return (
-    <main className="mx-auto max-w-3xl p-4 sm:p-6">
-      <div className="flex items-center justify-between gap-4">
-        <h1 className="text-2xl font-bold">{t("title")}</h1>
-        <Link className="text-sm underline" href={`/${locale}/catalogo`}>
-          ← {tNav("catalog")}
-        </Link>
-      </div>
+    <AppShell
+      locale={locale}
+      nav="customer"
+      user={{ name: portalUser.display_name ?? portalUser.companies.name }}
+    >
+      <h1 className="mt-8 text-2xl font-bold tracking-tight">{t("title")}</h1>
 
       {created != null && (
         <p
           role="status"
-          className="mt-4 rounded bg-green-50 px-3 py-2 text-sm text-green-800"
+          className="mt-4 rounded-lg bg-green-50 px-3 py-2 text-sm text-green-800"
         >
           {tCart("success", { n: created })}
         </p>
       )}
 
       {orders.length === 0 ? (
-        <p className="mt-10 text-center text-gray-400">{t("empty")}</p>
+        <p className={`${GLASS_CARD} mt-4 p-10 text-center text-muted`}>
+          {t("empty")}
+        </p>
       ) : (
-        <ul className="mt-4 divide-y">
+        <ul className={`${GLASS_CARD} mt-4 divide-y divide-border px-4 sm:px-5`}>
           {orders.map((order) => (
             <li key={order.id} className="py-3">
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
@@ -86,7 +87,7 @@ export default async function OrdersPage({
                 </p>
               </div>
 
-              <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-500">
+              <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted">
                 <span>
                   {t("placedAt")}: {formatOrderDate(order.created_at, locale)}
                 </span>
@@ -108,7 +109,7 @@ export default async function OrdersPage({
               </div>
 
               {order.customer_note && (
-                <p className="mt-1 text-sm text-gray-600">
+                <p className="mt-1 text-sm text-muted">
                   {tCart("note")}: {order.customer_note}
                 </p>
               )}
@@ -116,6 +117,6 @@ export default async function OrdersPage({
           ))}
         </ul>
       )}
-    </main>
+    </AppShell>
   );
 }

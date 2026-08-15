@@ -2,7 +2,9 @@ import type { Locale } from "next-intl";
 import { getTranslations, setRequestLocale } from "next-intl/server";
 import Link from "next/link";
 import { cancelOrder, confirmOrder } from "@/app/actions/staff-orders";
+import { AppShell } from "@/components/app-shell";
 import { OrderStatusBadge } from "@/components/order-status-badge";
+import { FIELD_SM, GLASS_CARD } from "@/components/ui";
 import { requireStaff } from "@/lib/auth/guards";
 import { localizedName } from "@/lib/catalog/display";
 import { formatEuros } from "@/lib/money";
@@ -52,7 +54,7 @@ export default async function StaffOrdersPage({
   const { locale } = await params;
   const { estado: rawEstado, rpcResult: rawResult } = await searchParams;
   setRequestLocale(locale);
-  await requireStaff(locale);
+  const { staffUser } = await requireStaff(locale);
   const t = await getTranslations("staff");
   // The order vocabulary is the customer's, the money labels are the cart's:
   // reused rather than duplicated into the staff namespace.
@@ -114,18 +116,22 @@ export default async function StaffOrdersPage({
   };
 
   return (
-    <main className="mx-auto max-w-4xl p-4 sm:p-6">
-      <div className="flex items-center justify-between gap-4">
-        <h1 className="text-2xl font-bold">{t("ordersQueue")}</h1>
-        <Link className="text-sm underline" href={`/${locale}/staff`}>
-          ← {t("title")}
-        </Link>
-      </div>
+    <AppShell
+      locale={locale}
+      nav="staff"
+      user={{
+        name: staffUser.display_name ?? staffUser.id,
+        detail: staffUser.role,
+      }}
+    >
+      <h1 className="mt-8 text-2xl font-bold tracking-tight">
+        {t("ordersQueue")}
+      </h1>
 
       {rpcResult && (
         <p
           role={rpcResult === "ok" ? "status" : "alert"}
-          className={`mt-4 rounded px-3 py-2 text-sm ${
+          className={`mt-4 rounded-lg px-3 py-2 text-sm ${
             rpcResult === "ok"
               ? "bg-green-50 text-green-800"
               : rpcResult === "wrong-state"
@@ -143,15 +149,15 @@ export default async function StaffOrdersPage({
         </p>
       )}
 
-      <nav className="mt-4 flex gap-4 border-b text-sm">
+      <nav className="mt-6 flex gap-5 border-b border-border text-sm">
         {QUEUE_TABS.map((target) => (
           <Link
             key={target}
             href={tabHref(target)}
             className={
               tab === target
-                ? "border-b-2 border-black pb-2 font-semibold"
-                : "pb-2 text-gray-500"
+                ? "-mb-px border-b-2 border-brand pb-2 font-semibold"
+                : "-mb-px border-b-2 border-transparent pb-2 text-muted transition-colors hover:text-ink"
             }
           >
             {tabLabel[target]}
@@ -160,9 +166,11 @@ export default async function StaffOrdersPage({
       </nav>
 
       {orders.length === 0 ? (
-        <p className="mt-10 text-center text-gray-400">{t("noOrders")}</p>
+        <p className={`${GLASS_CARD} mt-4 p-10 text-center text-muted`}>
+          {t("noOrders")}
+        </p>
       ) : (
-        <ul className="mt-2 divide-y">
+        <ul className={`${GLASS_CARD} mt-4 divide-y divide-border px-4 sm:px-5`}>
           {orders.map((order) => {
             const lines = linesByOrder.get(order.id) ?? [];
             // Both RPCs update `where status = 'submitted'`, so on any other
@@ -178,7 +186,7 @@ export default async function StaffOrdersPage({
                   <OrderStatusBadge status={order.status} />
                   {/* The restaurant, then its ERP customer number — the two
                       things a staff member matches against Wingest. */}
-                  <span className="min-w-0 truncate text-sm text-gray-600">
+                  <span className="min-w-0 truncate text-sm text-muted">
                     {order.companies?.name ?? "—"}
                     {order.companies?.codcli != null &&
                       ` · ${order.companies.codcli}`}
@@ -189,7 +197,7 @@ export default async function StaffOrdersPage({
                   </p>
                 </div>
 
-                <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-500">
+                <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted">
                   <span>
                     {tOrders("placedAt")}:{" "}
                     {formatOrderDate(order.created_at, locale)}
@@ -209,7 +217,7 @@ export default async function StaffOrdersPage({
                 </div>
 
                 {order.customer_note && (
-                  <p className="mt-1 text-sm text-gray-700">
+                  <p className="mt-1 text-sm">
                     {t("customerNote")}: {order.customer_note}
                   </p>
                 )}
@@ -217,7 +225,7 @@ export default async function StaffOrdersPage({
                 {/* Lines fold away so a screen of orders stays a screen; no
                     client component is needed for a <details>. */}
                 <details className="mt-2">
-                  <summary className="cursor-pointer text-sm text-gray-600">
+                  <summary className="cursor-pointer text-sm text-muted transition-colors hover:text-ink">
                     {t("orderLines", { n: lines.length })}
                   </summary>
                   <ul className="mt-1 space-y-1 text-sm">
@@ -226,7 +234,7 @@ export default async function StaffOrdersPage({
                         key={line.id}
                         className="flex flex-wrap items-center gap-x-2 gap-y-0.5"
                       >
-                        <span className="font-mono text-xs text-gray-500">
+                        <span className="font-mono text-xs text-muted">
                           {line.codart}
                         </span>
                         {/* The name is the order's own snapshot, not the
@@ -235,7 +243,7 @@ export default async function StaffOrdersPage({
                         <span className="min-w-0 flex-1 truncate">
                           {localizedName(line.name, locale)}
                         </span>
-                        <span className="text-xs text-gray-500">
+                        <span className="text-xs text-muted">
                           {line.qty} {line.unit} ×{" "}
                           {formatEuros(line.unit_price_cents, locale)}
                         </span>
@@ -268,12 +276,12 @@ export default async function StaffOrdersPage({
                         aria-label={t("staffNoteFor", {
                           n: order.order_number,
                         })}
-                        className="w-48 rounded border px-2 py-1 text-sm"
+                        className={`w-48 ${FIELD_SM}`}
                       />
                       <button
                         type="submit"
                         aria-label={t("confirmFor", { n: order.order_number })}
-                        className="rounded bg-black px-3 py-1 text-sm text-white"
+                        className="rounded-lg bg-brand px-3 py-1 text-sm text-white transition-colors hover:bg-brand/90"
                       >
                         {t("confirm")}
                       </button>
@@ -293,12 +301,14 @@ export default async function StaffOrdersPage({
                         aria-label={t("cancelReasonFor", {
                           n: order.order_number,
                         })}
-                        className="w-48 rounded border px-2 py-1 text-sm"
+                        className={`w-48 ${FIELD_SM}`}
                       />
+                      {/* Cancelling is destructive, not the accent: it keeps the
+                          semantic red it has always had. */}
                       <button
                         type="submit"
                         aria-label={t("cancelFor", { n: order.order_number })}
-                        className="rounded border border-red-300 px-3 py-1 text-sm text-red-700"
+                        className="rounded-lg border border-red-300 px-3 py-1 text-sm text-red-700 transition-colors hover:bg-red-50"
                       >
                         {t("cancel")}
                       </button>
@@ -310,6 +320,6 @@ export default async function StaffOrdersPage({
           })}
         </ul>
       )}
-    </main>
+    </AppShell>
   );
 }

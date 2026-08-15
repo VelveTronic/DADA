@@ -1,12 +1,11 @@
 import type { Locale } from "next-intl";
 import { getTranslations, setRequestLocale } from "next-intl/server";
-import { cookies } from "next/headers";
 import Link from "next/link";
-import { signOut } from "@/app/actions/auth";
 import { addToCart } from "@/app/actions/cart";
 import { toggleFavorite } from "@/app/actions/favorites";
+import { AppShell } from "@/components/app-shell";
+import { BTN_PRIMARY, FIELD, GLASS_CARD } from "@/components/ui";
 import { requireCompanyUser } from "@/lib/auth/guards";
-import { CART_COOKIE, parseCart } from "@/lib/cart";
 import { localizedName, sanitizeSearch } from "@/lib/catalog/display";
 import { formatEuros } from "@/lib/money";
 import type { CustomerCatalogProduct } from "@/lib/supabase/public.types";
@@ -41,9 +40,7 @@ export default async function CatalogPage({
   setRequestLocale(locale);
   const { portalUser } = await requireCompanyUser(locale);
   const t = await getTranslations("catalog");
-  const tc = await getTranslations("common");
   const tCart = await getTranslations("cart");
-  const tNav = await getTranslations("nav");
 
   const q = sanitizeSearch(rawQ ?? "");
   const tab = rawTab === "favoritos" ? "favoritos" : "all";
@@ -51,11 +48,6 @@ export default async function CatalogPage({
   // Only the two codes the cart actions emit; anything else renders nothing.
   const cartError =
     rawCartError === "full" || rawCartError === "qty" ? rawCartError : null;
-
-  // A page may READ the cart cookie; only the server actions write it.
-  const cartCount = Object.keys(
-    parseCart((await cookies()).get(CART_COOKIE)?.value),
-  ).length;
 
   const supabase = await createServerSupabase();
 
@@ -104,33 +96,23 @@ export default async function CatalogPage({
   // intact, so an error never dumps the customer back on page 1.
   const currentHref = href({ page });
 
+  const tabClass = (active: boolean) =>
+    active
+      ? "-mb-px border-b-2 border-brand pb-2 font-semibold"
+      : "-mb-px border-b-2 border-transparent pb-2 text-muted transition-colors hover:text-ink";
+
   return (
-    <main className="mx-auto max-w-5xl p-4 sm:p-6">
-      <div className="flex items-center justify-between gap-4">
-        <h1 className="text-2xl font-bold">{t("title")}</h1>
-        <div className="flex items-center gap-4">
-          <Link className="text-sm underline" href={`/${locale}/pedidos`}>
-            {tNav("orders")}
-          </Link>
-          <Link className="text-sm underline" href={`/${locale}/carrito`}>
-            {tCart("cartLink", { n: cartCount })}
-          </Link>
-          <form action={signOut}>
-            <input type="hidden" name="locale" value={locale} />
-            <button type="submit" className="text-sm underline">
-              {tc("logout")}
-            </button>
-          </form>
-        </div>
-      </div>
-      <p className="mt-1 text-sm text-gray-500">
-        {portalUser.display_name ?? portalUser.companies.name}
-      </p>
+    <AppShell
+      locale={locale}
+      nav="customer"
+      user={{ name: portalUser.display_name ?? portalUser.companies.name }}
+    >
+      <h1 className="mt-8 text-2xl font-bold tracking-tight">{t("title")}</h1>
 
       {cartError && (
         <p
           role="alert"
-          className="mt-4 rounded bg-red-50 px-3 py-2 text-sm text-red-700"
+          className="mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700"
         >
           {cartError === "full" ? tCart("full") : tCart("badQty")}
         </p>
@@ -145,40 +127,36 @@ export default async function CatalogPage({
           defaultValue={q}
           aria-label={t("searchPlaceholder")}
           placeholder={t("searchPlaceholder")}
-          className="w-full rounded border px-3 py-2"
+          className={`w-full ${FIELD}`}
         />
-        <button type="submit" className="rounded bg-black px-4 py-2 text-white">
+        <button type="submit" className={BTN_PRIMARY}>
           {t("searchButton")}
         </button>
       </form>
 
-      <nav className="mt-4 flex gap-4 border-b text-sm">
+      <nav className="mt-6 flex gap-5 border-b border-border text-sm">
         <Link
           href={href({ tab: "all", page: 1 })}
-          className={
-            tab === "all"
-              ? "border-b-2 border-black pb-2 font-semibold"
-              : "pb-2 text-gray-500"
-          }
+          className={tabClass(tab === "all")}
         >
           {t("tabAll")}
         </Link>
         <Link
           href={href({ tab: "favoritos", page: 1 })}
-          className={
-            tab === "favoritos"
-              ? "border-b-2 border-black pb-2 font-semibold"
-              : "pb-2 text-gray-500"
-          }
+          className={tabClass(tab === "favoritos")}
         >
           {t("tabFavorites")} ({favoriteIds.size})
         </Link>
       </nav>
 
       {products.length === 0 ? (
-        <p className="mt-10 text-center text-gray-400">{t("noResults")}</p>
+        <p className={`${GLASS_CARD} mt-4 p-10 text-center text-muted`}>
+          {t("noResults")}
+        </p>
       ) : (
-        <ul className="mt-2 divide-y">
+        <ul
+          className={`${GLASS_CARD} mt-4 divide-y divide-border px-4 sm:px-5`}
+        >
           {products.map((p) => {
             // The view projects the products PK and NOT NULL columns; the
             // generated view types widen every column to `| null`.
@@ -199,17 +177,17 @@ export default async function CatalogPage({
                       line below, where a long name can never clip them out of
                       view on a narrow phone. */}
                   <p className="truncate font-medium">{name}</p>
-                  <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-gray-500">
+                  <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted">
                     <span>
                       {p.codart} · {p.unit}
                     </span>
                     {p.is_weighed && (
-                      <span className="rounded bg-amber-100 px-1.5 py-0.5 text-amber-800">
+                      <span className="rounded-md bg-amber-100 px-1.5 py-0.5 text-amber-800">
                         {t("weighed")}
                       </span>
                     )}
                     {!p.is_available && (
-                      <span className="rounded bg-gray-200 px-1.5 py-0.5 text-gray-600">
+                      <span className="rounded-md bg-gray-200 px-1.5 py-0.5 text-gray-600">
                         {t("unavailable")}
                       </span>
                     )}
@@ -219,7 +197,7 @@ export default async function CatalogPage({
                   {p.price_cents != null ? (
                     formatEuros(p.price_cents, locale)
                   ) : (
-                    <span className="font-normal text-gray-400">
+                    <span className="font-normal text-muted">
                       {t("noPrice")}
                     </span>
                   )}
@@ -245,7 +223,7 @@ export default async function CatalogPage({
                             : tCart("addNoPrice", { name })
                         }
                         title={priced ? undefined : t("noPrice")}
-                        className="rounded border px-2 py-1 text-base leading-none disabled:cursor-not-allowed disabled:opacity-40"
+                        className="rounded-lg border border-border bg-white/70 px-2 py-1 text-base leading-none transition-colors hover:border-brand hover:text-brand-ink disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-border disabled:hover:text-ink"
                       >
                         +
                       </button>
@@ -259,7 +237,9 @@ export default async function CatalogPage({
                   <button
                     type="submit"
                     aria-label={isFav ? t("favRemove") : t("favAdd")}
-                    className={`px-2 text-lg ${isFav ? "text-amber-500" : "text-gray-300"}`}
+                    // Amber, not brand: a starred product is a state of the
+                    // row, and the accent is spent on actions.
+                    className={`px-2 text-lg ${isFav ? "text-amber-500" : "text-muted/40"}`}
                   >
                     ★
                   </button>
@@ -273,20 +253,26 @@ export default async function CatalogPage({
       {totalPages > 1 && (
         <nav className="mt-6 flex items-center justify-center gap-4 text-sm">
           {page > 1 && (
-            <Link className="underline" href={href({ page: page - 1 })}>
+            <Link
+              className="text-brand-ink hover:underline"
+              href={href({ page: page - 1 })}
+            >
               {t("prev")}
             </Link>
           )}
-          <span className="text-gray-500">
+          <span className="text-muted">
             {t("pageOf", { page, total: totalPages })}
           </span>
           {page < totalPages && (
-            <Link className="underline" href={href({ page: page + 1 })}>
+            <Link
+              className="text-brand-ink hover:underline"
+              href={href({ page: page + 1 })}
+            >
               {t("next")}
             </Link>
           )}
         </nav>
       )}
-    </main>
+    </AppShell>
   );
 }

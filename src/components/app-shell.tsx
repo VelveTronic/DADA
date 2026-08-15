@@ -6,28 +6,14 @@ import Link from "next/link";
 import { signOut } from "@/app/actions/auth";
 import { CART_COOKIE, parseCart } from "@/lib/cart";
 
-/**
- * The frosted-glass recipe, in one place so seven pages cannot drift apart.
- * White at 72% over the warm-grey ground, a hairline border, a 14px backdrop
- * blur and the one card radius — the same four properties the header uses.
- */
-export const GLASS_CARD =
-  "rounded-[var(--radius-card)] border border-border bg-surface backdrop-blur-[14px]";
-
-/** Text/number/date inputs and textareas. */
-export const FIELD =
-  "rounded-lg border border-border bg-white/70 px-3 py-2 text-ink placeholder:text-muted focus:border-brand focus:outline-none";
-
-/** The one accent: brand red, white text. Every page's main action. */
-export const BTN_PRIMARY =
-  "rounded-lg bg-brand px-4 py-2 text-white transition-colors hover:bg-brand/90 disabled:cursor-not-allowed disabled:opacity-40";
-
-/** Everything that is not the main action on its screen. */
-export const BTN_QUIET =
-  "rounded-lg border border-border bg-white/70 px-3 py-1.5 transition-colors hover:border-brand hover:text-brand";
-
 /** A shell nav entry, and the logout button that sits beside them. */
-const NAV_LINK = "text-sm text-muted transition-colors hover:text-brand";
+const NAV_LINK = "text-sm text-muted transition-colors hover:text-brand-ink";
+
+/** The same entry once it has something to say — today, a non-empty cart. */
+const NAV_PILL =
+  "rounded-full bg-brand-soft px-2.5 py-1 text-sm text-brand-ink transition-colors hover:bg-brand hover:text-white";
+
+type NavLink = { href: string; label: string; highlight?: boolean };
 
 /**
  * Who is signed in. `detail` is the staff member's role; customers have none —
@@ -71,7 +57,12 @@ export async function AppShell({
 
   const home = nav === "staff" ? `/${locale}/staff` : `/${locale}/catalogo`;
 
-  const links =
+  const cartCount =
+    nav === "customer"
+      ? Object.keys(parseCart((await cookies()).get(CART_COOKIE)?.value)).length
+      : 0;
+
+  const links: NavLink[] =
     nav === "staff"
       ? [
           { href: `/${locale}/staff/pedidos`, label: tStaff("ordersQueue") },
@@ -80,13 +71,12 @@ export async function AppShell({
       : [
           { href: `/${locale}/catalogo`, label: tNav("catalog") },
           { href: `/${locale}/pedidos`, label: tNav("orders") },
+          // Same label, same count, in the brand's soft tint once there is
+          // something in it — a cart nobody can see is a cart nobody submits.
           {
             href: `/${locale}/carrito`,
-            label: tCart("cartLink", {
-              n: Object.keys(
-                parseCart((await cookies()).get(CART_COOKIE)?.value),
-              ).length,
-            }),
+            label: tCart("cartLink", { n: cartCount }),
+            highlight: cartCount > 0,
           },
         ];
 
@@ -97,12 +87,14 @@ export async function AppShell({
           <Link href={home} className="flex items-center gap-2">
             {/* Sized by CSS in its own square aspect; the width/height pair is
                 only the intrinsic ratio, so a new export of the mark drops in
-                with no code change. */}
+                with no code change. `sizes` is what keeps the optimizer from
+                shipping a 1080px source for a 28px mark. */}
             <Image
               src="/brand/dada-logo.png"
               alt="DADA"
               width={512}
               height={512}
+              sizes="28px"
               className="h-7 w-7"
             />
             <span className="font-semibold tracking-tight">
@@ -112,7 +104,11 @@ export async function AppShell({
 
           <nav className="flex flex-wrap items-center gap-x-5 gap-y-1">
             {links.map((link) => (
-              <Link key={link.href} href={link.href} className={NAV_LINK}>
+              <Link
+                key={link.href}
+                href={link.href}
+                className={link.highlight ? NAV_PILL : NAV_LINK}
+              >
                 {link.label}
               </Link>
             ))}
