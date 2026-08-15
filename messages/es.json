@@ -31,5 +31,21 @@
     "next": "Siguiente",
     "pageOf": "Página {page} de {total}"
   },
-  "staff": { "title": "Panel interno", "ordersQueue": "Cola de confirmación de pedidos" }
+  "staff": {
+    "title": "Panel interno",
+    "ordersQueue": "Cola de confirmación de pedidos",
+    "products": "Productos",
+    "productsTitle": "Gestión de productos",
+    "searchPlaceholder": "Buscar código o nombre…",
+    "colProduct": "Producto",
+    "colFlags": "Estado",
+    "colPrices": "Tarifas (con precio)",
+    "available": "Disponible",
+    "unavailable": "Pausado",
+    "makeAvailable": "Reactivar",
+    "makeUnavailable": "Pausar",
+    "current": "Variante actual",
+    "makeCurrent": "Hacer actual",
+    "variantGroup": "Grupo {base} ({n})"
+  }
 }

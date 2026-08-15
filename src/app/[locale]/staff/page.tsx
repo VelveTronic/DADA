@@ -1,5 +1,6 @@
 import type { Locale } from "next-intl";
 import { getTranslations, setRequestLocale } from "next-intl/server";
+import Link from "next/link";
 import { signOut } from "@/app/actions/auth";
 import { requireStaff } from "@/lib/auth/guards";
 
@@ -31,6 +32,15 @@ export default async function StaffHome({
         {staffUser.display_name ?? staffUser.id} · {staffUser.role}
       </p>
       <p className="mt-8 text-gray-400">{t("ordersQueue")}</p>
+      <nav className="mt-4">
+        <ul className="text-sm">
+          <li>
+            <Link className="underline" href={`/${locale}/staff/productos`}>
+              {t("products")}
+            </Link>
+          </li>
+        </ul>
+      </nav>
     </main>
   );
 }

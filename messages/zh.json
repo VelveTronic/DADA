@@ -31,5 +31,21 @@
     "next": "下一页",
     "pageOf": "第 {page} 页 / 共 {total} 页"
   },
-  "staff": { "title": "员工后台", "ordersQueue": "订单确认队列" }
+  "staff": {
+    "title": "员工后台",
+    "ordersQueue": "订单确认队列",
+    "products": "商品管理",
+    "productsTitle": "商品管理",
+    "searchPlaceholder": "搜索编号或名称…",
+    "colProduct": "商品",
+    "colFlags": "状态",
+    "colPrices": "价目（有价档数）",
+    "available": "可售",
+    "unavailable": "停售",
+    "makeAvailable": "恢复可售",
+    "makeUnavailable": "设为停售",
+    "current": "当前变体",
+    "makeCurrent": "设为当前",
+    "variantGroup": "变体组 {base}（{n} 个）"
+  }
 }
