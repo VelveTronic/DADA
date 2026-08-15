@@ -1,16 +1,14 @@
 import type { Locale } from "next-intl";
 import { getTranslations, setRequestLocale } from "next-intl/server";
 import { cookies } from "next/headers";
-import { setCartQty } from "@/app/actions/cart";
 import { submitOrder } from "@/app/actions/checkout";
 import { AppShell } from "@/components/app-shell";
 import {
-  BTN_PRIMARY,
-  BTN_QUIET,
-  FIELD,
-  FIELD_SM,
-  GLASS_CARD,
-} from "@/components/ui";
+  CartLine,
+  CartQtyInput,
+  CartRemoveButton,
+} from "@/components/cart/cart-line";
+import { BTN_PRIMARY, FIELD, GLASS_CARD } from "@/components/ui";
 import { requireCompanyUser } from "@/lib/auth/guards";
 import { CART_COOKIE, parseCart } from "@/lib/cart";
 import { localizedName } from "@/lib/catalog/display";
@@ -37,7 +35,6 @@ type CartProduct = Pick<
 
 type CartRow = {
   productId: string;
-  qty: number;
   /** Null when the product no longer exists at all — the cookie outlived it. */
   product: CartProduct | null;
   /** Null whenever this line cannot be priced, for whichever of the two reasons. */
@@ -49,14 +46,10 @@ export default async function CartPage({
   searchParams,
 }: {
   params: Promise<{ locale: Locale }>;
-  searchParams: Promise<{ error?: string; detail?: string; cartError?: string }>;
+  searchParams: Promise<{ error?: string; detail?: string }>;
 }) {
   const { locale } = await params;
-  const {
-    error: rawError,
-    detail: rawDetail,
-    cartError: rawCartError,
-  } = await searchParams;
+  const { error: rawError, detail: rawDetail } = await searchParams;
   setRequestLocale(locale);
   const { portalUser } = await requireCompanyUser(locale);
   const t = await getTranslations("cart");
@@ -71,8 +64,6 @@ export default async function CartPage({
   const error = isOrderErrorKey(errorText) ? errorText : undefined;
   const detail =
     error && isOrderErrorDetail(detailText) ? detailText : undefined;
-  const cartError =
-    rawCartError === "full" || rawCartError === "qty" ? rawCartError : null;
 
   // A page may READ the cart cookie; only the server actions write it.
   const cart = parseCart((await cookies()).get(CART_COOKIE)?.value);
@@ -107,7 +98,6 @@ export default async function CartPage({
       const priceCents = product?.is_orderable ? product.price_cents : null;
       return {
         productId,
-        qty: cart[productId],
         product,
         totalCents:
           priceCents == null ? null : lineTotalCents(cart[productId], priceCents),
@@ -139,8 +129,17 @@ export default async function CartPage({
       ? t("pendingPrices")
       : null;
 
+  // Every line this render could price, for the provider. On this page that is
+  // normally all of them, so the phone's bar could total the cart — it hides
+  // itself here instead, because the subtotal is already in the layout below.
+  const cartPrices: Record<string, number> = {};
+  for (const row of rows) {
+    if (row.product?.is_orderable && row.product.price_cents != null) {
+      cartPrices[row.productId] = row.product.price_cents;
+    }
+  }
+
   const today = madridDay(new Date());
-  const cartHref = `/${locale}/carrito`;
   // Minted per render, and the page is force-dynamic: resubmitting the SAME
   // rendered form carries the SAME token, so create_order returns the order it
   // already made rather than a duplicate.
@@ -151,6 +150,7 @@ export default async function CartPage({
       locale={locale}
       nav="customer"
       user={{ name: portalUser.display_name ?? portalUser.companies.name }}
+      cartPrices={cartPrices}
     >
       <h1 className="mt-8 text-2xl font-bold tracking-tight">{t("title")}</h1>
 
@@ -163,15 +163,6 @@ export default async function CartPage({
           {detail && (
             <span className="ml-2 font-mono text-xs opacity-80">{detail}</span>
           )}
-        </p>
-      )}
-
-      {cartError && (
-        <p
-          role="alert"
-          className="mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700"
-        >
-          {cartError === "full" ? t("full") : t("badQty")}
         </p>
       )}
 
@@ -189,8 +180,12 @@ export default async function CartPage({
               const orderable = row.product?.is_orderable === true;
               const weighed = row.product?.is_weighed === true;
               return (
-                <li
+                // The <li> is a client leaf so the row can leave the list the
+                // moment its quantity reaches 0 — the one place where waiting
+                // for the cookie's render would look like the × did nothing.
+                <CartLine
                   key={row.productId}
+                  productId={row.productId}
                   className={`flex flex-wrap items-center gap-x-3 gap-y-2 py-3 ${
                     orderable ? "" : "opacity-45"
                   }`}
@@ -228,38 +223,11 @@ export default async function CartPage({
                   {/* A line that can never be ordered gets no quantity box, only
                       the way out — editing it would be busywork. */}
                   {orderable && (
-                    <form
-                      action={setCartQty}
-                      className="flex items-center gap-1"
-                    >
-                      <input
-                        type="hidden"
-                        name="product_id"
-                        value={row.productId}
-                      />
-                      <input type="hidden" name="locale" value={locale} />
-                      <input type="hidden" name="back" value={cartHref} />
-                      <input
-                        type="number"
-                        name="qty"
-                        defaultValue={row.qty}
-                        // Weighed goods are sold by fractional kilo; everything
-                        // else is whole units, which is also what create_order
-                        // enforces (BAD_QTY_STEP). Removing a line is the ×
-                        // button's job, so neither minimum reaches 0.
-                        step={weighed ? 0.001 : 1}
-                        min={weighed ? 0.001 : 1}
-                        inputMode={weighed ? "decimal" : "numeric"}
-                        // One "Cantidad" per row would be useless to a screen
-                        // reader, so the name goes in the label — unless the
-                        // product carries none in either language.
-                        aria-label={name ? t("qtyFor", { name }) : t("qty")}
-                        className={`w-24 ${FIELD_SM} text-right`}
-                      />
-                      <button type="submit" className={BTN_QUIET}>
-                        {t("update")}
-                      </button>
-                    </form>
+                    <CartQtyInput
+                      productId={row.productId}
+                      name={name}
+                      weighed={weighed}
+                    />
                   )}
 
                   <p className="w-28 text-right text-sm font-semibold">
@@ -276,25 +244,8 @@ export default async function CartPage({
                     )}
                   </p>
 
-                  <form action={setCartQty}>
-                    <input
-                      type="hidden"
-                      name="product_id"
-                      value={row.productId}
-                    />
-                    <input type="hidden" name="locale" value={locale} />
-                    <input type="hidden" name="back" value={cartHref} />
-                    {/* setCartQty takes an absolute quantity, and 0 removes. */}
-                    <input type="hidden" name="qty" value="0" />
-                    <button
-                      type="submit"
-                      aria-label={name ? t("removeFor", { name }) : t("remove")}
-                      className="px-2 text-lg leading-none text-muted transition-colors hover:text-brand-ink"
-                    >
-                      ×
-                    </button>
-                  </form>
-                </li>
+                  <CartRemoveButton productId={row.productId} name={name} />
+                </CartLine>
               );
             })}
           </ul>

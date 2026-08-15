@@ -4,16 +4,13 @@ import { cookies } from "next/headers";
 import Image from "next/image";
 import Link from "next/link";
 import { signOut } from "@/app/actions/auth";
+import { CartBar } from "@/components/cart/cart-bar";
+import { CartNavLink } from "@/components/cart/cart-nav-link";
+import { CartErrorBanner, CartProvider } from "@/components/cart/cart-provider";
+import { NAV_LINK } from "@/components/ui";
 import { CART_COOKIE, parseCart } from "@/lib/cart";
 
-/** A shell nav entry, and the logout button that sits beside them. */
-const NAV_LINK = "text-sm text-muted transition-colors hover:text-brand-ink";
-
-/** The same entry once it has something to say — today, a non-empty cart. */
-const NAV_PILL =
-  "rounded-full bg-brand-soft px-2.5 py-1 text-sm text-brand-ink transition-colors hover:bg-brand hover:text-white";
-
-type NavLink = { href: string; label: string; highlight?: boolean };
+type NavLink = { href: string; label: string };
 
 /**
  * Who is signed in. `detail` is the staff member's role; customers have none —
@@ -32,55 +29,56 @@ type ShellUser = { name: string; detail?: string | null };
  * - `customer` — catalogue, order history, cart (with its line count)
  * - `staff` — confirmation queue, product management
  *
- * Server component: the only interactive thing in it is the logout form, which
- * posts to the same `signOut` action the pages used to carry themselves.
+ * Server component: the only interactive thing IT renders is the logout form.
+ * The customer variant additionally wraps the page in `CartProvider` and hands
+ * the cart's three client leaves — the header count, the refusal banner and the
+ * phone's bottom bar — the cookie it just read. Staff pages mount none of it:
+ * there is no cart in that half of the portal, so there is no reason to ship it.
  *
  * A page may READ the cart cookie; only the cart server actions write it. The
- * read below is the count in the header link, and it is the reason every page
- * under this shell is `force-dynamic` already.
+ * read below seeds the provider, and it is the reason every page under this
+ * shell is `force-dynamic` already.
  */
 export async function AppShell({
   locale,
   nav,
   user,
+  cartPrices,
   children,
 }: {
   locale: Locale;
   nav: "customer" | "staff";
   user: ShellUser;
+  /**
+   * Unit price in cents for the products THIS page rendered, keyed by product
+   * id — the mobile bar's only source of money. Omitted by pages that price
+   * nothing (order history), which is why the bar can fall back to a count.
+   */
+  cartPrices?: Record<string, number>;
   children: React.ReactNode;
 }) {
   const tc = await getTranslations("common");
   const tNav = await getTranslations("nav");
-  const tCart = await getTranslations("cart");
   const tStaff = await getTranslations("staff");
 
   const home = nav === "staff" ? `/${locale}/staff` : `/${locale}/catalogo`;
+  const customer = nav === "customer";
 
-  const cartCount =
-    nav === "customer"
-      ? Object.keys(parseCart((await cookies()).get(CART_COOKIE)?.value)).length
-      : 0;
+  const cart = customer
+    ? parseCart((await cookies()).get(CART_COOKIE)?.value)
+    : {};
 
-  const links: NavLink[] =
-    nav === "staff"
-      ? [
-          { href: `/${locale}/staff/pedidos`, label: tStaff("ordersQueue") },
-          { href: `/${locale}/staff/productos`, label: tStaff("products") },
-        ]
-      : [
-          { href: `/${locale}/catalogo`, label: tNav("catalog") },
-          { href: `/${locale}/pedidos`, label: tNav("orders") },
-          // Same label, same count, in the brand's soft tint once there is
-          // something in it — a cart nobody can see is a cart nobody submits.
-          {
-            href: `/${locale}/carrito`,
-            label: tCart("cartLink", { n: cartCount }),
-            highlight: cartCount > 0,
-          },
-        ];
+  const links: NavLink[] = customer
+    ? [
+        { href: `/${locale}/catalogo`, label: tNav("catalog") },
+        { href: `/${locale}/pedidos`, label: tNav("orders") },
+      ]
+    : [
+        { href: `/${locale}/staff/pedidos`, label: tStaff("ordersQueue") },
+        { href: `/${locale}/staff/productos`, label: tStaff("products") },
+      ];
 
-  return (
+  const shell = (
     <>
       <header className="sticky top-0 z-40 border-b border-border bg-background/85 backdrop-blur-[14px]">
         <div className="mx-auto flex max-w-5xl flex-wrap items-center gap-x-5 gap-y-2 px-4 py-3">
@@ -104,14 +102,13 @@ export async function AppShell({
 
           <nav className="flex flex-wrap items-center gap-x-5 gap-y-1">
             {links.map((link) => (
-              <Link
-                key={link.href}
-                href={link.href}
-                className={link.highlight ? NAV_PILL : NAV_LINK}
-              >
+              <Link key={link.href} href={link.href} className={NAV_LINK}>
                 {link.label}
               </Link>
             ))}
+            {/* Same label and same count as before, now read from the provider
+                so a `+` on the catalogue ticks it without a navigation. */}
+            {customer && <CartNavLink locale={locale} />}
           </nav>
 
           <div className="ml-auto flex items-center gap-4">
@@ -129,7 +126,21 @@ export async function AppShell({
         </div>
       </header>
 
-      <main className="mx-auto max-w-5xl px-4 pb-16">{children}</main>
+      <main className="mx-auto max-w-5xl px-4 pb-16">
+        {/* Where the `?cartError` banner used to land after a redirect. Same
+            copy, same red, no round trip to get here. */}
+        {customer && <CartErrorBanner />}
+        {children}
+        {customer && <CartBar locale={locale} />}
+      </main>
     </>
+  );
+
+  if (!customer) return shell;
+
+  return (
+    <CartProvider cart={cart} prices={cartPrices ?? {}}>
+      {shell}
+    </CartProvider>
   );
 }

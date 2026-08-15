@@ -1,9 +1,9 @@
 import type { Locale } from "next-intl";
 import { getTranslations, setRequestLocale } from "next-intl/server";
 import Link from "next/link";
-import { addToCart } from "@/app/actions/cart";
 import { toggleFavorite } from "@/app/actions/favorites";
 import { AppShell } from "@/components/app-shell";
+import { QtyStepper } from "@/components/cart/qty-stepper";
 import { BTN_PRIMARY, FIELD, GLASS_CARD } from "@/components/ui";
 import { requireCompanyUser } from "@/lib/auth/guards";
 import { localizedName, sanitizeSearch } from "@/lib/catalog/display";
@@ -23,31 +23,17 @@ export default async function CatalogPage({
   searchParams,
 }: {
   params: Promise<{ locale: Locale }>;
-  searchParams: Promise<{
-    q?: string;
-    tab?: string;
-    page?: string;
-    cartError?: string;
-  }>;
+  searchParams: Promise<{ q?: string; tab?: string; page?: string }>;
 }) {
   const { locale } = await params;
-  const {
-    q: rawQ,
-    tab: rawTab,
-    page: rawPage,
-    cartError: rawCartError,
-  } = await searchParams;
+  const { q: rawQ, tab: rawTab, page: rawPage } = await searchParams;
   setRequestLocale(locale);
   const { portalUser } = await requireCompanyUser(locale);
   const t = await getTranslations("catalog");
-  const tCart = await getTranslations("cart");
 
   const q = sanitizeSearch(rawQ ?? "");
   const tab = rawTab === "favoritos" ? "favoritos" : "all";
   const page = Math.max(1, Number.parseInt(rawPage ?? "1", 10) || 1);
-  // Only the two codes the cart actions emit; anything else renders nothing.
-  const cartError =
-    rawCartError === "full" || rawCartError === "qty" ? rawCartError : null;
 
   const supabase = await createServerSupabase();
 
@@ -92,9 +78,16 @@ export default async function CatalogPage({
     return `/${locale}/catalogo${s ? `?${s}` : ""}`;
   };
 
-  // Where a failed add-to-cart returns to: this exact view, search and page
-  // intact, so an error never dumps the customer back on page 1.
-  const currentHref = href({ page });
+  // What the phone's bottom bar is allowed to add up: the price this render
+  // resolved for each row it can actually order. A cart line that is not on
+  // this page (or has no price, or has stopped being orderable) is missing from
+  // the map, and the bar answers with a count instead of a wrong total.
+  const cartPrices: Record<string, number> = {};
+  for (const product of products) {
+    if (product.id && product.is_orderable && product.price_cents != null) {
+      cartPrices[product.id] = product.price_cents;
+    }
+  }
 
   const tabClass = (active: boolean) =>
     active
@@ -106,17 +99,9 @@ export default async function CatalogPage({
       locale={locale}
       nav="customer"
       user={{ name: portalUser.display_name ?? portalUser.companies.name }}
+      cartPrices={cartPrices}
     >
       <h1 className="mt-8 text-2xl font-bold tracking-tight">{t("title")}</h1>
-
-      {cartError && (
-        <p
-          role="alert"
-          className="mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700"
-        >
-          {cartError === "full" ? tCart("full") : tCart("badQty")}
-        </p>
-      )}
 
       <form method="get" className="mt-4 flex gap-2">
         {tab === "favoritos" && (
@@ -170,9 +155,12 @@ export default async function CatalogPage({
             return (
               <li
                 key={id}
-                className={`flex items-center gap-3 py-3 ${p.is_available ? "" : "opacity-45"}`}
+                // Wraps like the cart page's rows: the `− n +` pill is wider
+                // than the `+` it replaces, and on a phone the name would be
+                // squeezed to nothing if all four cells shared one line.
+                className={`flex flex-wrap items-center gap-x-3 gap-y-2 py-3 ${p.is_available ? "" : "opacity-45"}`}
               >
-                <div className="min-w-0 flex-1">
+                <div className="min-w-0 flex-1 basis-full sm:basis-0">
                   {/* Only the name truncates. Badges live on the wrapping meta
                       line below, where a long name can never clip them out of
                       view on a narrow phone. */}
@@ -204,30 +192,13 @@ export default async function CatalogPage({
                 </p>
                 {/* Ordering gates on is_orderable (is_available AND
                     is_current_variant): a row that cannot be ordered gets no
-                    button at all, rather than one that would fail. The cell
-                    keeps its width either way so the star column stays aligned
-                    down the list. */}
-                <div className="flex w-9 shrink-0 justify-end">
+                    control at all, rather than one that would fail. The cell
+                    keeps its width either way — sized for the `− n +` pill, not
+                    the bare `+` — so the star column stays aligned down the
+                    list however many products are already in the cart. */}
+                <div className="flex w-24 shrink-0 justify-end">
                   {p.is_orderable && (
-                    <form action={addToCart}>
-                      <input type="hidden" name="product_id" value={id} />
-                      <input type="hidden" name="locale" value={locale} />
-                      <input type="hidden" name="qty" value="1" />
-                      <input type="hidden" name="back" value={currentHref} />
-                      <button
-                        type="submit"
-                        disabled={!priced}
-                        aria-label={
-                          priced
-                            ? tCart("add", { name })
-                            : tCart("addNoPrice", { name })
-                        }
-                        title={priced ? undefined : t("noPrice")}
-                        className="rounded-lg border border-border bg-white/70 px-2 py-1 text-base leading-none transition-colors hover:border-brand hover:text-brand-ink disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-border disabled:hover:text-ink"
-                      >
-                        +
-                      </button>
-                    </form>
+                    <QtyStepper productId={id} name={name} priced={priced} />
                   )}
                 </div>
                 <form action={toggleFavorite}>

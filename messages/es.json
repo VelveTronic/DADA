@@ -39,6 +39,7 @@
     "empty": "El carrito está vacío",
     "qty": "Cantidad",
     "qtyFor": "Cantidad: {name}",
+    "decreaseFor": "Quitar una unidad: {name}",
     "update": "Actualizar",
     "remove": "Quitar",
     "removeFor": "Quitar: {name}",
@@ -52,6 +53,7 @@
     "submitOrder": "Enviar pedido",
     "full": "El carrito está lleno. Envíe el pedido o quite algún producto.",
     "badQty": "Cantidad no válida. Vuelva a introducirla.",
+    "writeFailed": "No se ha podido actualizar el carrito. Inténtelo de nuevo.",
     "success": "Pedido enviado. Número {n}",
     "errors": {
       "NO_ACTIVE_COMPANY": "Su cuenta todavía no está activada. Contacte con DADA.",

@@ -1,9 +1,8 @@
 "use server";
 
 import { hasLocale } from "next-intl";
-import { revalidatePath } from "next/cache";
+import { refresh, revalidatePath } from "next/cache";
 import { cookies } from "next/headers";
-import { redirect } from "next/navigation";
 import { routing } from "@/i18n/routing";
 import type { Cart } from "@/lib/cart";
 import {
@@ -17,55 +16,22 @@ import {
 /** 30 days: long enough that a cart survives a weekend, short enough to expire. */
 const CART_MAX_AGE = 60 * 60 * 24 * 30;
 
-/** The locale arrives in a form field, so it is never trusted as a path segment. */
-function safeLocale(value: FormDataEntryValue | null) {
+/** Why a cart write was refused. Both codes already have customer-facing copy. */
+export type CartErrorCode = "full" | "qty";
+
+/**
+ * What a cart write answers. The caller is a CLICK, not a form post, so a
+ * refusal comes back as a value the stepper can render in place — the page it
+ * happened on keeps its scroll, its search and its filter tab.
+ */
+export type CartWriteResult = { ok: true } | { ok: false; code: CartErrorCode };
+
+/** The locale arrives from the client, so it is never trusted as a path segment. */
+function safeLocale(value: unknown) {
   const candidate = String(value ?? routing.defaultLocale);
   return hasLocale(routing.locales, candidate)
     ? candidate
     : routing.defaultLocale;
-}
-
-/**
- * A redirect target this server may hand a browser: path-absolute and
- * same-origin. `//host` and `/\host` are protocol-relative URLs to a browser,
- * not paths.
- */
-function isSafePath(value: string): boolean {
-  return (
-    value.length <= 512 &&
-    value.startsWith("/") &&
-    !value.startsWith("//") &&
-    !value.startsWith("/\\")
-  );
-}
-
-/**
- * Where to bounce the browser when a cart edit fails, with `?cartError` for the
- * page to render.
- *
- * `back` carries the caller's own URL (search, tab and page) so an error does
- * not throw the customer back to page 1 of the unfiltered catalog. It is form
- * input, so it is never trusted. The base below is a throwaway — only
- * pathname+search is ever emitted, never a host.
- */
-function cartErrorHref(
-  back: FormDataEntryValue | null,
-  fallback: string,
-  code: "full" | "qty",
-): string {
-  const raw = String(back ?? "");
-  const path = isSafePath(raw) ? raw : fallback;
-  try {
-    const url = new URL(path, "http://cart.invalid");
-    url.searchParams.set("cartError", code);
-    const href = `${url.pathname}${url.search}`;
-    // Checked AGAIN after parsing. WHATWG strips ASCII tab/newline before it
-    // parses, so `/<TAB>/evil.com//x` passes the check above and comes back out
-    // as the protocol-relative `//x` — an open redirect if it were emitted.
-    return isSafePath(href) ? href : `${fallback}?cartError=${code}`;
-  } catch {
-    return `${fallback}?cartError=${code}`;
-  }
 }
 
 async function readCart(): Promise<Cart> {
@@ -76,6 +42,9 @@ async function readCart(): Promise<Cart> {
  * httpOnly so no script can read or forge the cart; lax so it still rides along
  * on the top-level GET that follows a redirect. Quantities only — a price never
  * goes into this cookie (CLAUDE.md: prices are never trusted from the client).
+ *
+ * This is the ONLY writer. The client-side cart is a mirror of what this wrote,
+ * never a second copy of the truth.
  */
 async function writeCart(cart: Cart): Promise<void> {
   (await cookies()).set(CART_COOKIE, serializeCart(cart), {
@@ -91,50 +60,30 @@ function revalidateCart(locale: string): void {
   revalidatePath(`/${locale}/carrito`);
 }
 
-/** Add `qty` (default 1) to whatever the line already holds. */
-export async function addToCart(formData: FormData) {
-  const locale = safeLocale(formData.get("locale"));
-  const productId = String(formData.get("product_id") ?? "");
-  const back = formData.get("back");
-  const fallback = `/${locale}/catalogo`;
-  // A junk product id can only come from a crafted POST. Silent, like the
-  // favorites action: there is nothing here worth an error page.
-  if (!isProductId(productId)) return;
-
-  const rawQty = formData.get("qty");
-  const text = String(rawQty ?? "").trim();
-  const qty = text === "" ? 1 : Number(text);
-  if (!Number.isFinite(qty) || qty <= 0) {
-    redirect(cartErrorHref(back, fallback, "qty"));
-  }
-
-  const cart = await readCart();
-  let next: Cart;
-  try {
-    next = setQty(cart, productId, (cart[productId] ?? 0) + qty);
-  } catch (error) {
-    const full = error instanceof Error && error.message === "CART_FULL";
-    redirect(cartErrorHref(back, fallback, full ? "full" : "qty"));
-  }
-
-  await writeCart(next);
-  revalidateCart(locale);
-}
-
-/** Absolute quantity for one line; 0 removes it. */
-export async function setCartQty(formData: FormData) {
-  const locale = safeLocale(formData.get("locale"));
-  const productId = String(formData.get("product_id") ?? "");
-  const back = formData.get("back");
-  const fallback = `/${locale}/carrito`;
-  if (!isProductId(productId)) return;
-
-  const text = String(formData.get("qty") ?? "").trim();
-  // Blank is an error, never a silent delete: a customer who clears the box by
-  // accident must not lose the line without being told.
-  const qty = text === "" ? Number.NaN : Number(text);
-  if (!Number.isFinite(qty) || qty < 0) {
-    redirect(cartErrorHref(back, fallback, "qty"));
+/**
+ * Absolute quantity for one line; 0 removes it.
+ *
+ * **The one cart-line writer the browser can reach.** Both surfaces go through
+ * it — the catalogue's `− n +` stepper and the cart page's number box — because
+ * an absolute quantity is the only contract under which two of them racing
+ * still ends where the customer last pointed: the presses dispatch in order
+ * (React awaits Server Functions one at a time), so the last value wins and the
+ * cookie holds exactly what the pill shows.
+ *
+ * Every argument is network input — a Server Function is reachable by a crafted
+ * POST, not just through the UI — so the product id and the quantity are
+ * validated here exactly as the form-data version validated its fields. There
+ * is deliberately no session check, as there never was: this writes the
+ * caller's OWN cookie and reads nothing. Prices, availability and the company's
+ * tarifa are all re-resolved by `create_order` at submit.
+ */
+export async function setCartLineQty(
+  productId: string,
+  qty: number,
+): Promise<CartWriteResult> {
+  if (!isProductId(productId)) return { ok: false, code: "qty" };
+  if (typeof qty !== "number" || !Number.isFinite(qty) || qty < 0) {
+    return { ok: false, code: "qty" };
   }
 
   const cart = await readCart();
@@ -143,11 +92,28 @@ export async function setCartQty(formData: FormData) {
     next = setQty(cart, productId, qty);
   } catch (error) {
     const full = error instanceof Error && error.message === "CART_FULL";
-    redirect(cartErrorHref(back, fallback, full ? "full" : "qty"));
+    return { ok: false, code: full ? "full" : "qty" };
   }
 
   await writeCart(next);
-  revalidateCart(locale);
+  // `refresh` re-runs THIS route's dynamic render inside the same POST. That
+  // second render is what the optimistic UI settles onto: the provider's base
+  // cart is a prop off the freshly-read cookie, so the quantity left on screen
+  // when the transition ends is the cookie's own and a hard reload cannot
+  // disagree with it.
+  //
+  // Deliberately NOT `revalidatePath` for the sibling cart page, which is what
+  // the form-data actions this replaced did. Both cart pages are
+  // `force-dynamic`: there is no route-cache entry to invalidate, and the
+  // router keeps dynamic entries for 0ms, so opening the other page always
+  // re-renders and always reads the cookie this just wrote. Asking anyway would
+  // only invalidate `/carrito` on every single `+`, inviting the router to
+  // re-fetch — and re-render, with its product query — a page nobody is looking
+  // at. Next's own guidance for a dynamic read is this one call
+  // (`node_modules/next/dist/docs/01-app/02-guides/interactive-apps.md`,
+  // "Invalidate from mutations").
+  refresh();
+  return { ok: true };
 }
 
 /** Empty the cart. Also the post-checkout reset. */

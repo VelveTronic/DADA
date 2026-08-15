@@ -64,3 +64,22 @@ export function setQty(cart: Cart, productId: string, qty: number): Cart {
   next[productId] = Math.round(qty * 1000) / 1000;
   return next;
 }
+
+/**
+ * `setQty` that answers with the cart instead of throwing: a change the rules
+ * above refuse leaves it exactly as it was.
+ *
+ * This is what the OPTIMISTIC client mirror runs on, and running the server's
+ * own function is the point — the quantity the browser paints on the current
+ * frame can never be one the cookie would then refuse, so the two cannot
+ * disagree once the round trip lands. Why the change was refused still comes
+ * from the server action, which is the only thing that actually wrote (or did
+ * not write) the cookie.
+ */
+export function trySetQty(cart: Cart, productId: string, qty: number): Cart {
+  try {
+    return setQty(cart, productId, qty);
+  } catch {
+    return cart;
+  }
+}

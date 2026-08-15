@@ -39,6 +39,7 @@
     "empty": "购物车是空的",
     "qty": "数量",
     "qtyFor": "数量：{name}",
+    "decreaseFor": "减少数量：{name}",
     "update": "更新",
     "remove": "移除",
     "removeFor": "移除：{name}",
@@ -52,6 +53,7 @@
     "submitOrder": "提交订单",
     "full": "购物车已满，请先提交订单或移除部分商品",
     "badQty": "数量无效，请重新输入",
+    "writeFailed": "购物车未更新，请重试",
     "success": "订单已提交，编号 {n}",
     "errors": {
       "NO_ACTIVE_COMPANY": "您的账号尚未激活，请联系 DADA",

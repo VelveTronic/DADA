@@ -6,6 +6,7 @@ import {
   parseCart,
   serializeCart,
   setQty,
+  trySetQty,
 } from "./cart";
 
 describe("cart codec", () => {
@@ -66,6 +67,37 @@ describe("cart codec", () => {
   });
   it("exposes the cookie name", () => {
     expect(CART_COOKIE).toBe("dada_cart");
+  });
+});
+
+/**
+ * The optimistic client mirror runs on this, so a quantity it paints must be
+ * one the cookie would have accepted — and a refused change must leave the
+ * mirror showing exactly what the cookie still holds.
+ */
+describe("trySetQty", () => {
+  const A = "11111111-1111-4111-8111-111111111111";
+
+  it("applies what setQty applies", () => {
+    expect(trySetQty({}, A, 3)).toEqual({ [A]: 3 });
+    expect(trySetQty({ [A]: 3 }, A, 0)).toEqual({});
+    expect(trySetQty({ [A]: 3 }, A, 0.1234)).toEqual({ [A]: 0.123 });
+  });
+
+  it("returns the cart UNCHANGED where setQty would throw", () => {
+    const full: Record<string, number> = {};
+    for (let i = 0; i < CART_MAX_LINES; i++) {
+      full[`00000000-0000-4000-8000-${String(i).padStart(12, "0")}`] = 1;
+    }
+    expect(trySetQty(full, A, 1)).toBe(full);
+    expect(trySetQty({ [A]: 2 }, A, 100000)).toEqual({ [A]: 2 });
+    expect(trySetQty({ [A]: 2 }, A, Number.NaN)).toEqual({ [A]: 2 });
+  });
+
+  it("never mutates the cart it was given", () => {
+    const before = { [A]: 2 };
+    trySetQty(before, A, 9);
+    expect(before).toEqual({ [A]: 2 });
   });
 });
 
