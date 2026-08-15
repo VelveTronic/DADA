@@ -40,6 +40,7 @@
     "colProduct": "Producto",
     "colFlags": "Estado",
     "colPrices": "Tarifas (con precio)",
+    "colActions": "Acciones",
     "available": "Disponible",
     "unavailable": "Pausado",
     "makeAvailable": "Reactivar",

@@ -40,6 +40,7 @@
     "colProduct": "商品",
     "colFlags": "状态",
     "colPrices": "价目（有价档数）",
+    "colActions": "操作",
     "available": "可售",
     "unavailable": "停售",
     "makeAvailable": "恢复可售",

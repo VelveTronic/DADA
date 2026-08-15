@@ -63,8 +63,8 @@ export default async function StaffProductsPage({
   setRequestLocale(locale);
   await requireStaff(locale);
   const t = await getTranslations("staff");
-  // Shared catalog vocabulary — control labels and the weighed badge — reused
-  // rather than duplicated into the staff namespace.
+  // Shared catalog vocabulary — control labels, the weighed badge, the pager —
+  // reused rather than duplicated into the staff namespace.
   const tCatalog = await getTranslations("catalog");
 
   const q = sanitizeSearch(rawQ ?? "");
@@ -132,114 +132,125 @@ export default async function StaffProductsPage({
         </button>
       </form>
 
-      <div className="mt-4 overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b text-left text-xs text-gray-500">
-              <th className="py-2">{t("colProduct")}</th>
-              <th>{t("colFlags")}</th>
-              <th>{t("colPrices")}</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody className="divide-y">
-            {products.map((p) => {
-              const groupSize = groupSizes.get(p.base_sku) ?? 1;
-              const inGroup = groupSize > 1 || p.variant_suffix !== "";
-              return (
-                <tr
-                  key={p.id}
-                  className={`align-top ${p.is_available ? "" : "opacity-50"}`}
-                >
-                  <td className="py-2">
-                    {/* The name gets its own element and the markers sit on the
-                        wrapping meta line below, where a long name can never
-                        clip them out of view. */}
-                    <p className="font-medium">
-                      {localizedName(p.name, locale)}
-                    </p>
-                    <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-gray-500">
-                      <span>
-                        {p.codart} · {p.unit}
-                      </span>
-                      {p.is_weighed && (
-                        <span className="rounded bg-amber-100 px-1.5 py-0.5 text-amber-800">
-                          {tCatalog("weighed")}
-                        </span>
-                      )}
-                      {inGroup && (
+      {products.length === 0 ? (
+        <p className="mt-10 text-center text-gray-400">
+          {tCatalog("noResults")}
+        </p>
+      ) : (
+        <div className="mt-4 overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b text-left text-xs text-gray-500">
+                <th className="py-2">{t("colProduct")}</th>
+                <th>{t("colFlags")}</th>
+                <th>{t("colPrices")}</th>
+                {/* Named for screen readers, blank on screen: the column holds
+                    only buttons, which label themselves. */}
+                <th>
+                  <span className="sr-only">{t("colActions")}</span>
+                </th>
+              </tr>
+            </thead>
+            <tbody className="divide-y">
+              {products.map((p) => {
+                const groupSize = groupSizes.get(p.base_sku) ?? 1;
+                const inGroup = groupSize > 1 || p.variant_suffix !== "";
+                return (
+                  <tr
+                    key={p.id}
+                    className={`align-top ${p.is_available ? "" : "opacity-50"}`}
+                  >
+                    <td className="py-2">
+                      {/* The name gets its own element and the markers sit on
+                          the wrapping meta line below, where a long name can
+                          never clip them out of view. */}
+                      <p className="font-medium">
+                        {localizedName(p.name, locale)}
+                      </p>
+                      <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-gray-500">
                         <span>
-                          {t("variantGroup", { base: p.base_sku, n: groupSize })}
+                          {p.codart} · {p.unit}
                         </span>
-                      )}
-                    </div>
-                  </td>
-                  <td className="py-2">
-                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                      <span
-                        className={
-                          p.is_available ? "text-green-700" : "text-gray-500"
-                        }
-                      >
-                        {p.is_available ? t("available") : t("unavailable")}
-                      </span>
-                      {p.is_current_variant && (
-                        <span className="rounded bg-blue-100 px-1.5 py-0.5 text-xs text-blue-800">
-                          {t("current")}
-                        </span>
-                      )}
-                    </div>
-                  </td>
-                  <td className="py-2">{pricedTiers(p)}/6</td>
-                  <td className="py-2 text-right">
-                    <div className="flex justify-end gap-2">
-                      <form action={setProductAvailability}>
-                        <input type="hidden" name="product_id" value={p.id} />
-                        <input type="hidden" name="locale" value={locale} />
-                        <input
-                          type="hidden"
-                          name="available"
-                          value={p.is_available ? "0" : "1"}
-                        />
-                        <button
-                          type="submit"
-                          className="rounded border px-2 py-1 text-xs"
+                        {p.is_weighed && (
+                          <span className="rounded bg-amber-100 px-1.5 py-0.5 text-amber-800">
+                            {tCatalog("weighed")}
+                          </span>
+                        )}
+                        {inGroup && (
+                          <span>
+                            {t("variantGroup", {
+                              base: p.base_sku,
+                              n: groupSize,
+                            })}
+                          </span>
+                        )}
+                      </div>
+                    </td>
+                    <td className="py-2">
+                      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                        <span
+                          className={
+                            p.is_available ? "text-green-700" : "text-gray-500"
+                          }
                         >
-                          {p.is_available
-                            ? t("makeUnavailable")
-                            : t("makeAvailable")}
-                        </button>
-                      </form>
-                      {!p.is_current_variant && (
-                        <form action={setCurrentVariant}>
+                          {p.is_available ? t("available") : t("unavailable")}
+                        </span>
+                        {p.is_current_variant && (
+                          <span className="rounded bg-blue-100 px-1.5 py-0.5 text-xs text-blue-800">
+                            {t("current")}
+                          </span>
+                        )}
+                      </div>
+                    </td>
+                    <td className="py-2">{pricedTiers(p)}/6</td>
+                    <td className="py-2 text-right">
+                      <div className="flex justify-end gap-2">
+                        <form action={setProductAvailability}>
                           <input type="hidden" name="product_id" value={p.id} />
+                          <input type="hidden" name="locale" value={locale} />
                           <input
                             type="hidden"
-                            name="base_sku"
-                            value={p.base_sku}
+                            name="available"
+                            value={p.is_available ? "0" : "1"}
                           />
-                          <input type="hidden" name="locale" value={locale} />
                           <button
                             type="submit"
                             className="rounded border px-2 py-1 text-xs"
                           >
-                            {t("makeCurrent")}
+                            {p.is_available
+                              ? t("makeUnavailable")
+                              : t("makeAvailable")}
                           </button>
                         </form>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-
-      {products.length === 0 && (
-        <p className="mt-10 text-center text-gray-400">
-          {tCatalog("noResults")}
-        </p>
+                        {!p.is_current_variant && (
+                          <form action={setCurrentVariant}>
+                            <input
+                              type="hidden"
+                              name="product_id"
+                              value={p.id}
+                            />
+                            <input
+                              type="hidden"
+                              name="base_sku"
+                              value={p.base_sku}
+                            />
+                            <input type="hidden" name="locale" value={locale} />
+                            <button
+                              type="submit"
+                              className="rounded border px-2 py-1 text-xs"
+                            >
+                              {t("makeCurrent")}
+                            </button>
+                          </form>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       )}
 
       {totalPages > 1 && (
@@ -254,7 +265,7 @@ export default async function StaffProductsPage({
             </Link>
           )}
           <span className="text-gray-500">
-            {page} / {totalPages}
+            {tCatalog("pageOf", { page, total: totalPages })}
           </span>
           {page < totalPages && (
             <Link
