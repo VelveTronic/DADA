@@ -6,6 +6,7 @@ import {
   setProductAvailability,
 } from "@/app/actions/staff-products";
 import { AppShell } from "@/components/app-shell";
+import { ProductThumb } from "@/components/product-thumb";
 import { BTN_PRIMARY, BTN_QUIET, FIELD, GLASS_CARD } from "@/components/ui";
 import { requireStaff } from "@/lib/auth/guards";
 import { localizedName, sanitizeSearch } from "@/lib/catalog/display";
@@ -33,6 +34,7 @@ type StaffProductRow = Pick<
   | "unit"
   | "is_weighed"
   | "is_available"
+  | "image_url"
   | "price_1_cents"
   | "price_2_cents"
   | "price_3_cents"
@@ -76,7 +78,7 @@ export default async function StaffProductsPage({
   let query = admin
     .from("products")
     .select(
-      "id, codart, base_sku, variant_suffix, is_current_variant, name, unit, is_weighed, is_available, price_1_cents, price_2_cents, price_3_cents, price_4_cents, price_5_cents, price_6_cents",
+      "id, codart, base_sku, variant_suffix, is_current_variant, name, unit, is_weighed, is_available, image_url, price_1_cents, price_2_cents, price_3_cents, price_4_cents, price_5_cents, price_6_cents",
       { count: "exact" },
     );
   if (q) {
@@ -167,29 +169,37 @@ export default async function StaffProductsPage({
                     className={`align-top ${p.is_available ? "" : "opacity-50"}`}
                   >
                     <td className="py-2">
-                      {/* The name gets its own element and the markers sit on
-                          the wrapping meta line below, where a long name can
-                          never clip them out of view. */}
-                      <p className="font-medium">
-                        {localizedName(p.name, locale)}
-                      </p>
-                      <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted">
-                        <span>
-                          {p.codart} · {p.unit}
-                        </span>
-                        {p.is_weighed && (
-                          <span className="rounded-md bg-amber-100 px-1.5 py-0.5 text-amber-800">
-                            {tCatalog("weighed")}
-                          </span>
-                        )}
-                        {inGroup && (
-                          <span>
-                            {t("variantGroup", {
-                              base: p.base_sku,
-                              n: groupSize,
-                            })}
-                          </span>
-                        )}
+                      {/* The row is align-top, so the thumbnail sits with the
+                          name rather than centring itself against a cell whose
+                          height the wrapping meta line decides. */}
+                      <div className="flex items-start gap-3">
+                        <ProductThumb src={p.image_url} />
+                        <div className="min-w-0">
+                          {/* The name gets its own element and the markers sit
+                              on the wrapping meta line below, where a long name
+                              can never clip them out of view. */}
+                          <p className="font-medium">
+                            {localizedName(p.name, locale)}
+                          </p>
+                          <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted">
+                            <span>
+                              {p.codart} · {p.unit}
+                            </span>
+                            {p.is_weighed && (
+                              <span className="rounded-md bg-amber-100 px-1.5 py-0.5 text-amber-800">
+                                {tCatalog("weighed")}
+                              </span>
+                            )}
+                            {inGroup && (
+                              <span>
+                                {t("variantGroup", {
+                                  base: p.base_sku,
+                                  n: groupSize,
+                                })}
+                              </span>
+                            )}
+                          </div>
+                        </div>
                       </div>
                     </td>
                     <td className="py-2">

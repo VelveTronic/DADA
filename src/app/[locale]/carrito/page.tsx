@@ -9,6 +9,7 @@ import {
   CartRemoveButton,
   CartSubtotal,
 } from "@/components/cart/cart-line";
+import { ProductThumb } from "@/components/product-thumb";
 import { BTN_PRIMARY, FIELD, GLASS_CARD } from "@/components/ui";
 import { requireCompanyUser } from "@/lib/auth/guards";
 import { CART_COOKIE, parseCart } from "@/lib/cart";
@@ -31,7 +32,14 @@ const DELIVERY_WINDOW_DAYS = 60;
 /** Exactly the columns this page renders, off the customer-safe priced view. */
 type CartProduct = Pick<
   CustomerCatalogProduct,
-  "id" | "codart" | "name" | "unit" | "is_weighed" | "is_orderable" | "price_cents"
+  | "id"
+  | "codart"
+  | "name"
+  | "unit"
+  | "is_weighed"
+  | "is_orderable"
+  | "price_cents"
+  | "image_url"
 >;
 
 type CartRow = {
@@ -78,7 +86,9 @@ export default async function CartPage({
     // has stopped being orderable.
     const { data, error: queryError } = await supabase
       .from("products_priced")
-      .select("id, codart, name, unit, is_weighed, is_orderable, price_cents")
+      .select(
+        "id, codart, name, unit, is_weighed, is_orderable, price_cents, image_url",
+      )
       .in("id", ids);
     if (queryError) console.error("cart products query:", queryError);
     products = data ?? [];
@@ -194,33 +204,40 @@ export default async function CartPage({
                     orderable ? "" : "opacity-45"
                   }`}
                 >
-                  <div className="min-w-0 flex-1 basis-full sm:basis-0">
-                    {/* Only the name truncates. The badges sit on the wrapping
-                        meta line below, where a long name can never clip them
-                        out of view on a narrow phone. */}
-                    <p className="truncate font-medium">{name || "—"}</p>
-                    <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted">
-                      {/* A vanished product has no codart to show and its uuid
-                          means nothing to a restaurant, so the line says what
-                          the customer needs to know instead. The remove button
-                          still carries the id, which is all that has to travel. */}
-                      <span>
-                        {row.product
-                          ? `${row.product.codart} · ${row.product.unit}`
-                          : tCatalog("unavailable")}
-                      </span>
-                      {weighed && (
-                        <span className="rounded-md bg-amber-100 px-1.5 py-0.5 text-amber-800">
-                          {tCatalog("weighed")}
+                  {/* Thumbnail inside the name cell, as on the catalogue: the
+                      cell is `basis-full` on a phone, so a sibling of it would
+                      be pushed onto a line of its own. A line whose product has
+                      vanished has no photo either, and falls to the empty box. */}
+                  <div className="flex min-w-0 flex-1 basis-full items-center gap-3 sm:basis-0">
+                    <ProductThumb src={row.product?.image_url} />
+                    <div className="min-w-0 flex-1">
+                      {/* Only the name truncates. The badges sit on the wrapping
+                          meta line below, where a long name can never clip them
+                          out of view on a narrow phone. */}
+                      <p className="truncate font-medium">{name || "—"}</p>
+                      <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted">
+                        {/* A vanished product has no codart to show and its uuid
+                            means nothing to a restaurant, so the line says what
+                            the customer needs to know instead. The remove button
+                            still carries the id, which is all that has to travel. */}
+                        <span>
+                          {row.product
+                            ? `${row.product.codart} · ${row.product.unit}`
+                            : tCatalog("unavailable")}
                         </span>
-                      )}
-                      {/* …which is also why the badge is for PAUSED products
-                          only: on a vanished line it would just say it twice. */}
-                      {!orderable && row.product && (
-                        <span className="rounded-md bg-gray-200 px-1.5 py-0.5 text-gray-600">
-                          {tCatalog("unavailable")}
-                        </span>
-                      )}
+                        {weighed && (
+                          <span className="rounded-md bg-amber-100 px-1.5 py-0.5 text-amber-800">
+                            {tCatalog("weighed")}
+                          </span>
+                        )}
+                        {/* …which is also why the badge is for PAUSED products
+                            only: on a vanished line it would just say it twice. */}
+                        {!orderable && row.product && (
+                          <span className="rounded-md bg-gray-200 px-1.5 py-0.5 text-gray-600">
+                            {tCatalog("unavailable")}
+                          </span>
+                        )}
+                      </div>
                     </div>
                   </div>
 

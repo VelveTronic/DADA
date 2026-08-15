@@ -4,6 +4,7 @@ import Link from "next/link";
 import { toggleFavorite } from "@/app/actions/favorites";
 import { AppShell } from "@/components/app-shell";
 import { QtyStepper } from "@/components/cart/qty-stepper";
+import { ProductThumb } from "@/components/product-thumb";
 import { BTN_PRIMARY, FIELD, GLASS_CARD } from "@/components/ui";
 import { requireCompanyUser } from "@/lib/auth/guards";
 import { localizedName, sanitizeSearch } from "@/lib/catalog/display";
@@ -233,25 +234,31 @@ export default async function CatalogPage({
                 // squeezed to nothing if all four cells shared one line.
                 className={`flex flex-wrap items-center gap-x-3 gap-y-2 py-3 ${p.is_available ? "" : "opacity-45"}`}
               >
-                <div className="min-w-0 flex-1 basis-full sm:basis-0">
-                  {/* Only the name truncates. Badges live on the wrapping meta
-                      line below, where a long name can never clip them out of
-                      view on a narrow phone. */}
-                  <p className="truncate font-medium">{name}</p>
-                  <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted">
-                    <span>
-                      {p.codart} · {p.unit}
-                    </span>
-                    {p.is_weighed && (
-                      <span className="rounded-md bg-amber-100 px-1.5 py-0.5 text-amber-800">
-                        {t("weighed")}
+                {/* The thumbnail rides INSIDE the name cell rather than beside
+                    it: the cell is `basis-full` on a phone, so a sibling of it
+                    would be pushed onto a line of its own with nothing else. */}
+                <div className="flex min-w-0 flex-1 basis-full items-center gap-3 sm:basis-0">
+                  <ProductThumb src={p.image_url} />
+                  <div className="min-w-0 flex-1">
+                    {/* Only the name truncates. Badges live on the wrapping meta
+                        line below, where a long name can never clip them out of
+                        view on a narrow phone. */}
+                    <p className="truncate font-medium">{name}</p>
+                    <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted">
+                      <span>
+                        {p.codart} · {p.unit}
                       </span>
-                    )}
-                    {!p.is_available && (
-                      <span className="rounded-md bg-gray-200 px-1.5 py-0.5 text-gray-600">
-                        {t("unavailable")}
-                      </span>
-                    )}
+                      {p.is_weighed && (
+                        <span className="rounded-md bg-amber-100 px-1.5 py-0.5 text-amber-800">
+                          {t("weighed")}
+                        </span>
+                      )}
+                      {!p.is_available && (
+                        <span className="rounded-md bg-gray-200 px-1.5 py-0.5 text-gray-600">
+                          {t("unavailable")}
+                        </span>
+                      )}
+                    </div>
                   </div>
                 </div>
                 <p className="w-24 text-right text-sm font-semibold">
