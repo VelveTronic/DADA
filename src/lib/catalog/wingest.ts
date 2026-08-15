@@ -18,7 +18,13 @@ const CSV_FIELD_COUNT = 9;
  */
 const BOM = String.fromCharCode(0xfeff);
 
-/** One raw CSV line, still in ERP units (euro text, ERP unit names). */
+/**
+ * One raw CSV line, still in ERP units (euro text, ERP unit names). Every field
+ * is deliberately a STRING, the shape the CSV hands us: an empty cell and a NULL
+ * column both arrive as "". Plan 04's direct-SQL price sync can reuse this same
+ * transform by stringifying its column values with `String(value ?? "")` instead
+ * of inventing a second set of merge rules.
+ */
 export interface WingestPriceRow {
   codart: string;
   p1: string;
@@ -178,7 +184,13 @@ export function toWingestPricePatch(
   return patch;
 }
 
-/** A product with no surviving tier stays un-orderable after the merge. */
+/**
+ * Whether any tier survived the merge. A product with none stays VISIBLE and
+ * still passes is_orderable (generated from is_available AND is_current_variant,
+ * which know nothing about prices) — it fails later, inside create_order, with
+ * NO_PRICE. Pricing is per-tier too, so even a product with some tiers priced is
+ * NO_PRICE for a company whose tarifa lands on a NULL one.
+ */
 export function hasAnyPrice(patch: WingestPricePatch): boolean {
   return (
     patch.price_1_cents !== null ||

@@ -1,7 +1,13 @@
 # Read-only export of Wingest price tiers + units for the DADA portal.
 #
 # RUN ON SERVER (Windows PowerShell 5.1). It touches the ERP database with ONE
-# SELECT: no writes, no schema changes, no locks beyond the read.
+# SELECT against wgdemo, the live Wingest catalog database: no writes, no schema
+# changes, no locks beyond the read. Expect roughly 2.9k articles.
+#
+# HANDLE prices.csv AS CONFIDENTIAL: it is the full six-tier price matrix for
+# every article, the exact data the portal revokes from logged-in customers.
+# Keep it out of the repository (.gitignore already lists it), move it to the
+# portal workstation, and delete both copies once the merge has run.
 #
 # Run it as a FILE (.\export-prices.ps1), not by pasting the body into a console:
 # the output path is resolved from this script's own location, which a pasted
@@ -17,7 +23,10 @@
 #   $PW = Read-Host "dada_bridge password"
 #   .\export-prices.ps1
 #
-# The password is never stored in this file and never printed. Output: prices.csv
+# The password is never stored in this file, but Read-Host echoes it as you type
+# and it stays in $PW until the console closes: clear it with
+# `Remove-Variable PW` when the export is done. It must be a PLAIN STRING here,
+# so do not use -AsSecureString. Output: prices.csv
 # (UTF-8, no BOM) next to this script. Copy that file to the portal workstation
 # and merge it into the catalog with:
 #
@@ -36,14 +45,28 @@ $ErrorActionPreference = "Stop"
 if ([string]::IsNullOrWhiteSpace($PW)) {
   throw 'Set $PW to the dada_bridge SQL password first: $PW = Read-Host "dada_bridge password"'
 }
+# A SecureString (Read-Host -AsSecureString) passes every content check below,
+# because interpolating one yields the literal text "System.Security.SecureString"
+# - which is then what SQL Server receives as the password.
+if ($PW -isnot [string]) {
+  throw "`$PW must be a plain-text string, not a $($PW.GetType().Name). A SecureString interpolates into the connection string as its type name and reaches SQL Server as that literal password."
+}
 # The connection string is built by interpolation, so the password has to survive
-# it literally: ; and " are its delimiters (a password holding one truncates the
-# string), ' breaks the quoting of the Password value, and leading or trailing
-# whitespace is silently trimmed away. Each surfaces later as an unexplained
-# "Login failed" against the ERP. Say which one it is here instead; the fix is to
-# quote the Password value in $conn below.
-if ($PW -match '^\s|\s$|[''";]') {
-  throw 'The password has leading/trailing whitespace or contains '' " or ;, which the connection string cannot carry as written. Quote the Password value in $conn before running.'
+# it literally. Each of these surfaces later as an unexplained "Login failed"
+# against the ERP, so name the one that matched; the fix is to quote the Password
+# value in $conn below.
+$pwProblem = $null
+if ($PW -match '^\s|\s$') {
+  $pwProblem = 'leading or trailing whitespace, which is silently trimmed'
+} elseif ($PW -match ';') {
+  $pwProblem = 'a semicolon, which separates connection-string keywords and truncates the password'
+} elseif ($PW -match '"') {
+  $pwProblem = 'a double quote, which delimits connection-string values'
+} elseif ($PW -match "'") {
+  $pwProblem = 'a single quote, which breaks the quoting of the Password value'
+}
+if ($pwProblem) {
+  throw "The dada_bridge password has $pwProblem. Quote the Password value in `$conn before running."
 }
 
 $conn = "Server=localhost,50352;User ID=dada_bridge;Password=$PW;Initial Catalog=wgdemo;Encrypt=False;TrustServerCertificate=True;Connect Timeout=15"
@@ -58,6 +81,10 @@ SELECT RTRIM(CODART) AS codart,
 FROM articulo
 "@
   $rows = New-Object System.Collections.Generic.List[string]
+  # This header must stay BYTE-IDENTICAL to WINGEST_PRICE_CSV_HEADER in
+  # src/lib/catalog/wingest.ts: the merge script refuses any file whose header
+  # differs, because the columns are otherwise indistinguishable positional
+  # numbers and a reordered export would write tier 6 prices into tier 1.
   $rows.Add("codart,p1,p2,p3,p4,p5,p6,unidad,unilot")
   $rd = $c.ExecuteReader()
   try {

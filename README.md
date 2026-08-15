@@ -64,7 +64,13 @@ Real prices and units arrive separately: the owner runs
 `scripts/wingest/export-prices.ps1` on the ERP server (one read-only SELECT) and
 `pnpm import:wingest-prices <prices.csv> [--dry-run]` merges the resulting CSV
 into `products` by `codart`, turning zero tiers into NULL and deriving
-`is_weighed` from the `KG` unit.
+`is_weighed` from the `KG` unit. That CSV is the full price matrix: it is
+gitignored, and it should be deleted once the merge has run. Check the ERP's unit
+vocabulary against the `KG` rule before writing anything:
+
+```text
+pnpm --silent import:wingest-prices prices.csv --dry-run | jq .unidadValues
+```
 
 Customer catalog code reads `products_priced`. Staff access to raw price tiers
 is server-only through the service-role client after `requireStaff`. Direct

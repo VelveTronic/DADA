@@ -59,6 +59,10 @@ describe("parseWingestPriceCsv", () => {
     expect(rows).toHaveLength(1);
   });
 
+  it("returns no rows for a header-only export", () => {
+    expect(parseWingestPriceCsv(`${WINGEST_PRICE_CSV_HEADER}\n`)).toEqual([]);
+  });
+
   it("rejects a foreign header instead of guessing the columns", () => {
     expect(() => parseWingestPriceCsv("codart,precio\n4-007,3.50\n")).toThrow(
       /header/i,
@@ -121,6 +125,16 @@ describe("toWingestPricePatch", () => {
     const patch = toWingestPricePatch(row({ unidad: " kg " }), SYNCED_AT);
     expect(patch.unit).toBe("KG");
     expect(patch.is_weighed).toBe(true);
+  });
+
+  it("does not treat a KG-like unit as KG", () => {
+    // Only the exact unit KG derives is_weighed. If the ERP vocabulary turns out
+    // to be KGS or KILO, the merge report's unidadValues histogram shows it
+    // before any write, and the rule here is what gets widened — silently
+    // matching a prefix would flag boxed goods as sold by weight.
+    const patch = toWingestPricePatch(row({ unidad: "KGS" }), SYNCED_AT);
+    expect(patch.unit).toBe("KGS");
+    expect("is_weighed" in patch).toBe(false);
   });
 
   it("never writes is_weighed=false for a non-KG unit", () => {

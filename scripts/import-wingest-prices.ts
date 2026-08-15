@@ -11,8 +11,14 @@
  * given a value, never cleared: staff may have corrected them by hand.
  *
  * Usage: pnpm import:wingest-prices <prices.csv> [--dry-run]
- * --dry-run parses and reports without reading .env.local or touching the DB.
- * A write run requires .env.local: NEXT_PUBLIC_SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY.
+ * --dry-run parses and reports without reading .env.local or touching the DB,
+ * and prints ONE JSON document. A write run requires .env.local
+ * (NEXT_PUBLIC_SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY) and prints TWO: the
+ * merge report, then the post-merge diagnostics. Progress and anomalies go to
+ * stderr so both documents stay machine-readable.
+ *
+ * The CSV is confidential — the full six-tier price matrix. It is gitignored at
+ * scripts/wingest/prices.csv; delete it once the merge has run.
  *
  * Scripts import library code relatively, like scripts/create-user.ts — house
  * style, not a tooling limit (tsx does resolve the "@/" alias).
@@ -24,6 +30,7 @@ import {
   parseWingestPriceCsv,
   toWingestPricePatch,
   type WingestPricePatch,
+  type WingestPriceRow,
 } from "../src/lib/catalog/wingest";
 import type { Database } from "../src/lib/supabase/database.types";
 
@@ -47,6 +54,23 @@ function describeDbError(error: PostgrestError): string {
   ]
     .filter(Boolean)
     .join(" | ");
+}
+
+/**
+ * Distinct trimmed/uppercased unidad values with their counts, commonest first.
+ * is_weighed is derived from an EXACT match on KG, so the operator has to be
+ * able to see the ERP's real vocabulary — KG against KGS, KILO, KG. — in the
+ * dry run, before a write commits the wrong flag on every weighed product.
+ */
+function unidadHistogram(rows: WingestPriceRow[]): Record<string, number> {
+  const counts = new Map<string, number>();
+  for (const row of rows) {
+    const unidad = row.unidad.trim().toUpperCase() || "(empty)";
+    counts.set(unidad, (counts.get(unidad) ?? 0) + 1);
+  }
+  return Object.fromEntries(
+    [...counts].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])),
+  );
 }
 
 /**
@@ -173,6 +197,7 @@ async function main(): Promise<void> {
     weighedFromKg: patches.filter((entry) => entry.patch.is_weighed).length,
     unitsPerCaseSet: patches.filter((entry) => entry.patch.units_per_case !== null)
       .length,
+    unidadValues: unidadHistogram(rows),
   };
 
   if (dryRun) {
@@ -184,7 +209,6 @@ async function main(): Promise<void> {
 
   const db = serviceClient();
   let matched = 0;
-  let updated = 0;
   let notInPortal = 0;
   const notInPortalSample: string[] = [];
   for (const [index, { codart, patch }] of patches.entries()) {
@@ -203,6 +227,8 @@ async function main(): Promise<void> {
           describeDbError(error),
       );
     }
+    // data.length is 0 or 1 and never more: codart is unique, so a "rows
+    // updated" tally would only ever restate matched.
     if (data.length === 0) {
       notInPortal++;
       if (notInPortalSample.length < NOT_IN_PORTAL_SAMPLE) {
@@ -210,7 +236,6 @@ async function main(): Promise<void> {
       }
     } else {
       matched++;
-      updated += data.length;
     }
     // Progress on stderr so the single JSON report on stdout stays pipeable.
     if ((index + 1) % PROGRESS_EVERY === 0) {
@@ -218,17 +243,32 @@ async function main(): Promise<void> {
     }
   }
 
+  // Print what the writes did BEFORE asking the database anything else. The two
+  // counts below are diagnostics; losing them to a network blip must not also
+  // lose the only record of how 2900+ updates went.
   report.matched = matched;
-  report.updated = updated;
   report.notInPortal = notInPortal;
-  report.productsFullyUnpriced = await countFullyUnpriced(db);
-  report.productsOrderableWithPrice = await countOrderableWithPrice(db);
   console.log(JSON.stringify(report, null, 2));
   if (notInPortalSample.length) {
     console.error(
       `first not-in-portal codarts: ${notInPortalSample.join(", ")}`,
     );
   }
+
+  // Second document on stdout, so the merge report above stays exactly what it
+  // was when it was printed. A failure here is reported, not thrown: the merge
+  // itself already succeeded, and exiting non-zero would read as "the catalog
+  // did not get its prices" and invite a pointless re-run.
+  const diagnostics: Record<string, unknown> = {};
+  try {
+    diagnostics.productsFullyUnpriced = await countFullyUnpriced(db);
+    diagnostics.productsOrderableWithPrice = await countOrderableWithPrice(db);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    diagnostics.countError = message;
+    console.error(`post-merge diagnostics failed: ${message}`);
+  }
+  console.log(JSON.stringify(diagnostics, null, 2));
 }
 
 main().catch((error: unknown) => {
