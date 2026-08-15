@@ -192,17 +192,23 @@ export default async function CartPage({
                         out of view on a narrow phone. */}
                     <p className="truncate font-medium">{name || "—"}</p>
                     <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-gray-500">
+                      {/* A vanished product has no codart to show and its uuid
+                          means nothing to a restaurant, so the line says what
+                          the customer needs to know instead. The remove button
+                          still carries the id, which is all that has to travel. */}
                       <span>
                         {row.product
                           ? `${row.product.codart} · ${row.product.unit}`
-                          : row.productId}
+                          : tCatalog("unavailable")}
                       </span>
                       {weighed && (
                         <span className="rounded bg-amber-100 px-1.5 py-0.5 text-amber-800">
                           {tCatalog("weighed")}
                         </span>
                       )}
-                      {!orderable && (
+                      {/* …which is also why the badge is for PAUSED products
+                          only: on a vanished line it would just say it twice. */}
+                      {!orderable && row.product && (
                         <span className="rounded bg-gray-200 px-1.5 py-0.5 text-gray-600">
                           {tCatalog("unavailable")}
                         </span>
@@ -234,7 +240,7 @@ export default async function CartPage({
                         // button's job, so neither minimum reaches 0.
                         step={weighed ? 0.001 : 1}
                         min={weighed ? 0.001 : 1}
-                        inputMode="decimal"
+                        inputMode={weighed ? "decimal" : "numeric"}
                         // One "Cantidad" per row would be useless to a screen
                         // reader, so the name goes in the label — unless the
                         // product carries none in either language.

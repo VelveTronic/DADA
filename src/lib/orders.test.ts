@@ -90,6 +90,19 @@ describe("mapOrderError", () => {
     expect(mapOrderError(undefined).key).toBe("UNKNOWN");
   });
 
+  it("never carries a detail off an unmapped message", () => {
+    // An unrecognised code with a codart-shaped tail: without the UNKNOWN guard
+    // this fragment lands on the cart page glued to "try again later".
+    expect(mapOrderError("SOME_NEW_CODE:V-001")).toEqual({
+      key: "UNKNOWN",
+      detail: null,
+    });
+    expect(mapOrderError('invalid input syntax for type uuid: "x"')).toEqual({
+      key: "UNKNOWN",
+      detail: null,
+    });
+  });
+
   it("drops a detail that is not a plain codart", () => {
     expect(mapOrderError("NO_PRICE:<script>:tier 1").detail).toBe(null);
     expect(mapOrderError("NO_PRICE: :tier 1").detail).toBe(null);

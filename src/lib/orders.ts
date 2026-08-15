@@ -49,7 +49,7 @@ export type OrderErrorKey =
   | "NO_PRICE"
   | "UNKNOWN";
 
-const ORDER_ERROR_KEYS: readonly string[] = [
+export const ORDER_ERROR_KEYS: readonly OrderErrorKey[] = [
   "NO_ACTIVE_COMPANY",
   "COMPANY_NOT_LINKED",
   "EMPTY_ORDER",
@@ -65,7 +65,7 @@ const ORDER_ERROR_KEYS: readonly string[] = [
 
 /** Guards `?error=` on the way back in: the query string is user-editable. */
 export function isOrderErrorKey(value: string): value is OrderErrorKey {
-  return ORDER_ERROR_KEYS.includes(value);
+  return ORDER_ERROR_KEYS.some((key) => key === value);
 }
 
 /**
@@ -100,7 +100,11 @@ export function mapOrderError(message: string | null | undefined): {
   const code = (colon === -1 ? raw : raw.slice(0, colon)).trim();
   const key: OrderErrorKey = isOrderErrorKey(code) ? code : "UNKNOWN";
 
-  if (colon === -1) return { key, detail: null };
+  // A detail only ever accompanies a code we recognise. An unmapped Postgres
+  // message is not ours to quote: `permission denied for table orders` splits on
+  // its own colon into a fragment that passes the codart test, and would then be
+  // glued onto "try again later" on the customer's cart page.
+  if (colon === -1 || key === "UNKNOWN") return { key, detail: null };
   const candidate = raw.slice(colon + 1).split(":")[0].trim();
   return { key, detail: isOrderErrorDetail(candidate) ? candidate : null };
 }
