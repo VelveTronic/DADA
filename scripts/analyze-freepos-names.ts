@@ -40,7 +40,8 @@ function runs(name: string): { lang: "zh" | "es"; text: string }[] {
 }
 
 /** Every prefix shape freepos uses to mark a product dead, with its exact text. */
-const UNAVAILABLE_PREFIX = /^[(（]?\s*(?:断货|取消)\s*[)）]?\s*[-–—:：]?\s*/;
+const UNAVAILABLE_PREFIX =
+  /^[(（]?\s*(?:断货|取消|停产)\s*[)）]?\s*[-–—:：]?\s*/;
 const prefixes = new Map<string, number>();
 const name2Values: string[] = [];
 

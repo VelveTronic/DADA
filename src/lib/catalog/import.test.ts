@@ -140,6 +140,18 @@ describe("toProductRecord", () => {
     expect(cancelled.name.es).toBe("PAULUS DE TINTO JOVEN");
   });
 
+  it("停产 (discontinued) prefix is a dead marker too", () => {
+    const p = toProductRecord({
+      ...base,
+      编号: "102-033",
+      名称: "停产-ZANAHORIA PICADA RALLADA  C/8KG 冷冻红萝卜丁 ",
+    });
+    expect(p.is_available).toBe(false);
+    expect(p.name.zh).toBe("冷冻红萝卜丁");
+    expect(p.name.es).toBe("ZANAHORIA PICADA RALLADA C/8KG");
+    expect(`${p.name.zh}${p.name.es}`).not.toContain("停产");
+  });
+
   it("keeps a plain product available", () => {
     expect(toProductRecord({ ...base }).is_available).toBe(true);
   });

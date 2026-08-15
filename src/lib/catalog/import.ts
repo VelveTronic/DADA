@@ -5,8 +5,9 @@ const CJK = /[\u3400-\u4dbf\u4e00-\u9fff]/;
 const LATIN = /[A-Za-z]/;
 /** Separators that only ever glued the two language segments together. */
 const EDGE_SEPARATORS = /^[\s\-–—:：·,，/|]+|[\s\-–—:：·,，/|]+$/g;
-/** Freepos marks a product dead by prefixing its name: 断货 / (断货) / 取消. */
-const UNAVAILABLE_PREFIX = /^[(（]?\s*(?:断货|取消)\s*[)）]?\s*[-–—:：]?\s*/;
+/** Freepos marks a product dead by prefixing its name: 断货 / (断货) / 取消 / 停产. */
+const UNAVAILABLE_PREFIX =
+  /^[(（]?\s*(?:断货|取消|停产)\s*[)）]?\s*[-–—:：]?\s*/;
 
 export interface BilingualName {
   zh: string | null;
