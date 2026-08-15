@@ -67,9 +67,42 @@
       "UNKNOWN": "提交失败，请稍后重试"
     }
   },
+  "orders": {
+    "title": "我的订单",
+    "empty": "您还没有订单",
+    "orderNumber": "订单 {n}",
+    "placedAt": "下单日期",
+    "erpOrder": "ERP 单号 {n}",
+    "erpAlbaran": "送货单号 {n}",
+    "status": {
+      "submitted": "已提交",
+      "confirmed": "已确认",
+      "processing": "处理中",
+      "injected": "已进ERP",
+      "albaran": "已出单",
+      "cancelled": "已取消"
+    }
+  },
   "staff": {
     "title": "员工后台",
     "ordersQueue": "订单确认队列",
+    "tabSubmitted": "待确认",
+    "tabConfirmed": "已确认",
+    "tabAll": "全部",
+    "noOrders": "此视图中没有订单",
+    "orderLines": "明细（{n} 项）",
+    "customerNote": "客户备注",
+    "confirm": "确认",
+    "confirmFor": "确认订单 {n}",
+    "cancel": "取消",
+    "cancelFor": "取消订单 {n}",
+    "staffNote": "内部备注（可选）",
+    "staffNoteFor": "内部备注：订单 {n}",
+    "cancelReason": "取消原因（可选）",
+    "cancelReasonFor": "取消原因：订单 {n}",
+    "rpcOk": "操作已完成",
+    "rpcWrongState": "订单状态已变化，未作任何修改。请刷新后再试。",
+    "rpcFailed": "操作未完成，请稍后重试。",
     "products": "商品管理",
     "productsTitle": "商品管理",
     "searchPlaceholder": "搜索编号或名称…",

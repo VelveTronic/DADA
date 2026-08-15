@@ -43,6 +43,7 @@ export default async function CatalogPage({
   const t = await getTranslations("catalog");
   const tc = await getTranslations("common");
   const tCart = await getTranslations("cart");
+  const tNav = await getTranslations("nav");
 
   const q = sanitizeSearch(rawQ ?? "");
   const tab = rawTab === "favoritos" ? "favoritos" : "all";
@@ -108,6 +109,9 @@ export default async function CatalogPage({
       <div className="flex items-center justify-between gap-4">
         <h1 className="text-2xl font-bold">{t("title")}</h1>
         <div className="flex items-center gap-4">
+          <Link className="text-sm underline" href={`/${locale}/pedidos`}>
+            {tNav("orders")}
+          </Link>
           <Link className="text-sm underline" href={`/${locale}/carrito`}>
             {tCart("cartLink", { n: cartCount })}
           </Link>

@@ -67,9 +67,42 @@
       "UNKNOWN": "No se ha podido enviar el pedido. Inténtelo de nuevo."
     }
   },
+  "orders": {
+    "title": "Mis pedidos",
+    "empty": "Todavía no ha hecho ningún pedido",
+    "orderNumber": "Pedido {n}",
+    "placedAt": "Fecha del pedido",
+    "erpOrder": "Pedido ERP {n}",
+    "erpAlbaran": "Albarán {n}",
+    "status": {
+      "submitted": "Enviado",
+      "confirmed": "Confirmado",
+      "processing": "En proceso",
+      "injected": "En ERP",
+      "albaran": "Albarán",
+      "cancelled": "Cancelado"
+    }
+  },
   "staff": {
     "title": "Panel interno",
     "ordersQueue": "Cola de confirmación de pedidos",
+    "tabSubmitted": "Pendientes",
+    "tabConfirmed": "Confirmados",
+    "tabAll": "Todos",
+    "noOrders": "No hay pedidos en esta vista",
+    "orderLines": "Líneas ({n})",
+    "customerNote": "Observaciones del cliente",
+    "confirm": "Confirmar",
+    "confirmFor": "Confirmar el pedido {n}",
+    "cancel": "Cancelar",
+    "cancelFor": "Cancelar el pedido {n}",
+    "staffNote": "Nota interna (opcional)",
+    "staffNoteFor": "Nota interna: pedido {n}",
+    "cancelReason": "Motivo de la cancelación (opcional)",
+    "cancelReasonFor": "Motivo de la cancelación: pedido {n}",
+    "rpcOk": "Operación realizada",
+    "rpcWrongState": "El pedido ya no estaba en ese estado. No se ha cambiado nada; actualice la página.",
+    "rpcFailed": "No se ha podido completar la operación. Inténtelo de nuevo.",
     "products": "Productos",
     "productsTitle": "Gestión de productos",
     "searchPlaceholder": "Buscar código o nombre…",

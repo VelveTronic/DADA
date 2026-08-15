@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ORDER_ERROR_KEYS } from "@/lib/orders";
+import { ORDER_ERROR_KEYS, ORDER_STATUSES } from "@/lib/orders";
 import es from "../../messages/es.json";
 import zh from "../../messages/zh.json";
 
@@ -26,6 +26,24 @@ describe("translations", () => {
     for (const key of ORDER_ERROR_KEYS) {
       expect(zhErrors[key], `zh cart.errors.${key}`).toBeTypeOf("string");
       expect(esErrors[key], `es cart.errors.${key}`).toBeTypeOf("string");
+    }
+  });
+
+  /**
+   * Both order pages label a status by indexing this namespace with a value read
+   * straight out of the database. A state with no label here reaches a customer
+   * as the bare English word from the check constraint.
+   */
+  it("carries an orders.status label for every state an order can hold", () => {
+    const zhStatus: Record<string, string> = zh.orders.status;
+    const esStatus: Record<string, string> = es.orders.status;
+    for (const status of ORDER_STATUSES) {
+      expect(zhStatus[status], `zh orders.status.${status}`).toBeTypeOf(
+        "string",
+      );
+      expect(esStatus[status], `es orders.status.${status}`).toBeTypeOf(
+        "string",
+      );
     }
   });
 });

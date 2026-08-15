@@ -1,8 +1,8 @@
 /**
- * Order-side helpers shared by the cart page and the checkout action. Pure, no
- * I/O: the delivery-date window and the `create_order` error map are exactly the
- * two places where a silent mistake would either block a valid order or show a
- * customer nothing but "try again".
+ * Order-side helpers shared by the cart page, the checkout action and the two
+ * order pages. Pure, no I/O: the delivery-date window, the `create_order` error
+ * map and the status vocabulary are the places where a silent mistake would
+ * either block a valid order or show a customer nothing but "try again".
  */
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -33,6 +33,85 @@ export function addDays(day: string, days: number): string {
   const [year, month, date] = day.split("-").map(Number);
   const shifted = new Date(Date.UTC(year, month - 1, date) + days * 86_400_000);
   return shifted.toISOString().slice(0, 10);
+}
+
+/**
+ * Every state `orders_status_check` allows, in the order an order moves through
+ * them. `processing` is the bridge's own claim state — `bridge_claim_confirmed`
+ * sets it and `bridge_mark_injected` moves it on — and it is as visible to a
+ * customer as any other, so it carries a label like the rest.
+ */
+export type OrderStatus =
+  | "submitted"
+  | "confirmed"
+  | "processing"
+  | "injected"
+  | "albaran"
+  | "cancelled";
+
+export const ORDER_STATUSES: readonly OrderStatus[] = [
+  "submitted",
+  "confirmed",
+  "processing",
+  "injected",
+  "albaran",
+  "cancelled",
+];
+
+/**
+ * `orders.status` is `text` to the type generator, so every page reads it as a
+ * plain string. Guarding it before it indexes `orders.status.<key>` keeps a
+ * state this build has never heard of from throwing at a customer mid-page.
+ */
+export function isOrderStatus(value: string): value is OrderStatus {
+  return ORDER_STATUSES.some((status) => status === value);
+}
+
+/** The three views the staff queue offers; `all` means "no status filter". */
+export const QUEUE_TABS = ["submitted", "confirmed", "all"] as const;
+
+export type QueueTab = (typeof QUEUE_TABS)[number];
+
+/**
+ * `?estado=` is user-editable and reaches `.eq("status", …)`, so it is checked
+ * against the tabs the queue actually offers rather than against the status
+ * list: `injected` is a real status and still not a view this page has.
+ */
+export function safeQueueTab(value: string | null | undefined): QueueTab {
+  return QUEUE_TABS.find((tab) => tab === value) ?? "submitted";
+}
+
+/**
+ * `?created=` survives the checkout redirect and goes straight into the success
+ * banner, so it is a plain order number or nothing at all — digits only, and
+ * short enough to be a value of a sequence that starts at 1001.
+ */
+export function parseOrderNumber(value: string | null | undefined): number | null {
+  if (typeof value !== "string" || !/^\d{1,9}$/.test(value)) return null;
+  const parsed = Number(value);
+  return parsed > 0 ? parsed : null;
+}
+
+/**
+ * The dates an order carries, rendered for a locale on Madrid's calendar.
+ *
+ * The two columns are different animals and the format has to know which it
+ * has. `delivery_date` is a `date`: no time and no zone, so "2026-08-16" parses
+ * as UTC midnight and, formatted in any zone behind UTC, would come back out as
+ * the 15th — it is pinned to UTC. `created_at` is a `timestamptz` and formats in
+ * Europe/Madrid, the same calendar `madridDay` judges the delivery window on, so
+ * the two dates in a row can never disagree about what day it is.
+ */
+export function formatOrderDate(value: string, locale: string): string {
+  const plainDay = /^\d{4}-\d{2}-\d{2}$/.test(value);
+  const date = new Date(plainDay ? `${value}T00:00:00Z` : value);
+  if (Number.isNaN(date.getTime())) return "";
+  return new Intl.DateTimeFormat(locale === "zh" ? "zh-CN" : "es-ES", {
+    timeZone: plainDay ? "UTC" : "Europe/Madrid",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(date);
 }
 
 /** Every `create_order` failure a customer gets a written explanation for. */

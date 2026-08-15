@@ -31,9 +31,13 @@ export default async function StaffHome({
       <p className="mt-2 text-sm text-gray-500">
         {staffUser.display_name ?? staffUser.id} · {staffUser.role}
       </p>
-      <p className="mt-8 text-gray-400">{t("ordersQueue")}</p>
-      <nav className="mt-4">
-        <ul className="text-sm">
+      <nav className="mt-8">
+        <ul className="space-y-2 text-sm">
+          <li>
+            <Link className="underline" href={`/${locale}/staff/pedidos`}>
+              {t("ordersQueue")}
+            </Link>
+          </li>
           <li>
             <Link className="underline" href={`/${locale}/staff/productos`}>
               {t("products")}

@@ -1,11 +1,17 @@
 import { describe, expect, it } from "vitest";
 import {
   addDays,
+  formatOrderDate,
   isOrderErrorDetail,
   isOrderErrorKey,
+  isOrderStatus,
   isUuid,
   madridDay,
   mapOrderError,
+  ORDER_STATUSES,
+  parseOrderNumber,
+  QUEUE_TABS,
+  safeQueueTab,
 } from "./orders";
 
 describe("madridDay", () => {
@@ -130,5 +136,93 @@ describe("isOrderErrorDetail", () => {
     expect(isOrderErrorDetail("11111111-1111-4111-8111-111111111111")).toBe(
       false,
     );
+  });
+});
+
+describe("ORDER_STATUSES", () => {
+  it("is exactly what orders_status_check allows, in lifecycle order", () => {
+    // `processing` is the bridge's claim state (bridge_claim_confirmed sets it,
+    // bridge_mark_injected clears it). It is in the live constraint, so it can
+    // reach a customer's screen and needs a label like the other five.
+    expect(ORDER_STATUSES).toEqual([
+      "submitted",
+      "confirmed",
+      "processing",
+      "injected",
+      "albaran",
+      "cancelled",
+    ]);
+  });
+});
+
+describe("isOrderStatus", () => {
+  it("guards a status read out of the database before it indexes a message", () => {
+    for (const status of ORDER_STATUSES) {
+      expect(isOrderStatus(status), status).toBe(true);
+    }
+    expect(isOrderStatus("")).toBe(false);
+    expect(isOrderStatus("Submitted")).toBe(false);
+    expect(isOrderStatus("toString")).toBe(false);
+    expect(isOrderStatus("shipped")).toBe(false);
+  });
+});
+
+describe("safeQueueTab", () => {
+  it("keeps `?estado=` to the three views the queue offers", () => {
+    expect(QUEUE_TABS).toEqual(["submitted", "confirmed", "all"]);
+    for (const tab of QUEUE_TABS) expect(safeQueueTab(tab)).toBe(tab);
+  });
+
+  it("falls back to the pending view for anything else", () => {
+    // A status the queue has no tab for is still not a tab: `injected` would
+    // otherwise reach `.eq("status", …)` through a validator that said yes.
+    expect(safeQueueTab("injected")).toBe("submitted");
+    expect(safeQueueTab("cancelled")).toBe("submitted");
+    expect(safeQueueTab("")).toBe("submitted");
+    expect(safeQueueTab("toString")).toBe("submitted");
+    expect(safeQueueTab(undefined)).toBe("submitted");
+    expect(safeQueueTab(null)).toBe("submitted");
+  });
+});
+
+describe("parseOrderNumber", () => {
+  it("accepts a plain order number", () => {
+    // The sequence starts at 1001.
+    expect(parseOrderNumber("1001")).toBe(1001);
+    expect(parseOrderNumber("999999999")).toBe(999_999_999);
+  });
+
+  it("renders no banner for anything that is not one", () => {
+    expect(parseOrderNumber("0")).toBe(null);
+    expect(parseOrderNumber("")).toBe(null);
+    expect(parseOrderNumber(" 1001")).toBe(null);
+    expect(parseOrderNumber("1001abc")).toBe(null);
+    expect(parseOrderNumber("1e3")).toBe(null);
+    expect(parseOrderNumber("-1")).toBe(null);
+    expect(parseOrderNumber("1.5")).toBe(null);
+    expect(parseOrderNumber("1234567890")).toBe(null);
+    expect(parseOrderNumber(undefined)).toBe(null);
+    expect(parseOrderNumber(null)).toBe(null);
+  });
+});
+
+describe("formatOrderDate", () => {
+  it("keeps a plain delivery date on its own day, in either locale", () => {
+    // `delivery_date` is a `date`: no time, no zone. Parsed as UTC midnight and
+    // formatted in a zone BEHIND UTC it would come back out as the 15th.
+    expect(formatOrderDate("2026-08-16", "es")).toBe("16/08/2026");
+    expect(formatOrderDate("2026-08-16", "zh")).toBe("2026/08/16");
+  });
+
+  it("reads a timestamp on Madrid's calendar, like madridDay", () => {
+    // 23:30 UTC in August is already tomorrow in Madrid — the same calendar the
+    // delivery window is judged on, so both dates in a row agree.
+    expect(formatOrderDate("2026-08-15T23:30:00Z", "es")).toBe("16/08/2026");
+    expect(formatOrderDate("2025-12-31T23:30:00Z", "zh")).toBe("2026/01/01");
+  });
+
+  it("renders nothing for a value it cannot parse", () => {
+    expect(formatOrderDate("", "es")).toBe("");
+    expect(formatOrderDate("not a date", "zh")).toBe("");
   });
 });
