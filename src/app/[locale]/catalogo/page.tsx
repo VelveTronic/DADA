@@ -23,10 +23,20 @@ export default async function CatalogPage({
   searchParams,
 }: {
   params: Promise<{ locale: Locale }>;
-  searchParams: Promise<{ q?: string; tab?: string; page?: string }>;
+  searchParams: Promise<{
+    q?: string;
+    tab?: string;
+    page?: string;
+    cat?: string;
+  }>;
 }) {
   const { locale } = await params;
-  const { q: rawQ, tab: rawTab, page: rawPage } = await searchParams;
+  const {
+    q: rawQ,
+    tab: rawTab,
+    page: rawPage,
+    cat: rawCat,
+  } = await searchParams;
   setRequestLocale(locale);
   const { portalUser } = await requireCompanyUser(locale);
   const t = await getTranslations("catalog");
@@ -44,6 +54,24 @@ export default async function CatalogPage({
   if (favError) console.error("catalog favorites query:", favError);
   const favoriteIds = new Set((favRows ?? []).map((row) => row.product_id));
 
+  const { data: categoryRows, error: categoryError } = await supabase
+    .from("categories")
+    .select("id, erp_code, name, sort_order")
+    .eq("is_active", true);
+  if (categoryError) console.error("catalog categories query:", categoryError);
+  // Ordered here rather than in SQL: `name` is jsonb, so only the app knows
+  // which of {zh, es} this locale actually shows — and that name is the
+  // tiebreaker for the many freepos sort values that collide on one number.
+  const categories = (categoryRows ?? [])
+    .map((row) => ({ ...row, label: localizedName(row.name, locale) }))
+    .sort(
+      (a, b) =>
+        a.sort_order - b.sort_order || a.label.localeCompare(b.label, locale),
+    );
+  // The whole validation of ?cat=: an erp_code that is not an active category
+  // resolves to nothing and the page renders unfiltered, never a failed query.
+  const activeCategory = categories.find((c) => c.erp_code === rawCat) ?? null;
+
   // Customers read the priced VIEW only: it carries exactly one price column,
   // resolved server-side from this company's tarifa.
   let query = supabase
@@ -59,6 +87,7 @@ export default async function CatalogPage({
     const ids = [...favoriteIds];
     query = query.in("id", ids.length ? ids : [NO_MATCH_ID]);
   }
+  if (activeCategory) query = query.eq("category_id", activeCategory.id);
   const from = (page - 1) * PAGE_SIZE;
   const { data, count, error } = await query
     .order("codart", { ascending: true })
@@ -67,12 +96,22 @@ export default async function CatalogPage({
   const products: CustomerCatalogProduct[] = data ?? [];
   const totalPages = Math.max(1, Math.ceil((count ?? 0) / PAGE_SIZE));
 
-  const href = (p: { q?: string; tab?: string; page?: number }) => {
+  const href = (p: {
+    q?: string;
+    tab?: string;
+    page?: number;
+    cat?: string;
+  }) => {
     const sp = new URLSearchParams();
     const qq = p.q ?? q;
     const tt = p.tab ?? tab;
+    // A category survives a search or a tab switch; only the "all" chip clears
+    // it, by passing the empty string. Every caller that changes the filter
+    // passes page: 1, so a narrower result set never lands on a page past its end.
+    const cc = p.cat ?? activeCategory?.erp_code ?? "";
     if (qq) sp.set("q", qq);
     if (tt !== "all") sp.set("tab", tt);
+    if (cc) sp.set("cat", cc);
     if ((p.page ?? 1) > 1) sp.set("page", String(p.page));
     const s = sp.toString();
     return `/${locale}/catalogo${s ? `?${s}` : ""}`;
@@ -94,6 +133,13 @@ export default async function CatalogPage({
       ? "-mb-px border-b-2 border-brand pb-2 font-semibold"
       : "-mb-px border-b-2 border-transparent pb-2 text-muted transition-colors hover:text-ink";
 
+  // The tabs' underline, minus the -mb-px that makes it sit ON the nav's border:
+  // inside a horizontal scroller that overhang would be clipped away.
+  const chipClass = (active: boolean) =>
+    active
+      ? "shrink-0 whitespace-nowrap border-b-2 border-brand pb-1 font-semibold"
+      : "shrink-0 whitespace-nowrap border-b-2 border-transparent pb-1 text-muted transition-colors hover:text-ink";
+
   return (
     <AppShell
       locale={locale}
@@ -106,6 +152,11 @@ export default async function CatalogPage({
       <form method="get" className="mt-4 flex gap-2">
         {tab === "favoritos" && (
           <input type="hidden" name="tab" value="favoritos" />
+        )}
+        {/* A GET form submits only its own fields, so the chosen category has to
+            ride along or searching would silently widen the result set. */}
+        {activeCategory && (
+          <input type="hidden" name="cat" value={activeCategory.erp_code} />
         )}
         <input
           name="q"
@@ -133,6 +184,28 @@ export default async function CatalogPage({
           {t("tabFavorites")} ({favoriteIds.size})
         </Link>
       </nav>
+
+      {categories.length > 0 && (
+        // Full-bleed on a phone: the row scrolls past the page gutter, so the
+        // last chip is visibly cut off rather than looking like the end of it.
+        <nav className="-mx-4 mt-3 flex gap-4 overflow-x-auto px-4 text-sm sm:mx-0 sm:px-0">
+          <Link
+            href={href({ cat: "", page: 1 })}
+            className={chipClass(!activeCategory)}
+          >
+            {t("catAll")}
+          </Link>
+          {categories.map((c) => (
+            <Link
+              key={c.id}
+              href={href({ cat: c.erp_code, page: 1 })}
+              className={chipClass(activeCategory?.id === c.id)}
+            >
+              {c.label}
+            </Link>
+          ))}
+        </nav>
+      )}
 
       {products.length === 0 ? (
         <p className={`${GLASS_CARD} mt-4 p-10 text-center text-muted`}>

@@ -14,6 +14,7 @@
     "user:create": "tsx scripts/create-user.ts",
     "import:freepos": "tsx scripts/import-freepos.ts",
     "import:wingest-prices": "tsx scripts/import-wingest-prices.ts",
+    "seed:categories": "tsx scripts/seed-categories.ts",
     "db:test": "supabase test db"
   },
   "dependencies": {

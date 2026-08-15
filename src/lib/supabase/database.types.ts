@@ -21,6 +21,7 @@ export type Database = {
           id: number
           is_active: boolean
           name: Json
+          parent_label: Json | null
           sort_order: number
           updated_at: string
         }
@@ -30,6 +31,7 @@ export type Database = {
           id?: never
           is_active?: boolean
           name: Json
+          parent_label?: Json | null
           sort_order?: number
           updated_at?: string
         }
@@ -39,6 +41,7 @@ export type Database = {
           id?: never
           is_active?: boolean
           name?: Json
+          parent_label?: Json | null
           sort_order?: number
           updated_at?: string
         }
