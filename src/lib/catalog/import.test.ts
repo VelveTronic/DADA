@@ -188,6 +188,8 @@ describe("toProductRecord", () => {
     expect(toProductRecord({ ...base, 税率: "0.1" }).iva_rate).toBe(10);
     expect(toProductRecord({ ...base, 税率: "21" }).iva_rate).toBe(21);
     expect(() => toProductRecord({ ...base, 税率: "0.07" })).toThrow(/tax rate/);
+    // An already-percent value is never rounded into a legal rate.
+    expect(() => toProductRecord({ ...base, 税率: "20.7" })).toThrow(/tax rate/);
   });
 
   it("ignores 名称2: freepos stores a number there, not a second name", () => {

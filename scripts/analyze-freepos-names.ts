@@ -43,7 +43,13 @@ function runs(name: string): { lang: "zh" | "es"; text: string }[] {
 /** Exact text of every KNOWN dead-marker shape (the importer's own regex). */
 const prefixes = new Map<string, number>();
 const name2Values: string[] = [];
-/** Radar for markers we do not know yet: leading zh token of unmarked names. */
+/**
+ * Radar for markers we do not know yet: the leading maximal CJK run of unmarked
+ * names. Keying on the first WHITESPACE token would hide exactly what we hunt —
+ * real markers fuse with their hyphen ("停产-ZANAHORIA…"), making every
+ * occurrence a unique head that the repeat filter drops.
+ */
+const CJK_RUN = /^[\u3400-\u4dbf\u4e00-\u9fff]+/;
 const unmarkedHeads = new Map<string, number>();
 
 for (const row of rows) {
@@ -57,10 +63,8 @@ for (const row of rows) {
   if (prefix) {
     prefixes.set(prefix, (prefixes.get(prefix) ?? 0) + 1);
   } else {
-    const head = name.replace(/\s+/g, " ").split(" ")[0];
-    if (head && CJK.test(head)) {
-      unmarkedHeads.set(head, (unmarkedHeads.get(head) ?? 0) + 1);
-    }
+    const head = name.match(CJK_RUN)?.[0];
+    if (head) unmarkedHeads.set(head, (unmarkedHeads.get(head) ?? 0) + 1);
   }
   const hasCjk = CJK.test(name);
   const hasLatin = LATIN.test(name);
@@ -91,7 +95,7 @@ for (const [prefix, count] of [...prefixes.entries()].sort((a, b) => b[1] - a[1]
 }
 console.log(`${String(unavailable).padStart(4)}  TOTAL`);
 
-console.log("\n--- new-marker radar: repeated zh leading token of UNMARKED names ---");
+console.log("\n--- new-marker radar: repeated leading CJK run of UNMARKED names ---");
 console.log("(scan for anything that reads like a status word; real product heads are noise)");
 const radar = [...unmarkedHeads.entries()]
   .filter(([, count]) => count >= 2)

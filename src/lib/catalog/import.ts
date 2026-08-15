@@ -76,13 +76,22 @@ function flag(value: string | null): boolean {
   return value !== null && value.trim() !== "" && value.trim() !== "0";
 }
 
+/**
+ * Deliberately duplicates freepos.ts's private taxTextToPercent. Only the
+ * fraction branch rounds, to absorb float noise from the ×100; an already-percent
+ * value stays exact so garbage like "20.7" is rejected instead of becoming 21.
+ * All three real rates (0.04/0.1/0.21) multiply out exactly today, so the
+ * rounding guards a future snapshot rather than fixing a live bug — which is
+ * also why the twin is not consolidated: extracting a shared helper would move
+ * rounding into freepos.ts's strict parse boundary for no present gain.
+ */
 function ivaPercent(value: string | null): number {
   if (value === null) throw new Error("Freepos tax rate is required");
   const raw = Number(value);
   if (!Number.isFinite(raw) || raw < 0) {
     throw new Error(`Invalid Freepos tax rate: ${value}`);
   }
-  const percent = raw <= 1 ? Math.round(raw * 100) : Math.round(raw);
+  const percent = raw <= 1 ? Math.round(raw * 100) : raw;
   if (![4, 10, 21].includes(percent)) {
     throw new Error(`Unsupported Freepos tax rate: ${value}`);
   }
@@ -111,6 +120,9 @@ export function toProductRecord(row: FreeposImportRow): ImportedProduct {
     throw new Error(`Unsplittable Freepos name for ${codart}: ${rawName}`);
   }
   const { zh, es } = splitBilingualName(stripped);
+  // A missing language OMITS its key rather than nulling it: the DB check tests
+  // key existence, so {"zh": null} would satisfy the constraint and then render
+  // as a null name, and the UI's zh→es fallback keys off the absent zh too.
   const name: { zh?: string; es?: string } = {};
   if (zh) name.zh = zh;
   if (es) name.es = es;
