@@ -1,9 +1,12 @@
 import type { Locale } from "next-intl";
 import { getTranslations, setRequestLocale } from "next-intl/server";
+import { cookies } from "next/headers";
 import Link from "next/link";
 import { signOut } from "@/app/actions/auth";
+import { addToCart } from "@/app/actions/cart";
 import { toggleFavorite } from "@/app/actions/favorites";
 import { requireCompanyUser } from "@/lib/auth/guards";
+import { CART_COOKIE, parseCart } from "@/lib/cart";
 import { localizedName, sanitizeSearch } from "@/lib/catalog/display";
 import { formatEuros } from "@/lib/money";
 import type { CustomerCatalogProduct } from "@/lib/supabase/public.types";
@@ -21,18 +24,37 @@ export default async function CatalogPage({
   searchParams,
 }: {
   params: Promise<{ locale: Locale }>;
-  searchParams: Promise<{ q?: string; tab?: string; page?: string }>;
+  searchParams: Promise<{
+    q?: string;
+    tab?: string;
+    page?: string;
+    cartError?: string;
+  }>;
 }) {
   const { locale } = await params;
-  const { q: rawQ, tab: rawTab, page: rawPage } = await searchParams;
+  const {
+    q: rawQ,
+    tab: rawTab,
+    page: rawPage,
+    cartError: rawCartError,
+  } = await searchParams;
   setRequestLocale(locale);
   const { portalUser } = await requireCompanyUser(locale);
   const t = await getTranslations("catalog");
   const tc = await getTranslations("common");
+  const tCart = await getTranslations("cart");
 
   const q = sanitizeSearch(rawQ ?? "");
   const tab = rawTab === "favoritos" ? "favoritos" : "all";
   const page = Math.max(1, Number.parseInt(rawPage ?? "1", 10) || 1);
+  // Only the two codes the cart actions emit; anything else renders nothing.
+  const cartError =
+    rawCartError === "full" || rawCartError === "qty" ? rawCartError : null;
+
+  // A page may READ the cart cookie; only the server actions write it.
+  const cartCount = Object.keys(
+    parseCart((await cookies()).get(CART_COOKIE)?.value),
+  ).length;
 
   const supabase = await createServerSupabase();
 
@@ -77,20 +99,38 @@ export default async function CatalogPage({
     return `/${locale}/catalogo${s ? `?${s}` : ""}`;
   };
 
+  // Where a failed add-to-cart returns to: this exact view, search and page
+  // intact, so an error never dumps the customer back on page 1.
+  const currentHref = href({ page });
+
   return (
     <main className="mx-auto max-w-5xl p-4 sm:p-6">
       <div className="flex items-center justify-between gap-4">
         <h1 className="text-2xl font-bold">{t("title")}</h1>
-        <form action={signOut}>
-          <input type="hidden" name="locale" value={locale} />
-          <button type="submit" className="text-sm underline">
-            {tc("logout")}
-          </button>
-        </form>
+        <div className="flex items-center gap-4">
+          <Link className="text-sm underline" href={`/${locale}/carrito`}>
+            {tCart("cartLink", { n: cartCount })}
+          </Link>
+          <form action={signOut}>
+            <input type="hidden" name="locale" value={locale} />
+            <button type="submit" className="text-sm underline">
+              {tc("logout")}
+            </button>
+          </form>
+        </div>
       </div>
       <p className="mt-1 text-sm text-gray-500">
         {portalUser.display_name ?? portalUser.companies.name}
       </p>
+
+      {cartError && (
+        <p
+          role="alert"
+          className="mt-4 rounded bg-red-50 px-3 py-2 text-sm text-red-700"
+        >
+          {cartError === "full" ? tCart("full") : tCart("badQty")}
+        </p>
+      )}
 
       <form method="get" className="mt-4 flex gap-2">
         {tab === "favoritos" && (
@@ -140,6 +180,11 @@ export default async function CatalogPage({
             // generated view types widen every column to `| null`.
             const id = p.id as string;
             const isFav = favoriteIds.has(id);
+            const name = localizedName(p.name, locale);
+            // Every price is NULL until the owner's Wingest merge, so today this
+            // renders as a disabled button explaining why; the moment a tarifa
+            // price lands the same row becomes orderable with no code change.
+            const priced = p.price_cents != null;
             return (
               <li
                 key={id}
@@ -149,9 +194,7 @@ export default async function CatalogPage({
                   {/* Only the name truncates. Badges live on the wrapping meta
                       line below, where a long name can never clip them out of
                       view on a narrow phone. */}
-                  <p className="truncate font-medium">
-                    {localizedName(p.name, locale)}
-                  </p>
+                  <p className="truncate font-medium">{name}</p>
                   <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-gray-500">
                     <span>
                       {p.codart} · {p.unit}
@@ -177,6 +220,34 @@ export default async function CatalogPage({
                     </span>
                   )}
                 </p>
+                {/* Ordering gates on is_orderable (is_available AND
+                    is_current_variant): a row that cannot be ordered gets no
+                    button at all, rather than one that would fail. The cell
+                    keeps its width either way so the star column stays aligned
+                    down the list. */}
+                <div className="flex w-9 shrink-0 justify-end">
+                  {p.is_orderable && (
+                    <form action={addToCart}>
+                      <input type="hidden" name="product_id" value={id} />
+                      <input type="hidden" name="locale" value={locale} />
+                      <input type="hidden" name="qty" value="1" />
+                      <input type="hidden" name="back" value={currentHref} />
+                      <button
+                        type="submit"
+                        disabled={!priced}
+                        aria-label={
+                          priced
+                            ? tCart("add", { name })
+                            : tCart("addNoPrice", { name })
+                        }
+                        title={priced ? undefined : t("noPrice")}
+                        className="rounded border px-2 py-1 text-base leading-none disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        +
+                      </button>
+                    </form>
+                  )}
+                </div>
                 <form action={toggleFavorite}>
                   <input type="hidden" name="product_id" value={id} />
                   <input type="hidden" name="locale" value={locale} />

@@ -31,6 +31,36 @@
     "next": "下一页",
     "pageOf": "第 {page} 页 / 共 {total} 页"
   },
+  "cart": {
+    "title": "购物车",
+    "add": "加入购物车：{name}",
+    "addNoPrice": "价格待定，暂不能加入购物车：{name}",
+    "cartLink": "购物车（{n}）",
+    "empty": "购物车是空的",
+    "qty": "数量",
+    "remove": "移除",
+    "lineTotal": "金额",
+    "subtotal": "合计（不含税）",
+    "pendingPrices": "部分商品价格待定，暂不能下单",
+    "checkout": "结算",
+    "deliveryDate": "送货日期",
+    "note": "备注",
+    "notePlaceholder": "例如：请上午送货",
+    "submitOrder": "提交订单",
+    "full": "购物车已满，请先提交订单或移除部分商品",
+    "badQty": "数量无效，请重新输入",
+    "success": "订单已提交，编号 {n}",
+    "errors": {
+      "NO_ACTIVE_COMPANY": "您的账号尚未激活，请联系 DADA",
+      "COMPANY_NOT_LINKED": "账号未关联 ERP，请联系 DADA",
+      "BAD_DELIVERY_DATE": "送货日期无效，请选择今天至 60 天内的日期",
+      "PRODUCT_UNAVAILABLE": "部分商品已下架，请从购物车移除",
+      "NO_PRICE": "部分商品价格待定，暂不能下单",
+      "EMPTY_ORDER": "购物车是空的",
+      "TOO_MANY_LINES": "商品种类过多，请分批下单",
+      "UNKNOWN": "提交失败，请稍后重试"
+    }
+  },
   "staff": {
     "title": "员工后台",
     "ordersQueue": "订单确认队列",
