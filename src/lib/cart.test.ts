@@ -25,6 +25,22 @@ describe("cart codec", () => {
       {},
     );
   });
+  it("drops non-uuid keys, prototype-ish ones included", () => {
+    expect(
+      parseCart(
+        '{"__proto__":1,"constructor":2,"11111111-1111-4111-8111-111111111111":2}',
+      ),
+    ).toEqual({ "11111111-1111-4111-8111-111111111111": 2 });
+  });
+  it("truncates an over-cap cookie to CART_MAX_LINES", () => {
+    const raw: Record<string, number> = {};
+    for (let i = 0; i < CART_MAX_LINES + 25; i++) {
+      raw[`00000000-0000-4000-8000-${String(i).padStart(12, "0")}`] = 1;
+    }
+    expect(Object.keys(parseCart(JSON.stringify(raw)))).toHaveLength(
+      CART_MAX_LINES,
+    );
+  });
   it("setQty adds, updates, and removes at qty<=0", () => {
     let c = setQty({}, "11111111-1111-4111-8111-111111111111", 3);
     c = setQty(c, "11111111-1111-4111-8111-111111111111", 5);

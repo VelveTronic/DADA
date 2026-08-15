@@ -53,7 +53,7 @@
     "errors": {
       "NO_ACTIVE_COMPANY": "Su cuenta todavía no está activada. Contacte con DADA.",
       "COMPANY_NOT_LINKED": "La cuenta no está vinculada al ERP. Contacte con DADA.",
-      "BAD_DELIVERY_DATE": "Fecha de entrega no válida. Elija una fecha entre hoy y 60 días.",
+      "BAD_DELIVERY_DATE": "Fecha de entrega no válida. Elija una fecha entre hoy y dentro de 60 días.",
       "PRODUCT_UNAVAILABLE": "Algún producto ya no está disponible. Quítelo del carrito.",
       "NO_PRICE": "Algún producto todavía no tiene precio. Aún no se puede enviar el pedido.",
       "EMPTY_ORDER": "El carrito está vacío.",

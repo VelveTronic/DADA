@@ -40,7 +40,7 @@
     "qty": "数量",
     "remove": "移除",
     "lineTotal": "金额",
-    "subtotal": "合计（不含税）",
+    "subtotal": "小计（不含税）",
     "pendingPrices": "部分商品价格待定，暂不能下单",
     "checkout": "结算",
     "deliveryDate": "送货日期",

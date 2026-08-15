@@ -36,6 +36,10 @@ export function parseCart(raw: string | undefined): Cart {
     if (!UUID.test(id)) continue;
     const n = typeof qty === "number" ? qty : Number.NaN;
     if (!Number.isFinite(n) || n <= 0 || n > MAX_QTY) continue;
+    // The cap is a READ-side invariant too: a hand-crafted cookie can carry
+    // hundreds of perfectly valid uuids, and no caller should ever query more
+    // lines than setQty would have let anyone write.
+    if (Object.keys(cart).length >= CART_MAX_LINES) break;
     cart[id] = Math.round(n * 1000) / 1000;
   }
   return cart;
