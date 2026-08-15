@@ -3,11 +3,13 @@
 import { useTranslations } from "next-intl";
 import { useState, type ReactNode } from "react";
 import { BTN_QUIET, FIELD_SM } from "@/components/ui";
+import { formatEuros } from "@/lib/money";
 import { useCart } from "./cart-provider";
 
 /**
- * The cart page's three per-line controls, moved onto the provider so the page
- * and the catalogue stay one cart without a navigation between them.
+ * The cart page's client leaves — its three per-line controls and its subtotal
+ * — moved onto the provider so the page and the catalogue stay one cart without
+ * a navigation between them.
  *
  * The page keeps the shape it had — an editable ABSOLUTE quantity plus an `×`,
  * not the catalogue's stepper — because a restaurant ordering 24 of something
@@ -99,6 +101,32 @@ export function CartQtyInput({
         {t("update")}
       </button>
     </form>
+  );
+}
+
+/**
+ * The order's running total, from the provider rather than from the server
+ * render — otherwise removing a line makes the row vanish while the figure
+ * below it still counts the line for another round trip, which is the one
+ * moment the page would be visibly lying about money.
+ *
+ * It is the SAME arithmetic, not a second opinion: this page hands the provider
+ * a price for exactly the lines whose `totalCents` the server resolved
+ * (orderable AND priced), and `cartSubtotalCents` sums the same rounded line
+ * totals and answers null under exactly the condition that made the server's
+ * `priceable` false. Nothing is derived here — the unit prices are the ones
+ * this render already put on screen.
+ */
+export function CartSubtotal({ locale }: { locale: string }) {
+  const { subtotalCents } = useCart();
+  return (
+    <span className="text-lg font-semibold">
+      {subtotalCents == null ? (
+        <span className="font-normal text-muted">—</span>
+      ) : (
+        formatEuros(subtotalCents, locale)
+      )}
+    </span>
   );
 }
 

@@ -56,13 +56,14 @@ export const NAV_PILL =
   "rounded-full bg-brand-soft px-2.5 py-1 text-sm text-brand-ink transition-colors hover:bg-brand hover:text-white";
 
 /**
- * The `− n +` pill: one bordered glass capsule holding two ghost buttons around
- * a tabular figure, rather than three controls floating in a table cell. Its
- * 32px squares are the row's touch targets, so they are sized here and not left
- * to the icon.
+ * The `− n +` pill: one bordered glass capsule, rather than controls floating
+ * loose in a table cell. It holds the lone `+` of an empty row just as it holds
+ * all three once there is a quantity — same capsule, more inside it — which is
+ * what lets the `+` keep focus across the 0→1 change. Its 32px squares are the
+ * row's touch targets, so they are sized here and not left to the glyph.
  */
 export const STEPPER =
-  "inline-flex h-9 items-center rounded-full border border-border bg-white/70";
+  "inline-flex h-9 items-center rounded-full border border-border bg-white/70 transition-colors focus-within:border-brand hover:border-brand";
 
 export const STEPPER_BTN =
   "inline-flex size-8 items-center justify-center rounded-full text-base leading-none transition-colors hover:text-brand-ink disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:text-ink";

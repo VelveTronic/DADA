@@ -9,8 +9,14 @@ import { useCart } from "./cart-provider";
 /**
  * The phone's bottom cart bar (TOKACHI's `cart-bar.tsx` shape): count, name,
  * subtotal, fixed above the safe area, below `lg` only and only while the cart
- * has something in it. On a phone the header's cart entry scrolls away with the
- * rest of the shell; this is the way back to the order that never does.
+ * has something in it.
+ *
+ * **It is not there because the header scrolls away** — the header is sticky
+ * and the cart count is always on it. It earns its place on two other counts:
+ * it shows the RUNNING SUBTOTAL, which the header entry never has room for and
+ * which is the number a restaurant is actually watching while it shops; and it
+ * puts the way to checkout inside thumb reach at 44px, instead of at the top
+ * corner of a phone held one-handed.
  *
  * **The subtotal is the page's own arithmetic or nothing.** The provider adds up
  * the prices the SERVER rendered on this page (`cartSubtotalCents` returns null

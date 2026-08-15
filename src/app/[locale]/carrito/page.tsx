@@ -7,6 +7,7 @@ import {
   CartLine,
   CartQtyInput,
   CartRemoveButton,
+  CartSubtotal,
 } from "@/components/cart/cart-line";
 import { BTN_PRIMARY, FIELD, GLASS_CARD } from "@/components/ui";
 import { requireCompanyUser } from "@/lib/auth/guards";
@@ -110,12 +111,15 @@ export default async function CartPage({
       return (a.product?.codart ?? "").localeCompare(b.product?.codart ?? "");
     });
 
-  let subtotalCents = 0;
-  let priceable = rows.length > 0;
-  for (const row of rows) {
-    if (row.totalCents == null) priceable = false;
-    else subtotalCents += row.totalCents;
-  }
+  // The SERVER's answer, and now only for the submit button and the banner
+  // beside it. The subtotal on screen comes from the provider (`CartSubtotal`),
+  // so it cannot lag an optimistically removed row — but whether checkout is
+  // OPEN is the one thing that must not move optimistically: a button enabled
+  // ahead of the cookie is a button that submits an order the server is about
+  // to refuse. It settles a beat later, conservatively, which is the right way
+  // round.
+  const priceable =
+    rows.length > 0 && rows.every((row) => row.totalCents != null);
 
   // Two different blockers with two different fixes: remove the line, or wait
   // for the price. The same sentence explains the banner and the dead button.
@@ -252,13 +256,7 @@ export default async function CartPage({
 
           <div className="mt-4 flex items-center justify-between px-4 sm:px-5">
             <span className="text-sm text-muted">{t("subtotal")}</span>
-            <span className="text-lg font-semibold">
-              {priceable ? (
-                formatEuros(subtotalCents, locale)
-              ) : (
-                <span className="font-normal text-muted">—</span>
-              )}
-            </span>
+            <CartSubtotal locale={locale} />
           </div>
 
           {blockedMessage && (
