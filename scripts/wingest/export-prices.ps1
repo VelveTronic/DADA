@@ -20,6 +20,12 @@ $ErrorActionPreference = "Stop"
 if ([string]::IsNullOrWhiteSpace($PW)) {
   throw 'Set $PW to the dada_bridge SQL password first: $PW = Read-Host "dada_bridge password"'
 }
+# ; and " are the connection-string delimiters: a password holding one silently
+# truncates the string and surfaces as an unexplained "Login failed". Say so
+# here instead; the fix is to single-quote the Password value below.
+if ($PW -match '[;"]') {
+  throw 'The password contains ; or ", which breaks the connection string. Quote the Password value in $conn before running.'
+}
 
 $conn = "Server=localhost,50352;User ID=dada_bridge;Password=$PW;Initial Catalog=wgdemo;Encrypt=False;TrustServerCertificate=True;Connect Timeout=15"
 $cn = New-Object System.Data.SqlClient.SqlConnection($conn)
