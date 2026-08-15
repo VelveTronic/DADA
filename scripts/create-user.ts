@@ -3,8 +3,25 @@
  * See README.md for argument forms. Requires .env.local service-role credentials.
  */
 import { readFileSync } from "node:fs";
-import { createClient } from "@supabase/supabase-js";
+import { createClient, type PostgrestError } from "@supabase/supabase-js";
 import type { Database } from "../src/lib/supabase/database.types";
+
+/**
+ * On the { data, error } path PostgREST hands back a PLAIN OBJECT, not the
+ * PostgrestError class it is typed as — that one is only constructed when
+ * throwOnError is set. So it fails `instanceof Error` and stringifies to
+ * "[object Object]"; flatten the fields an operator needs by hand instead.
+ */
+function describeDbError(error: PostgrestError): string {
+  return [
+    error.message,
+    error.code && `code ${error.code}`,
+    error.details,
+    error.hint,
+  ]
+    .filter(Boolean)
+    .join(" | ");
+}
 
 for (const line of readFileSync(".env.local", "utf8").split(/\r?\n/)) {
   const match = line.match(/^([A-Z][A-Z0-9_]*)=(.*)$/);
@@ -74,7 +91,9 @@ async function main(): Promise<void> {
         role,
         display_name: displayName,
       });
-      if (error) throw error;
+      if (error) {
+        throw new Error(`staff_users insert failed: ${describeDbError(error)}`);
+      }
       console.log(`Created staff ${email} (${role}), uid=${userId}`);
     } else {
       const { data: company, error: companyError } = await admin
@@ -82,7 +101,11 @@ async function main(): Promise<void> {
         .insert({ name: companyName!, codcli, tarcli })
         .select("id")
         .single();
-      if (companyError) throw companyError;
+      if (companyError) {
+        throw new Error(
+          `companies insert failed: ${describeDbError(companyError)}`,
+        );
+      }
       companyId = company.id;
 
       const { error } = await admin.from("portal_users").insert({
@@ -90,12 +113,32 @@ async function main(): Promise<void> {
         company_id: companyId,
         display_name: displayName,
       });
-      if (error) throw error;
+      if (error) {
+        throw new Error(`portal_users insert failed: ${describeDbError(error)}`);
+      }
       console.log(`Created customer ${email} for ${companyName}, uid=${userId}`);
     }
   } catch (error) {
-    await admin.auth.admin.deleteUser(userId);
-    if (companyId) await admin.from("companies").delete().eq("id", companyId);
+    // Roll back what we already created. A FAILED rollback is worse than the
+    // original error — it strands a half-built account only a human can clear —
+    // so name the exact orphan instead of letting the cleanup fail silently.
+    const { error: userCleanup } = await admin.auth.admin.deleteUser(userId);
+    if (userCleanup) {
+      console.error(
+        `MANUAL CLEANUP NEEDED: auth user ${userId} (${userCleanup.message})`,
+      );
+    }
+    if (companyId) {
+      const { error: companyCleanup } = await admin
+        .from("companies")
+        .delete()
+        .eq("id", companyId);
+      if (companyCleanup) {
+        console.error(
+          `MANUAL CLEANUP NEEDED: company ${companyId} (${describeDbError(companyCleanup)})`,
+        );
+      }
+    }
     throw error;
   }
 }

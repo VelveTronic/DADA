@@ -12,6 +12,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run --maxWorkers=1",
     "user:create": "tsx scripts/create-user.ts",
+    "import:freepos": "tsx scripts/import-freepos.ts",
     "db:test": "supabase test db"
   },
   "dependencies": {

@@ -37,15 +37,22 @@ in the local configuration. Create users only from a trusted workstation after
 setting `SUPABASE_SERVICE_ROLE_KEY` in `.env.local`:
 
 ```text
-pnpm user:create -- staff <email> <password> <displayName> [role]
-pnpm user:create -- customer <email> <password> <displayName> <companyName> <codcli> [tarcli]
+pnpm user:create staff <email> <password> <displayName> [role]
+pnpm user:create customer <email> <password> <displayName> <companyName> <codcli> [tarcli]
 ```
+
+Pass the arguments directly, with no `--` separator: pnpm 10 forwards script
+arguments as they are and would hand the separator itself to the script.
 
 ## Database
 
 SQL migrations in `supabase/migrations/` are the source of truth. They are
 applied to project `gudiykhngonoqsjoigza` with Supabase MCP
 `apply_migration`, never with `supabase db push`.
+
+Load the product catalog from the freepos snapshot with
+`pnpm import:freepos --dry-run` to preview counts and anomalies, then without the
+flag to write; it is idempotent by `codart` and never writes price columns.
 
 Customer catalog code reads `products_priced`. Staff access to raw price tiers
 is server-only through the service-role client after `requireStaff`. Direct

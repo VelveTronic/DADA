@@ -1,20 +1,22 @@
 /**
  * Import the freepos snapshot into public.products. Idempotent by codart.
  * NEVER writes price columns (they stay NULL until the Wingest price merge).
- * Usage: pnpm dlx tsx scripts/import-freepos.ts [--dry-run]
+ * Usage: pnpm import:freepos [--dry-run]
  * Requires .env.local: NEXT_PUBLIC_SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY.
  *
  * Scripts import library code relatively, like scripts/create-user.ts — house
  * style, not a tooling limit (tsx does resolve the "@/" alias).
  */
 import { readFileSync } from "node:fs";
-import { createClient } from "@supabase/supabase-js";
+import { createClient, type PostgrestError } from "@supabase/supabase-js";
 import { parseFreeposImportSnapshot } from "../src/lib/catalog/freepos";
 import {
   selectCurrentVariants,
   toProductRecord,
 } from "../src/lib/catalog/import";
 import type { Database } from "../src/lib/supabase/database.types";
+
+const USAGE = "Usage: pnpm import:freepos [--dry-run]";
 
 for (const line of readFileSync(".env.local", "utf8").split(/\r?\n/)) {
   const match = line.match(/^([A-Z][A-Z0-9_]*)=(.*)$/);
@@ -30,8 +32,34 @@ if (!url || !key) {
   process.exit(1);
 }
 
-const dryRun = process.argv.includes("--dry-run");
+// Fail CLOSED on anything that is not exactly --dry-run. A typo ("--dryrun")
+// must never be read as "no flag given" and silently run the REAL import.
+const args = process.argv.slice(2);
+const unknownArgs = args.filter((arg) => arg !== "--dry-run");
+if (unknownArgs.length) {
+  console.error(`Unknown argument(s): ${unknownArgs.join(" ")}`);
+  console.error(USAGE);
+  process.exit(1);
+}
+const dryRun = args.includes("--dry-run");
 const db = createClient<Database>(url, key, { auth: { persistSession: false } });
+
+/**
+ * On the { data, error } path PostgREST hands back a PLAIN OBJECT, not the
+ * PostgrestError class it is typed as — that one is only constructed when
+ * throwOnError is set. So it fails `instanceof Error` and stringifies to
+ * "[object Object]"; flatten the fields an operator needs by hand instead.
+ */
+function describeDbError(error: PostgrestError): string {
+  return [
+    error.message,
+    error.code && `code ${error.code}`,
+    error.details,
+    error.hint,
+  ]
+    .filter(Boolean)
+    .join(" | ");
+}
 
 const rows = parseFreeposImportSnapshot(
   readFileSync("data/freepos/products.json"),
@@ -42,7 +70,13 @@ for (const row of rows) {
   try {
     records.push(toProductRecord(row));
   } catch (error) {
-    anomalies.push(error instanceof Error ? error.message : String(error));
+    const message = error instanceof Error ? error.message : String(error);
+    // Name-split failures already quote the codart, tax-rate ones do not, and an
+    // anomaly an operator cannot trace back to a SKU is not actionable.
+    const codart = row["编号"]?.trim();
+    anomalies.push(
+      codart && !message.includes(codart) ? `${codart}: ${message}` : message,
+    );
   }
 }
 
@@ -58,6 +92,7 @@ const deduped = records.filter((record) => {
   seen.add(record.codart);
   return true;
 });
+// Rewrites is_current_variant on these objects in place; the return is the same array.
 selectCurrentVariants(deduped);
 
 const groups = new Set(deduped.map((record) => record.base_sku));
@@ -70,9 +105,9 @@ const report = {
   weighed: deduped.filter((record) => record.is_weighed).length,
   currents: deduped.filter((record) => record.is_current_variant).length,
 };
+// Report on stdout, anomalies on stderr: the JSON stays machine-readable alone.
 console.log(JSON.stringify(report, null, 2));
-if (anomalies.length) console.log("ANOMALIES:\n" + anomalies.join("\n"));
-if (dryRun) process.exit(0);
+if (anomalies.length) console.error("ANOMALIES:\n" + anomalies.join("\n"));
 
 // Two-phase write honoring the partial unique index products_one_current_variant:
 // phase 1 upserts every record with is_current_variant=false (whole groups demoted),
@@ -81,6 +116,7 @@ const CHUNK = 500;
 async function upsertChunk(
   chunk: typeof deduped,
   demote: boolean,
+  offset: number,
 ): Promise<void> {
   // unit, units_per_case and erp_synced_at are deliberately ABSENT, like the
   // price columns: on first insert the DB defaults give unit='UNIDAD' and NULLs
@@ -99,7 +135,14 @@ async function upsertChunk(
   const { error } = await db
     .from("products")
     .upsert(payload, { onConflict: "codart" });
-  if (error) throw new Error(`upsert failed: ${error.message}`);
+  // Name the phase and the rows: deciding whether a re-run is safe depends on
+  // knowing how far the write got.
+  if (error) {
+    throw new Error(
+      `${demote ? "demote" : "promote"} phase failed on rows ` +
+        `${offset}-${offset + chunk.length - 1}: ${describeDbError(error)}`,
+    );
+  }
 }
 
 /**
@@ -109,20 +152,28 @@ async function upsertChunk(
  */
 async function importAll(): Promise<void> {
   for (let i = 0; i < deduped.length; i += CHUNK) {
-    await upsertChunk(deduped.slice(i, i + CHUNK), true);
+    await upsertChunk(deduped.slice(i, i + CHUNK), true, i);
   }
   const winners = deduped.filter((record) => record.is_current_variant);
   for (let i = 0; i < winners.length; i += CHUNK) {
-    await upsertChunk(winners.slice(i, i + CHUNK), false);
+    await upsertChunk(winners.slice(i, i + CHUNK), false, i);
   }
 
-  const { count } = await db
+  const { count, error } = await db
     .from("products")
     .select("*", { count: "exact", head: true });
+  // A failed verification must not read as a successful import of null rows.
+  if (error) {
+    throw new Error(`verification count failed: ${describeDbError(error)}`);
+  }
   console.log(`products table now holds ${count} rows`);
 }
 
-importAll().catch((error: unknown) => {
-  console.error(error instanceof Error ? error.message : String(error));
-  process.exit(1);
-});
+// Guarded rather than an early process.exit(0): on Windows an explicit exit can
+// cut off piped stdout before the report above has flushed.
+if (!dryRun) {
+  importAll().catch((error: unknown) => {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exit(1);
+  });
+}
