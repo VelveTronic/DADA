@@ -116,7 +116,8 @@ const CHUNK = 500;
 async function upsertChunk(
   chunk: typeof deduped,
   demote: boolean,
-  offset: number,
+  chunkIndex: number,
+  chunkCount: number,
 ): Promise<void> {
   // unit, units_per_case and erp_synced_at are deliberately ABSENT, like the
   // price columns: on first insert the DB defaults give unit='UNIDAD' and NULLs
@@ -135,12 +136,16 @@ async function upsertChunk(
   const { error } = await db
     .from("products")
     .upsert(payload, { onConflict: "codart" });
-  // Name the phase and the rows: deciding whether a re-run is safe depends on
-  // knowing how far the write got.
+  // Name the phase and the codarts: deciding whether a re-run is safe depends on
+  // knowing how far the write got, and a codart range is checkable straight
+  // against the snapshot and the table. A row index would not be — the two phases
+  // walk different arrays (every record when demoting, the winners alone when
+  // promoting), so the same number means a different row in each.
   if (error) {
     throw new Error(
-      `${demote ? "demote" : "promote"} phase failed on rows ` +
-        `${offset}-${offset + chunk.length - 1}: ${describeDbError(error)}`,
+      `${demote ? "demote" : "promote"} phase failed on codarts ` +
+        `${chunk[0].codart}..${chunk[chunk.length - 1].codart} ` +
+        `(chunk ${chunkIndex}/${chunkCount}): ${describeDbError(error)}`,
     );
   }
 }
@@ -151,12 +156,24 @@ async function upsertChunk(
  * it is a transform-time error, so bare `await` here would break even --dry-run.
  */
 async function importAll(): Promise<void> {
+  const demoteChunks = Math.ceil(deduped.length / CHUNK);
   for (let i = 0; i < deduped.length; i += CHUNK) {
-    await upsertChunk(deduped.slice(i, i + CHUNK), true, i);
+    await upsertChunk(
+      deduped.slice(i, i + CHUNK),
+      true,
+      i / CHUNK + 1,
+      demoteChunks,
+    );
   }
   const winners = deduped.filter((record) => record.is_current_variant);
+  const promoteChunks = Math.ceil(winners.length / CHUNK);
   for (let i = 0; i < winners.length; i += CHUNK) {
-    await upsertChunk(winners.slice(i, i + CHUNK), false, i);
+    await upsertChunk(
+      winners.slice(i, i + CHUNK),
+      false,
+      i / CHUNK + 1,
+      promoteChunks,
+    );
   }
 
   const { count, error } = await db

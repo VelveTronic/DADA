@@ -53,6 +53,12 @@ applied to project `gudiykhngonoqsjoigza` with Supabase MCP
 Load the product catalog from the freepos snapshot with
 `pnpm import:freepos --dry-run` to preview counts and anomalies, then without the
 flag to write; it is idempotent by `codart` and never writes price columns.
+The count report is JSON on stdout and the anomalies go to stderr, so piping the
+report needs pnpm's `--silent` to keep its lifecycle banner out of the pipe:
+
+```text
+pnpm --silent import:freepos --dry-run | jq .anomalies
+```
 
 Customer catalog code reads `products_priced`. Staff access to raw price tiers
 is server-only through the service-role client after `requireStaff`. Direct
