@@ -99,6 +99,7 @@ export default async function CatalogPage({
         <input
           name="q"
           defaultValue={q}
+          aria-label={t("searchPlaceholder")}
           placeholder={t("searchPlaceholder")}
           className="w-full rounded border px-3 py-2"
         />
@@ -145,22 +146,27 @@ export default async function CatalogPage({
                 className={`flex items-center gap-3 py-3 ${p.is_available ? "" : "opacity-45"}`}
               >
                 <div className="min-w-0 flex-1">
+                  {/* Only the name truncates. Badges live on the wrapping meta
+                      line below, where a long name can never clip them out of
+                      view on a narrow phone. */}
                   <p className="truncate font-medium">
                     {localizedName(p.name, locale)}
+                  </p>
+                  <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-gray-500">
+                    <span>
+                      {p.codart} · {p.unit}
+                    </span>
                     {p.is_weighed && (
-                      <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-xs text-amber-800">
+                      <span className="rounded bg-amber-100 px-1.5 py-0.5 text-amber-800">
                         {t("weighed")}
                       </span>
                     )}
                     {!p.is_available && (
-                      <span className="ml-2 rounded bg-gray-200 px-1.5 py-0.5 text-xs text-gray-600">
+                      <span className="rounded bg-gray-200 px-1.5 py-0.5 text-gray-600">
                         {t("unavailable")}
                       </span>
                     )}
-                  </p>
-                  <p className="text-xs text-gray-500">
-                    {p.codart} · {p.unit}
-                  </p>
+                  </div>
                 </div>
                 <p className="w-24 text-right text-sm font-semibold">
                   {p.price_cents != null ? (
