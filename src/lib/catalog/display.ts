@@ -4,6 +4,7 @@
 export function localizedName(name: unknown, locale: string): string {
   if (!name || typeof name !== "object" || Array.isArray(name)) return "";
   const n = name as Record<string, unknown>;
+  // {"zh": null} is DB-legal: products_name_shape checks key existence only.
   const zh = typeof n.zh === "string" ? n.zh : null;
   const es = typeof n.es === "string" ? n.es : null;
   return (locale === "zh" ? (zh ?? es) : (es ?? zh)) ?? "";

@@ -16,6 +16,12 @@ describe("localizedName", () => {
     expect(localizedName({ fr: "RIZ" } as unknown, "zh")).toBe("");
     expect(localizedName(["ARROZ"] as unknown, "zh")).toBe("");
   });
+  it("falls back when a present key holds a json null", () => {
+    expect(localizedName({ zh: null, es: "ARROZ" }, "zh")).toBe("ARROZ");
+  });
+  it("ignores non-string values", () => {
+    expect(localizedName({ zh: 123 } as unknown, "zh")).toBe("");
+  });
 });
 
 describe("sanitizeSearch", () => {
@@ -24,6 +30,9 @@ describe("sanitizeSearch", () => {
   });
   it("caps length at 40", () => {
     expect(sanitizeSearch("a".repeat(60))).toHaveLength(40);
+  });
+  it("strips ilike wildcards and escapes", () => {
+    expect(sanitizeSearch("a*b.c\\d")).toBe("a b c d");
   });
   it("returns empty for whitespace-only", () => {
     expect(sanitizeSearch("   ")).toBe("");
