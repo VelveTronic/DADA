@@ -234,6 +234,8 @@ export type Database = {
       orders: {
         Row: {
           albaran_at: string | null
+          bridge_claim_token: string | null
+          bridge_claimed_at: string | null
           client_token: string | null
           company_id: string
           confirmed_at: string | null
@@ -246,6 +248,7 @@ export type Database = {
           numped: number | null
           order_number: number
           placed_by: string | null
+          request_hash: string | null
           staff_note: string | null
           status: string
           subtotal_cents: number
@@ -253,6 +256,8 @@ export type Database = {
         }
         Insert: {
           albaran_at?: string | null
+          bridge_claim_token?: string | null
+          bridge_claimed_at?: string | null
           client_token?: string | null
           company_id: string
           confirmed_at?: string | null
@@ -265,6 +270,7 @@ export type Database = {
           numped?: number | null
           order_number?: number
           placed_by?: string | null
+          request_hash?: string | null
           staff_note?: string | null
           status?: string
           subtotal_cents?: number
@@ -272,6 +278,8 @@ export type Database = {
         }
         Update: {
           albaran_at?: string | null
+          bridge_claim_token?: string | null
+          bridge_claimed_at?: string | null
           client_token?: string | null
           company_id?: string
           confirmed_at?: string | null
@@ -284,6 +292,7 @@ export type Database = {
           numped?: number | null
           order_number?: number
           placed_by?: string | null
+          request_hash?: string | null
           staff_note?: string | null
           status?: string
           subtotal_cents?: number
@@ -497,13 +506,20 @@ export type Database = {
       }
     }
     Functions: {
-      bridge_fetch_confirmed: { Args: never; Returns: Json }
+      bridge_claim_confirmed: {
+        Args: {
+          p_claim_token: string
+          p_lease_seconds?: number
+          p_limit?: number
+        }
+        Returns: Json
+      }
       bridge_mark_albaran: {
         Args: { p_numalb: number; p_order_id: string }
         Returns: boolean
       }
       bridge_mark_injected: {
-        Args: { p_numped: number; p_order_id: string }
+        Args: { p_claim_token: string; p_numped: number; p_order_id: string }
         Returns: boolean
       }
       create_order: {
@@ -515,14 +531,20 @@ export type Database = {
         }
         Returns: Json
       }
-      is_staff: { Args: never; Returns: boolean }
-      my_company_id: { Args: never; Returns: string }
       price_cents_for: {
         Args: {
           p: Database["public"]["Tables"]["products"]["Row"]
           tier: number
         }
         Returns: number
+      }
+      staff_cancel_order: {
+        Args: { p_order_id: string; p_reason?: string }
+        Returns: boolean
+      }
+      staff_confirm_order: {
+        Args: { p_order_id: string; p_staff_note?: string }
+        Returns: boolean
       }
     }
     Enums: {

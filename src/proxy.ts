@@ -58,7 +58,9 @@ type PendingCookie = Parameters<SetAllCookies>[0][number];
  */
 export default async function proxy(request: NextRequest): Promise<NextResponse> {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  const supabaseKey =
+    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ??
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
   if (!supabaseUrl || !supabaseKey || !hasAuthCookie(request)) {
     return intl(request);
   }
@@ -89,15 +91,10 @@ export default async function proxy(request: NextRequest): Promise<NextResponse>
   // refresh, and the cookies it produces have to exist before any response is
   // built (`CookieMethodsServer.setAll` docblock).
   //
-  // `getSession()`, not `getUser()`: both run the same `__loadSession()` — read
-  // the cookies, and if the access token is inside its expiry margin, POST
-  // `/token?grant_type=refresh_token` and save — which IS the refresh. `getUser()`
-  // is that plus an unconditional `GET /auth/v1/user` round trip to validate the
-  // token, and the result is discarded here either way. This proxy refreshes, it
-  // does not authorise: every authorisation decision re-asks with its own
-  // validated `auth.getUser()` via `src/lib/auth/session.ts`, so a session
-  // revoked elsewhere is still refused there, on the same request.
-  await supabase.auth.getSession();
+  // Supabase's SSR guidance requires getClaims(): unlike getSession(), it
+  // validates the JWT signature and still performs the required cookie refresh.
+  // Authorization remains in the data-access guards, close to each data read.
+  await supabase.auth.getClaims();
 
   const response = intl(request);
 
@@ -119,7 +116,7 @@ export default async function proxy(request: NextRequest): Promise<NextResponse>
  * chunks when it is long, and `…-code-verifier` mid-PKCE) — every one of them
  * `sb-` prefixed. No such cookie ⇒ no session ⇒ nothing to refresh.
  */
-function hasAuthCookie(request: NextRequest): boolean {
+export function hasAuthCookie(request: NextRequest): boolean {
   return request.cookies.getAll().some(({ name }) => name.startsWith("sb-"));
 }
 

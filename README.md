@@ -1,36 +1,69 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# DADA Portal
 
-## Getting Started
+Bilingual (中文/Español) B2B ordering portal for DADA Distribución. Restaurant
+customers see company-specific prices and place orders; staff confirm them and
+an outbound on-premises bridge transfers confirmed orders into Wingest.
 
-First, run the development server:
+## Stack
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+Next.js 16 App Router, React 19, TypeScript, Supabase Postgres/Auth, next-intl,
+Tailwind CSS, Vitest and pgTAP.
+
+## Local development
+
+1. Install Node.js 22 and pnpm 10.15.0.
+2. Run `pnpm install`.
+3. Copy `.env.example` to `.env.local` and fill server-only secrets when needed.
+4. Run `pnpm dev`.
+
+Before opening a pull request, run:
+
+```text
+pnpm lint
+pnpm typecheck
+pnpm test
+pnpm build
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+The CI workflow runs the same application gate. It also starts an isolated local
+Supabase Postgres instance, replays every migration, and runs the database
+contract suite.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Authentication and users
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+The portal has two mutually exclusive user mappings: restaurant users in
+`portal_users` and internal users in `staff_users`. Public signup is disabled
+in the local configuration. Create users only from a trusted workstation after
+setting `SUPABASE_SERVICE_ROLE_KEY` in `.env.local`:
 
-## Learn More
+```text
+pnpm user:create -- staff <email> <password> <displayName> [role]
+pnpm user:create -- customer <email> <password> <displayName> <companyName> <codcli> [tarcli]
+```
 
-To learn more about Next.js, take a look at the following resources:
+## Database
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+SQL migrations in `supabase/migrations/` are the source of truth. They are
+applied to project `gudiykhngonoqsjoigza` with Supabase MCP
+`apply_migration`, never with `supabase db push`.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Customer catalog code reads `products_priced`. Staff access to raw price tiers
+is server-only through the service-role client after `requireStaff`. Direct
+authenticated updates to orders, price tiers and internal notes are denied;
+order creation and staff state changes use the dedicated RPCs.
 
-## Deploy on Vercel
+With Docker running, reproduce the database and run all 36 authorization and
+order/bridge contract assertions:
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+```text
+pnpm exec supabase db start
+pnpm db:test
+```
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+The bridge contract is lease-based: `bridge_claim_confirmed` moves claimed
+orders to `processing`; `bridge_mark_injected` accepts only the same claim
+token, and all mark functions return `false` when the expected transition did
+not occur.
+
+See `CLAUDE.md` for domain invariants and `docs/superpowers/plans/` for
+delivery plans.

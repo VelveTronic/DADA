@@ -2,6 +2,7 @@
 
 import { createBrowserClient } from "@supabase/ssr";
 import type { Database } from "./database.types";
+import { getSupabasePublicEnv } from "./env";
 
 /**
  * Supabase client for Client Components. `createBrowserClient` stores the
@@ -9,8 +10,6 @@ import type { Database } from "./database.types";
  * and the server clients see the same session.
  */
 export function createClient() {
-  return createBrowserClient<Database>(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-  );
+  const { url, key } = getSupabasePublicEnv();
+  return createBrowserClient<Database>(url, key);
 }
