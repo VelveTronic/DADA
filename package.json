@@ -13,6 +13,7 @@
     "test": "vitest run --maxWorkers=1",
     "user:create": "tsx scripts/create-user.ts",
     "import:freepos": "tsx scripts/import-freepos.ts",
+    "import:wingest-prices": "tsx scripts/import-wingest-prices.ts",
     "db:test": "supabase test db"
   },
   "dependencies": {

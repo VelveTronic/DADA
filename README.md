@@ -60,6 +60,12 @@ report needs pnpm's `--silent` to keep its lifecycle banner out of the pipe:
 pnpm --silent import:freepos --dry-run | jq .anomalies
 ```
 
+Real prices and units arrive separately: the owner runs
+`scripts/wingest/export-prices.ps1` on the ERP server (one read-only SELECT) and
+`pnpm import:wingest-prices <prices.csv> [--dry-run]` merges the resulting CSV
+into `products` by `codart`, turning zero tiers into NULL and deriving
+`is_weighed` from the `KG` unit.
+
 Customer catalog code reads `products_priced`. Staff access to raw price tiers
 is server-only through the service-role client after `requireStaff`. Direct
 authenticated updates to orders, price tiers and internal notes are denied;
