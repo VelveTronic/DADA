@@ -14,6 +14,22 @@
     "errorInactive": "Cuenta inactiva. Contacte con DADA."
   },
   "nav": { "catalog": "Catálogo", "orders": "Mis pedidos", "staff": "Panel interno" },
-  "catalog": { "title": "Catálogo", "empty": "Catálogo en preparación" },
+  "catalog": {
+    "title": "Catálogo",
+    "empty": "Catálogo en preparación",
+    "searchPlaceholder": "Buscar por nombre o código…",
+    "searchButton": "Buscar",
+    "tabAll": "Todos",
+    "tabFavorites": "Mis favoritos",
+    "noResults": "Sin resultados",
+    "unavailable": "Agotado",
+    "weighed": "Por peso",
+    "noPrice": "Precio pendiente",
+    "favAdd": "Guardar",
+    "favRemove": "Quitar",
+    "prev": "Anterior",
+    "next": "Siguiente",
+    "pageOf": "Página {page} de {total}"
+  },
   "staff": { "title": "Panel interno", "ordersQueue": "Cola de confirmación de pedidos" }
 }

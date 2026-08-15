@@ -14,6 +14,22 @@
     "errorInactive": "账号未激活，请联系 DADA"
   },
   "nav": { "catalog": "商品目录", "orders": "我的订单", "staff": "员工后台" },
-  "catalog": { "title": "商品目录", "empty": "目录准备中" },
+  "catalog": {
+    "title": "商品目录",
+    "empty": "目录准备中",
+    "searchPlaceholder": "搜索商品名或编号…",
+    "searchButton": "搜索",
+    "tabAll": "全部商品",
+    "tabFavorites": "我的收藏",
+    "noResults": "没有匹配的商品",
+    "unavailable": "断货",
+    "weighed": "称重",
+    "noPrice": "价格待定",
+    "favAdd": "收藏",
+    "favRemove": "取消收藏",
+    "prev": "上一页",
+    "next": "下一页",
+    "pageOf": "第 {page} 页 / 共 {total} 页"
+  },
   "staff": { "title": "员工后台", "ordersQueue": "订单确认队列" }
 }
