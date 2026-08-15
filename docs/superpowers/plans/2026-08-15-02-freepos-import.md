@@ -332,8 +332,10 @@ for (const row of rows) {
     anomalies.push(e instanceof Error ? e.message : String(e));
   }
 }
-selectCurrentVariants(records);
 
+// Dedupe BEFORE variant selection: a duplicate codart that survives into
+// selectCurrentVariants could win a group and then be dropped here, leaving the
+// group with zero currents (the DB partial unique index only catches too-many).
 const seen = new Set<string>();
 const deduped = records.filter((r) => {
   if (seen.has(r.codart)) {
@@ -343,6 +345,7 @@ const deduped = records.filter((r) => {
   seen.add(r.codart);
   return true;
 });
+selectCurrentVariants(deduped);
 
 const groups = new Set(deduped.map((r) => r.base_sku));
 const report = {

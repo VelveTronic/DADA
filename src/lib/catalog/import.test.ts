@@ -81,6 +81,17 @@ describe("splitBilingualName", () => {
     });
   });
 
+  it("sends a leading letterless token to es", () => {
+    expect(splitBilingualName("() 冰鲜鲈鱼 LUBINA FRESCA 8/10 C/10KG (火锅店专用)")).toEqual({
+      zh: "冰鲜鲈鱼 (火锅店专用)",
+      es: "() LUBINA FRESCA 8/10 C/10KG",
+    });
+    expect(splitBilingualName("15191 PLATO LARGO 凯旋长条盘25cm 密胺")).toEqual({
+      zh: "凯旋长条盘25cm 密胺",
+      es: "15191 PLATO LARGO",
+    });
+  });
+
   it("empty in, empty out", () => {
     expect(splitBilingualName("   ")).toEqual({ zh: null, es: null });
   });
@@ -168,8 +179,7 @@ describe("toProductRecord", () => {
 
   it("prices are NEVER emitted from freepos", () => {
     const p = toProductRecord({ ...base, 售价: "3.50" });
-    expect(p).not.toHaveProperty("price_1_cents");
-    expect(p).not.toHaveProperty("price_6_cents");
+    expect(Object.keys(p).filter((k) => /cent|price|precio/i.test(k))).toEqual([]);
   });
 
   it("iva normalizes fraction to percent", () => {
@@ -204,6 +214,14 @@ describe("toProductRecord", () => {
     expect(() => toProductRecord({ ...base, 编号: "  " })).toThrow(/product number/);
     expect(() => toProductRecord({ ...base, 名称: "  " })).toThrow(/name is required/);
     expect(() => toProductRecord({ ...base, 名称: "断货-" })).toThrow(/Unsplittable/);
+  });
+
+  it("rejects a punctuation-only name instead of importing it", () => {
+    // H-54514, H-21905, H-34808, H-35012 and H-34608 are all named ".".
+    expect(() => toProductRecord({ ...base, 编号: "H-34808", 名称: "." })).toThrow(
+      "Unsplittable Freepos name for H-34808: .",
+    );
+    expect(() => toProductRecord({ ...base, 名称: "- / -" })).toThrow(/Unsplittable/);
   });
 });
 
@@ -271,6 +289,16 @@ describe("selectCurrentVariants", () => {
     expect([...groups.keys()].sort()).toEqual(["A6-092", "V-001"]);
     expect([...groups.values()].every((n) => n === 1)).toBe(true);
     expect(out.find((p) => p.codart === "A6-092A")!.is_current_variant).toBe(true);
+  });
+
+  it("mutates the passed products in place and returns the same array", () => {
+    const stale = mk("A9-465A", false);
+    const winner = mk("A9-465B", true);
+    const input = [stale, winner];
+    const out = selectCurrentVariants(input);
+    expect(out).toBe(input);
+    expect(stale.is_current_variant).toBe(false);
+    expect(winner.is_current_variant).toBe(true);
   });
 
   it("survives a duplicated codart with a single current", () => {

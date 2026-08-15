@@ -2,11 +2,12 @@
  * Ground the bilingual name-split rule in the real snapshot.
  * Usage: pnpm dlx tsx scripts/analyze-freepos-names.ts  (read-only, no DB)
  *
- * Scripts import library code relatively (like scripts/create-user.ts): the
- * standalone tsx runner does not resolve the "@/" tsconfig alias.
+ * Scripts import library code relatively, like scripts/create-user.ts — house
+ * style, not a tooling limit (tsx does resolve the "@/" alias).
  */
 import { readFileSync } from "node:fs";
 import { parseFreeposImportSnapshot } from "../src/lib/catalog/freepos";
+import { UNAVAILABLE_PREFIX } from "../src/lib/catalog/import";
 
 const rows = parseFreeposImportSnapshot(readFileSync("data/freepos/products.json"));
 const CJK = /[\u3400-\u4dbf\u4e00-\u9fff]/;
@@ -39,11 +40,11 @@ function runs(name: string): { lang: "zh" | "es"; text: string }[] {
   return out.map((run) => ({ ...run, text: run.text.trim() }));
 }
 
-/** Every prefix shape freepos uses to mark a product dead, with its exact text. */
-const UNAVAILABLE_PREFIX =
-  /^[(（]?\s*(?:断货|取消|停产)\s*[)）]?\s*[-–—:：]?\s*/;
+/** Exact text of every KNOWN dead-marker shape (the importer's own regex). */
 const prefixes = new Map<string, number>();
 const name2Values: string[] = [];
+/** Radar for markers we do not know yet: leading zh token of unmarked names. */
+const unmarkedHeads = new Map<string, number>();
 
 for (const row of rows) {
   const name = (row["名称"] ?? "").trim();
@@ -53,7 +54,14 @@ for (const row of rows) {
   }
   if (/^断货/.test(name)) duanhuo++;
   const prefix = name.match(UNAVAILABLE_PREFIX)?.[0];
-  if (prefix) prefixes.set(prefix, (prefixes.get(prefix) ?? 0) + 1);
+  if (prefix) {
+    prefixes.set(prefix, (prefixes.get(prefix) ?? 0) + 1);
+  } else {
+    const head = name.replace(/\s+/g, " ").split(" ")[0];
+    if (head && CJK.test(head)) {
+      unmarkedHeads.set(head, (unmarkedHeads.get(head) ?? 0) + 1);
+    }
+  }
   const hasCjk = CJK.test(name);
   const hasLatin = LATIN.test(name);
   if (hasCjk && hasLatin) {
@@ -74,13 +82,24 @@ for (const row of rows) {
 
 console.log({ total: rows.length, both, zhOnly, esOnly, name2, duanhuo });
 
-console.log("\n--- unavailable name prefixes (availability lives here, not in the 断货 column) ---");
+console.log("\n--- KNOWN unavailable name prefixes (availability lives here, not in the 断货 column) ---");
+console.log("(duanhuo above counts only bare /^断货/; TOTAL adds the bracketed, 取消 and 停产 shapes)");
 let unavailable = 0;
 for (const [prefix, count] of [...prefixes.entries()].sort((a, b) => b[1] - a[1])) {
   unavailable += count;
   console.log(`${String(count).padStart(4)}  ${JSON.stringify(prefix)}`);
 }
 console.log(`${String(unavailable).padStart(4)}  TOTAL`);
+
+console.log("\n--- new-marker radar: repeated zh leading token of UNMARKED names ---");
+console.log("(scan for anything that reads like a status word; real product heads are noise)");
+const radar = [...unmarkedHeads.entries()]
+  .filter(([, count]) => count >= 2)
+  .sort((a, b) => b[1] - a[1]);
+for (const [head, count] of radar.slice(0, 25)) {
+  console.log(`${String(count).padStart(4)}  ${JSON.stringify(head)}`);
+}
+console.log(`(${radar.length} repeated zh heads in total)`);
 
 console.log("\n--- 名称2 values (is it a second name?) ---");
 console.log(name2Values.join("\n") || "(none)");

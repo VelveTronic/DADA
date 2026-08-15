@@ -5,8 +5,13 @@ const CJK = /[\u3400-\u4dbf\u4e00-\u9fff]/;
 const LATIN = /[A-Za-z]/;
 /** Separators that only ever glued the two language segments together. */
 const EDGE_SEPARATORS = /^[\s\-–—:：·,，/|]+|[\s\-–—:：·,，/|]+$/g;
-/** Freepos marks a product dead by prefixing its name: 断货 / (断货) / 取消 / 停产. */
-const UNAVAILABLE_PREFIX =
+/**
+ * Freepos marks a product dead by prefixing its name: 断货 / (断货) / 取消 / 停产.
+ * This is the only availability signal in the snapshot: the 断货 column is "0"
+ * and the 需称重 / App隐藏 columns are NULL on all 2976 rows, so the name prefix
+ * carries it by design. Exported so the analysis script scans the same shapes.
+ */
+export const UNAVAILABLE_PREFIX =
   /^[(（]?\s*(?:断货|取消|停产)\s*[)）]?\s*[-–—:：]?\s*/;
 
 export interface BilingualName {
@@ -27,7 +32,9 @@ function joinSegment(tokens: string[]): string | null {
  * KILO"), so a head/tail rule cannot work. Split per whitespace token instead:
  * a token holding any CJK character belongs to zh (sizes and latin fragments
  * glued inside it, "咖喱角10/1.2KG", stay with zh), any other token holding a
- * latin letter belongs to es, and a token with neither follows its predecessor.
+ * latin letter belongs to es, and a token with neither follows its predecessor
+ * ("15191 PLATO LARGO 凯旋长条盘25cm 密胺"). A name that opens on such a token
+ * has no predecessor, so the seed sends it to es, the more common head language.
  * Each side keeps its original order; separators left at an edge are trimmed.
  */
 export function splitBilingualName(raw: string): BilingualName {
@@ -36,6 +43,8 @@ export function splitBilingualName(raw: string): BilingualName {
 
   const zh: string[] = [];
   const es: string[] = [];
+  // Seed: a leading token with no letters at all has nothing to follow, so it
+  // joins es — Spanish opens 1791 of the 2419 mixed names.
   let previous: NameLanguage = "es";
   for (const token of cleaned.split(" ")) {
     // Annotated: without it the assignment below makes the inference circular.
@@ -95,13 +104,16 @@ export function toProductRecord(row: FreeposImportRow): ImportedProduct {
   const rawName = (row["名称"] ?? "").trim();
   if (!rawName) throw new Error(`Freepos name is required for ${codart}`);
   const unavailableByName = UNAVAILABLE_PREFIX.test(rawName);
-  const { zh, es } = splitBilingualName(rawName.replace(UNAVAILABLE_PREFIX, ""));
+  const stripped = rawName.replace(UNAVAILABLE_PREFIX, "");
+  // Punctuation alone is not a name: 5 rows are literally named ".". Reject them
+  // here so they surface as import anomalies instead of unlabelable catalog rows.
+  if (!CJK.test(stripped) && !LATIN.test(stripped)) {
+    throw new Error(`Unsplittable Freepos name for ${codart}: ${rawName}`);
+  }
+  const { zh, es } = splitBilingualName(stripped);
   const name: { zh?: string; es?: string } = {};
   if (zh) name.zh = zh;
   if (es) name.es = es;
-  if (!name.zh && !name.es) {
-    throw new Error(`Unsplittable Freepos name for ${codart}: ${rawName}`);
-  }
 
   return {
     codart,
@@ -119,7 +131,10 @@ export function toProductRecord(row: FreeposImportRow): ImportedProduct {
 /**
  * Exactly one current variant per base_sku:
  * available beats unavailable → suffixless beats suffixed → lowest suffix wins.
- * Deterministic and total; ties cannot survive.
+ * On an exact tie (equal availability and suffix, which means a duplicated
+ * codart) the first occurrence in the input wins, so the result never depends
+ * on sort stability. MUTATES is_current_variant on the passed objects in place
+ * and returns the same array, not a copy.
  */
 export function selectCurrentVariants(
   products: ImportedProduct[],
