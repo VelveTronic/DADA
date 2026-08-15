@@ -38,7 +38,10 @@
     "cartLink": "Carrito ({n})",
     "empty": "El carrito está vacío",
     "qty": "Cantidad",
+    "qtyFor": "Cantidad: {name}",
+    "update": "Actualizar",
     "remove": "Quitar",
+    "removeFor": "Quitar: {name}",
     "lineTotal": "Importe",
     "subtotal": "Subtotal (sin IVA)",
     "pendingPrices": "Algunos productos aún no tienen precio. Todavía no se puede enviar el pedido.",
@@ -58,6 +61,9 @@
       "NO_PRICE": "Algún producto todavía no tiene precio. Aún no se puede enviar el pedido.",
       "EMPTY_ORDER": "El carrito está vacío.",
       "TOO_MANY_LINES": "Demasiadas líneas en el pedido. Divídalo en varios pedidos.",
+      "BAD_QTY": "Alguna cantidad no es válida. Revise las cantidades del carrito.",
+      "BAD_QTY_STEP": "Este producto solo se pide en unidades enteras. Corrija la cantidad.",
+      "NOTE_TOO_LONG": "Las observaciones son demasiado largas. Máximo 2000 caracteres.",
       "UNKNOWN": "No se ha podido enviar el pedido. Inténtelo de nuevo."
     }
   },

@@ -38,7 +38,10 @@
     "cartLink": "购物车（{n}）",
     "empty": "购物车是空的",
     "qty": "数量",
+    "qtyFor": "数量：{name}",
+    "update": "更新",
     "remove": "移除",
+    "removeFor": "移除：{name}",
     "lineTotal": "金额",
     "subtotal": "小计（不含税）",
     "pendingPrices": "部分商品价格待定，暂不能下单",
@@ -58,6 +61,9 @@
       "NO_PRICE": "部分商品价格待定，暂不能下单",
       "EMPTY_ORDER": "购物车是空的",
       "TOO_MANY_LINES": "商品种类过多，请分批下单",
+      "BAD_QTY": "数量无效，请检查购物车中的数量",
+      "BAD_QTY_STEP": "该商品只能按整数下单，请修改数量",
+      "NOTE_TOO_LONG": "备注过长，请精简到 2000 字以内",
       "UNKNOWN": "提交失败，请稍后重试"
     }
   },
