@@ -15,7 +15,16 @@
     "errorInvalid": "Correo o contraseña incorrectos",
     "errorInactive": "Cuenta inactiva. Contacte con DADA."
   },
-  "nav": { "catalog": "Catálogo", "orders": "Mis pedidos", "staff": "Panel interno" },
+  "nav": {
+    "catalog": "Catálogo",
+    "orders": "Mis pedidos",
+    "staff": "Panel interno",
+    "shop": "Tienda",
+    "search": "Buscar",
+    "account": "Mi cuenta",
+    "addresses": "Mi dirección de entrega",
+    "profile": "Mis datos"
+  },
   "catalog": {
     "title": "Catálogo",
     "empty": "Catálogo en preparación",
@@ -88,6 +97,43 @@
       "injected": "En ERP",
       "albaran": "Albarán",
       "cancelled": "Cancelado"
+    }
+  },
+  "addresses": {
+    "title": "Mi dirección de entrega",
+    "cardTitle": "Dirección de entrega",
+    "company": "Restaurante",
+    "street": "Dirección",
+    "city": "Población",
+    "postal": "Código postal",
+    "phone": "Teléfono de contacto",
+    "note": "Para modificarla, contacte con DADA",
+    "empty": "Todavía no tenemos su dirección de entrega. Contacte con DADA para añadirla."
+  },
+  "profile": {
+    "title": "Mis datos",
+    "accountTitle": "Datos de la cuenta",
+    "email": "Correo electrónico",
+    "emailHint": "El correo no se puede cambiar aquí. Para cambiarlo, contacte con DADA.",
+    "company": "Restaurante",
+    "displayName": "Nombre visible",
+    "displayNameHint": "El nombre que aparece en la parte superior de la página.",
+    "save": "Guardar",
+    "passwordTitle": "Cambiar la contraseña",
+    "currentPassword": "Contraseña actual",
+    "newPassword": "Contraseña nueva",
+    "confirmPassword": "Repita la contraseña nueva",
+    "passwordHint": "Mínimo 8 caracteres, máximo 72 bytes",
+    "changePassword": "Cambiar la contraseña",
+    "results": {
+      "ok": "Guardado",
+      "BAD_NAME": "El nombre visible no puede estar vacío y admite 80 caracteres como máximo.",
+      "BAD_PASSWORD": "La contraseña nueva no es válida: mínimo 8 caracteres y máximo 72 bytes.",
+      "PASSWORD_MISMATCH": "Las dos contraseñas nuevas no coinciden.",
+      "SAME_PASSWORD": "La contraseña nueva debe ser distinta de la actual.",
+      "WRONG_PASSWORD": "La contraseña actual no es correcta.",
+      "AUTH_ERROR": "No se ha podido cambiar la contraseña. Inténtelo de nuevo.",
+      "DB_ERROR": "No se ha podido guardar. Inténtelo de nuevo."
     }
   },
   "staff": {

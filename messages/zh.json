@@ -15,7 +15,16 @@
     "errorInvalid": "邮箱或密码不正确",
     "errorInactive": "账号未激活，请联系 DADA"
   },
-  "nav": { "catalog": "商品目录", "orders": "我的订单", "staff": "员工后台" },
+  "nav": {
+    "catalog": "商品目录",
+    "orders": "我的订单",
+    "staff": "员工后台",
+    "shop": "商店",
+    "search": "搜索",
+    "account": "我的账号",
+    "addresses": "我的配送地址",
+    "profile": "我的信息"
+  },
   "catalog": {
     "title": "商品目录",
     "empty": "目录准备中",
@@ -88,6 +97,43 @@
       "injected": "已进ERP",
       "albaran": "已出单",
       "cancelled": "已取消"
+    }
+  },
+  "addresses": {
+    "title": "我的配送地址",
+    "cardTitle": "送货地址",
+    "company": "餐厅名称",
+    "street": "街道地址",
+    "city": "城市",
+    "postal": "邮编",
+    "phone": "联系电话",
+    "note": "地址有误请联系我们修改",
+    "empty": "我们还没有登记您的送货地址，请联系 DADA 补充。"
+  },
+  "profile": {
+    "title": "我的信息",
+    "accountTitle": "账号信息",
+    "email": "邮箱",
+    "emailHint": "邮箱不能自行修改，如需更换请联系 DADA。",
+    "company": "所属餐厅",
+    "displayName": "显示名称",
+    "displayNameHint": "显示在页面右上角的名称。",
+    "save": "保存",
+    "passwordTitle": "修改密码",
+    "currentPassword": "当前密码",
+    "newPassword": "新密码",
+    "confirmPassword": "确认新密码",
+    "passwordHint": "至少 8 位，最长 72 字节（约 24 个汉字）",
+    "changePassword": "修改密码",
+    "results": {
+      "ok": "已保存",
+      "BAD_NAME": "显示名称不能为空，且不超过 80 个字符",
+      "BAD_PASSWORD": "新密码不符合要求：至少 8 位，最长 72 字节（约 24 个汉字）",
+      "PASSWORD_MISMATCH": "两次输入的新密码不一致",
+      "SAME_PASSWORD": "新密码不能与当前密码相同",
+      "WRONG_PASSWORD": "当前密码不正确",
+      "AUTH_ERROR": "修改失败，请稍后重试",
+      "DB_ERROR": "保存失败，请稍后重试"
     }
   },
   "staff": {

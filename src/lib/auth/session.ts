@@ -14,6 +14,13 @@ import { createServerSupabase } from "@/lib/supabase/server";
  * A missing session is normal and deliberately quiet. Unexpected Auth or
  * configuration failures are logged so an outage cannot masquerade as logout.
  * React cache deduplicates the check within one render pass.
+ *
+ * `email` rides along on the same validated claim set for the two places that
+ * need it: 我的信息 prints it, and the password change re-authenticates with it.
+ * That second use is the reason it comes from HERE and never from a form field —
+ * `signInWithPassword` against an address the browser supplied would let a
+ * crafted POST test somebody else's password. It is `null` for any session whose
+ * token carries no email claim, and the callers refuse rather than guess.
  */
 export const getSessionUser = cache(async () => {
   try {
@@ -26,7 +33,9 @@ export const getSessionUser = cache(async () => {
       return null;
     }
     const id = data?.claims?.sub;
-    return typeof id === "string" ? { id } : null;
+    if (typeof id !== "string") return null;
+    const email = data?.claims?.email;
+    return { id, email: typeof email === "string" ? email : null };
   } catch (e) {
     console.error("getSessionUser:", e);
     return null;

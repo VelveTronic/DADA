@@ -30,6 +30,7 @@ export default async function CatalogPage({
     tab?: string;
     page?: string;
     cat?: string;
+    focus?: string;
   }>;
 }) {
   const { locale } = await params;
@@ -38,6 +39,7 @@ export default async function CatalogPage({
     tab: rawTab,
     page: rawPage,
     cat: rawCat,
+    focus: rawFocus,
   } = await searchParams;
   setRequestLocale(locale);
   const { portalUser } = await requireCompanyUser(locale);
@@ -46,6 +48,14 @@ export default async function CatalogPage({
   const q = sanitizeSearch(rawQ ?? "");
   const tab = rawTab === "favoritos" ? "favoritos" : "all";
   const page = Math.max(1, Number.parseInt(rawPage ?? "1", 10) || 1);
+  // What the header's 搜索 icon links to (`?focus=search`). The whole feature is
+  // this boolean and the `autoFocus` below: React DOM renders the real
+  // `autofocus` attribute server-side, so the browser puts the caret in the box
+  // as it parses the page — no client component, no effect, no second search UI
+  // to keep in step with this one. Compared strictly, so nothing else in the
+  // parameter's value can turn it on, and it is deliberately NOT carried by
+  // `href()`: it belongs to the one navigation that asked for it.
+  const focusSearch = rawFocus === "search";
 
   const supabase = await createServerSupabase();
 
@@ -189,6 +199,9 @@ export default async function CatalogPage({
         <input
           name="q"
           defaultValue={q}
+          // False on every ordinary catalogue load: focus is only stolen when
+          // the customer pressed 搜索 and asked for exactly this box.
+          autoFocus={focusSearch}
           aria-label={t("searchPlaceholder")}
           placeholder={t("searchPlaceholder")}
           className={`w-full ${FIELD}`}

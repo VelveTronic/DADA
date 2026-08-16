@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ORDER_ERROR_KEYS, ORDER_STATUSES } from "@/lib/orders";
+import { PROFILE_ERRORS } from "@/lib/profile";
 import { SETTINGS_ERRORS } from "@/lib/settings";
 import { STAFF_ROLES, USER_ADMIN_ERRORS } from "@/lib/user-admin";
 import es from "../../messages/es.json";
@@ -60,6 +61,21 @@ describe("translations", () => {
     for (const key of [...SETTINGS_ERRORS, "ok"]) {
       expect(zhResults[key], `zh staff.settings.results.${key}`).toBeTypeOf("string");
       expect(esResults[key], `es staff.settings.results.${key}`).toBeTypeOf("string");
+    }
+  });
+
+  /**
+   * `updateDisplayName` and `changePassword` redirect with `?name=<CODE>` /
+   * `?pwd=<CODE>` and `/perfil` draws `profile.results.<CODE>` off whichever
+   * arrived. A code with no message here reaches a restaurant as the raw
+   * SCREAMING_SNAKE token in the middle of changing their own password.
+   */
+  it("carries a profile.results message for every profile outcome", () => {
+    const zhResults: Record<string, string> = zh.profile.results;
+    const esResults: Record<string, string> = es.profile.results;
+    for (const key of [...PROFILE_ERRORS, "ok"]) {
+      expect(zhResults[key], `zh profile.results.${key}`).toBeTypeOf("string");
+      expect(esResults[key], `es profile.results.${key}`).toBeTypeOf("string");
     }
   });
 

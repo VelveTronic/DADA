@@ -5,8 +5,8 @@ import Image from "next/image";
 import Link from "next/link";
 import { signOut } from "@/app/actions/auth";
 import { CartBar } from "@/components/cart/cart-bar";
-import { CartNavLink } from "@/components/cart/cart-nav-link";
 import { CartErrorBanner, CartProvider } from "@/components/cart/cart-provider";
+import { StorefrontNav } from "@/components/storefront-nav";
 import { NAV_LINK } from "@/components/ui";
 import { CART_COOKIE, parseCart } from "@/lib/cart";
 import { canManageStaff, canManageUsers } from "@/lib/user-admin";
@@ -30,13 +30,20 @@ type ShellUser = { name: string; role?: string | null };
  *
  * Each page used to hand-roll its own title row, its own back link and its own
  * logout form, which is why the brand mark, the app name and the way out now
- * live here exactly once. The two variants differ only in where the brand mark
- * points and which links follow it:
+ * live here exactly once. The two variants no longer merely differ in their
+ * links — they are two different headers:
  *
- * - `customer` — catalogue, order history, cart (with its line count)
- * - `staff` — confirmation queue, product management
+ * - `customer` — the DADA mark and four ICONS (商店, 搜索, 购物车, 用户), the
+ *   last of which opens the account menu that now holds 我的订单 and the way
+ *   out. The word 订货平台 is gone from it: a storefront header carries the
+ *   BRAND, and the app's full name still names the browser tab (`common.appName`
+ *   in `layout.tsx`) and titles the login page.
+ * - `staff` — unchanged: the same text nav, the same identity caption, the same
+ *   logout button. Plan 09 Task 3 replaces this half with a sidebar, and moving
+ *   it twice would be moving it once too often.
  *
- * Server component: the only interactive thing IT renders is the logout form.
+ * Server component: the only interactive thing IT renders is the staff logout
+ * form; the storefront's icon row is one client leaf (`StorefrontNav`).
  * The customer variant additionally wraps the page in `CartProvider` and hands
  * the cart's three client leaves — the header count, the refusal banner and the
  * phone's bottom bar — the cookie it just read. Staff pages mount none of it:
@@ -79,7 +86,6 @@ export async function AppShell({
   children: React.ReactNode;
 }) {
   const tc = await getTranslations("common");
-  const tNav = await getTranslations("nav");
   const tStaff = await getTranslations("staff");
 
   const home = nav === "staff" ? `/${locale}/staff` : `/${locale}/catalogo`;
@@ -89,11 +95,8 @@ export async function AppShell({
     ? parseCart((await cookies()).get(CART_COOKIE)?.value)
     : {};
 
-  const links: NavLink[] = customer
-    ? [
-        { href: `/${locale}/catalogo`, label: tNav("catalog") },
-        { href: `/${locale}/pedidos`, label: tNav("orders") },
-      ]
+  const staffLinks: NavLink[] = customer
+    ? []
     : [
         { href: `/${locale}/staff/pedidos`, label: tStaff("ordersQueue") },
         { href: `/${locale}/staff/productos`, label: tStaff("products") },
@@ -111,52 +114,75 @@ export async function AppShell({
           : []),
       ];
 
+  /* Sized by CSS in its own square aspect; the width/height pair is only the
+     intrinsic ratio, so a new export of the mark drops in with no code change.
+     `sizes` is what keeps the optimizer from shipping a 1080px source for a
+     28px mark. */
+  const mark = (
+    <Image
+      src="/brand/dada-logo.png"
+      alt="DADA"
+      width={512}
+      height={512}
+      sizes="28px"
+      className="h-7 w-7"
+    />
+  );
+
   const shell = (
     <>
       <header className="sticky top-0 z-40 border-b border-border bg-background/85 backdrop-blur-[14px]">
-        <div className="mx-auto flex max-w-5xl flex-wrap items-center gap-x-5 gap-y-2 px-4 py-3">
-          <Link href={home} className="flex items-center gap-2">
-            {/* Sized by CSS in its own square aspect; the width/height pair is
-                only the intrinsic ratio, so a new export of the mark drops in
-                with no code change. `sizes` is what keeps the optimizer from
-                shipping a 1080px source for a 28px mark. */}
-            <Image
-              src="/brand/dada-logo.png"
-              alt="DADA"
-              width={512}
-              height={512}
-              sizes="28px"
-              className="h-7 w-7"
-            />
-            <span className="font-semibold tracking-tight">
-              {tc("appName")}
-            </span>
-          </Link>
+        {customer ? (
+          // One row that never wraps: mark on the left, icons pinned right. No
+          // `flex-wrap` here on purpose — four 44px targets and a wordmark fit
+          // inside 375px, and a wrapping header would push the catalogue down a
+          // line on exactly the phones this layout is for.
+          <div className="mx-auto flex max-w-5xl items-center gap-3 px-4 py-2">
+            <Link
+              href={home}
+              className="flex items-center gap-2 transition-colors hover:text-brand-ink"
+            >
+              {mark}
+              {/* The BRAND, not the app name. `alt="DADA"` above says the same
+                  word, so the mark is decorative beside it — but an empty alt
+                  would make the link's whole name depend on this span, and it
+                  is the one thing here that could be styled away. */}
+              <span className="text-lg font-semibold tracking-tight">DADA</span>
+            </Link>
 
-          <nav className="flex flex-wrap items-center gap-x-5 gap-y-1">
-            {links.map((link) => (
-              <Link key={link.href} href={link.href} className={NAV_LINK}>
-                {link.label}
-              </Link>
-            ))}
-            {/* Same label and same count as before, now read from the provider
-                so a `+` on the catalogue ticks it without a navigation. */}
-            {customer && <CartNavLink locale={locale} />}
-          </nav>
-
-          <div className="ml-auto flex items-center gap-4">
-            <span className="max-w-[12rem] truncate text-xs text-muted">
-              {user.name}
-              {user.role ? ` · ${user.role}` : ""}
-            </span>
-            <form action={signOut}>
-              <input type="hidden" name="locale" value={locale} />
-              <button type="submit" className={NAV_LINK}>
-                {tc("logout")}
-              </button>
-            </form>
+            <StorefrontNav locale={locale} userName={user.name} />
           </div>
-        </div>
+        ) : (
+          <div className="mx-auto flex max-w-5xl flex-wrap items-center gap-x-5 gap-y-2 px-4 py-3">
+            <Link href={home} className="flex items-center gap-2">
+              {mark}
+              <span className="font-semibold tracking-tight">
+                {tc("appName")}
+              </span>
+            </Link>
+
+            <nav className="flex flex-wrap items-center gap-x-5 gap-y-1">
+              {staffLinks.map((link) => (
+                <Link key={link.href} href={link.href} className={NAV_LINK}>
+                  {link.label}
+                </Link>
+              ))}
+            </nav>
+
+            <div className="ml-auto flex items-center gap-4">
+              <span className="max-w-[12rem] truncate text-xs text-muted">
+                {user.name}
+                {user.role ? ` · ${user.role}` : ""}
+              </span>
+              <form action={signOut}>
+                <input type="hidden" name="locale" value={locale} />
+                <button type="submit" className={NAV_LINK}>
+                  {tc("logout")}
+                </button>
+              </form>
+            </div>
+          </div>
+        )}
       </header>
 
       <main className="mx-auto max-w-5xl px-4 pb-16">

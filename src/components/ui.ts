@@ -56,6 +56,25 @@ export const NAV_PILL =
   "rounded-full bg-brand-soft px-2.5 py-1 text-sm text-brand-ink transition-colors hover:bg-brand hover:text-white";
 
 /**
+ * A storefront header icon — the shop, the search, the cart and the account
+ * menu, whether the control under it is a link or a button.
+ *
+ * `size-11` is 44px, the touch target Apple and WCAG 2.5.5 both ask for, and it
+ * is the reason the box is so much larger than the 24px glyph inside it: on a
+ * phone these four sit in a row at the top corner of the screen, thumbed by
+ * somebody holding a delivery note in the other hand. `relative` is here for the
+ * cart's count badge, which is positioned against this box.
+ *
+ * The glyph is drawn with `stroke="currentColor"` (see `icons.tsx`), so the
+ * colour rules below reach it without the icon knowing anything about state.
+ */
+export const ICON_BTN =
+  "relative inline-flex size-11 shrink-0 items-center justify-center rounded-full text-ink transition-colors hover:bg-brand-soft hover:text-brand-ink focus-visible:bg-brand-soft focus-visible:text-brand-ink";
+
+/** The same control on the page it points at: the one accent, held. */
+export const ICON_BTN_ACTIVE = `${ICON_BTN} bg-brand-soft text-brand-ink`;
+
+/**
  * The `− n +` pill: one bordered glass capsule, rather than controls floating
  * loose in a table cell. It holds the lone `+` of an empty row just as it holds
  * all three once there is a quantity — same capsule, more inside it — which is
