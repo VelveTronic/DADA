@@ -71,7 +71,7 @@ export function useCart(): CartContextValue {
   const value = useContext(CartContext);
   if (!value) {
     throw new Error(
-      "useCart must be used inside <CartProvider> (mounted by AppShell for nav=customer)",
+      "useCart must be used inside <CartProvider> (mounted by AppShell, the customer shell)",
     );
   }
   return value;

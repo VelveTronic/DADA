@@ -2,8 +2,8 @@ import type { Locale } from "next-intl";
 import { getTranslations, setRequestLocale } from "next-intl/server";
 import Link from "next/link";
 import { cancelOrder, confirmOrder } from "@/app/actions/staff-orders";
-import { AppShell } from "@/components/app-shell";
 import { OrderStatusBadge } from "@/components/order-status-badge";
+import { StaffShell } from "@/components/staff-shell";
 import { FIELD_SM, GLASS_CARD } from "@/components/ui";
 import { requireStaff } from "@/lib/auth/guards";
 import { localizedName, unitLabel } from "@/lib/catalog/display";
@@ -119,18 +119,15 @@ export default async function StaffOrdersPage({
   };
 
   return (
-    <AppShell
+    <StaffShell
       locale={locale}
-      nav="staff"
+      title={t("ordersQueue")}
+      breadcrumb={t("nav.orders")}
       user={{
         name: staffUser.display_name ?? staffUser.id,
         role: staffUser.role,
       }}
     >
-      <h1 className="mt-8 text-2xl font-bold tracking-tight">
-        {t("ordersQueue")}
-      </h1>
-
       {rpcResult && (
         <p
           role={rpcResult === "ok" ? "status" : "alert"}
@@ -181,7 +178,13 @@ export default async function StaffOrdersPage({
             // shows the order and leaves out the controls that cannot work.
             const actionable = order.status === "submitted";
             return (
-              <li key={order.id} className="py-3">
+              // The queue is read by scanning down it, so the row answers the
+              // pointer the way an admin table does. `-mx-2 px-2` is what lets
+              // the tint reach past the text column instead of stopping at it.
+              <li
+                key={order.id}
+                className="-mx-2 rounded-lg px-2 py-3 transition-colors hover:bg-white/50"
+              >
                 <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
                   <p className="font-medium">
                     {tOrders("orderNumber", { n: order.order_number })}
@@ -194,7 +197,10 @@ export default async function StaffOrdersPage({
                     {order.companies?.codcli != null &&
                       ` · ${order.companies.codcli}`}
                   </span>
-                  <p className="ml-auto text-right font-semibold">
+                  {/* Money is right-aligned and `tabular-nums` down the whole
+                      queue, so the euro columns line up digit under digit the
+                      way they do on the albarán being checked against it. */}
+                  <p className="ml-auto text-right font-semibold tabular-nums">
                     <span className="sr-only">{tCart("subtotal")}: </span>
                     {formatEuros(order.subtotal_cents, locale)}
                   </p>
@@ -253,14 +259,14 @@ export default async function StaffOrdersPage({
                             on the line — so `qty x this = line_total_cents`
                             exactly, and the row reads the way a staff member
                             checking an albarán needs it to. */}
-                        <span className="text-xs text-muted">
+                        <span className="text-xs text-muted tabular-nums">
                           {line.qty} {unitLabel(line.unit, line.units_per_case)} ×{" "}
                           {formatEuros(
                             line.units_per_case * line.unit_price_cents,
                             locale,
                           )}
                         </span>
-                        <span className="w-20 text-right">
+                        <span className="w-20 text-right tabular-nums">
                           {formatEuros(line.line_total_cents, locale)}
                         </span>
                       </li>
@@ -333,6 +339,6 @@ export default async function StaffOrdersPage({
           })}
         </ul>
       )}
-    </AppShell>
+    </StaffShell>
   );
 }

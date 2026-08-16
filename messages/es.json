@@ -16,9 +16,7 @@
     "errorInactive": "Cuenta inactiva. Contacte con DADA."
   },
   "nav": {
-    "catalog": "Catálogo",
     "orders": "Mis pedidos",
-    "staff": "Panel interno",
     "shop": "Tienda",
     "search": "Buscar",
     "account": "Mi cuenta",
@@ -138,6 +136,19 @@
   },
   "staff": {
     "title": "Panel interno",
+    "nav": {
+      "home": "Inicio",
+      "orders": "Pedidos",
+      "products": "Productos",
+      "users": "Usuarios",
+      "settings": "Ajustes"
+    },
+    "shell": {
+      "nav": "Navegación del panel",
+      "breadcrumb": "Ruta de navegación",
+      "openMenu": "Abrir el menú",
+      "closeMenu": "Cerrar el menú"
+    },
     "ordersQueue": "Cola de confirmación de pedidos",
     "tabSubmitted": "Pendientes",
     "tabConfirmed": "Confirmados",
@@ -156,7 +167,6 @@
     "rpcOk": "Operación realizada",
     "rpcWrongState": "El pedido ya no estaba en ese estado. No se ha cambiado nada; actualice la página.",
     "rpcFailed": "No se ha podido completar la operación. Inténtelo de nuevo.",
-    "products": "Productos",
     "productsTitle": "Gestión de productos",
     "searchPlaceholder": "Buscar código o nombre…",
     "colProduct": "Producto",
@@ -170,8 +180,6 @@
     "current": "Variante actual",
     "makeCurrent": "Hacer actual",
     "variantGroup": "Grupo {base} ({n})",
-    "usersAdmin": "Usuarios",
-    "settingsAdmin": "Ajustes",
     "users": {
       "title": "Gestión de usuarios",
       "customersTitle": "Cuentas de cliente",

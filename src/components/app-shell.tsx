@@ -1,53 +1,33 @@
 import type { Locale } from "next-intl";
-import { getTranslations } from "next-intl/server";
 import { cookies } from "next/headers";
 import Image from "next/image";
 import Link from "next/link";
-import { signOut } from "@/app/actions/auth";
 import { CartBar } from "@/components/cart/cart-bar";
 import { CartErrorBanner, CartProvider } from "@/components/cart/cart-provider";
 import { StorefrontNav } from "@/components/storefront-nav";
-import { NAV_LINK } from "@/components/ui";
 import { CART_COOKIE, parseCart } from "@/lib/cart";
-import { canManageStaff, canManageUsers } from "@/lib/user-admin";
-
-type NavLink = { href: string; label: string };
 
 /**
- * Who is signed in. `role` is the staff member's `staff_users.role`; customers
- * have none — the restaurant's own name is already the whole label.
- *
- * It arrives as the ROLE rather than as a pre-formatted caption because the
- * shell now asks it a question as well as printing it: whether this staff
- * member sees 用户管理 in the nav. One field, one source — a page cannot show
- * the link while captioning a different role. `user-admin` is a pure module
- * with no imports, so a Server Component may hold it as safely as a lib.
- */
-type ShellUser = { name: string; role?: string | null };
-
-/**
- * The sticky glass header plus the page's `<main>`, for every signed-in page.
+ * The storefront's sticky glass header plus the page's `<main>`, for every
+ * signed-in CUSTOMER page.
  *
  * Each page used to hand-roll its own title row, its own back link and its own
  * logout form, which is why the brand mark, the app name and the way out now
- * live here exactly once. The two variants no longer merely differ in their
- * links — they are two different headers:
+ * live here exactly once.
  *
- * - `customer` — the DADA mark and four ICONS (商店, 搜索, 购物车, 用户), the
- *   last of which opens the account menu that now holds 我的订单 and the way
- *   out. The word 订货平台 is gone from it: a storefront header carries the
- *   BRAND, and the app's full name still names the browser tab (`common.appName`
- *   in `layout.tsx`) and titles the login page.
- * - `staff` — unchanged: the same text nav, the same identity caption, the same
- *   logout button. Plan 09 Task 3 replaces this half with a sidebar, and moving
- *   it twice would be moving it once too often.
+ * It used to serve the staff pages too, behind a `nav` prop, and it no longer
+ * does: the two halves had stopped sharing anything but the `<main>` element.
+ * Staff pages render `StaffShell` — a persistent left sidebar — and this file
+ * kept only the half it is actually about: the DADA mark and four ICONS
+ * (商店, 搜索, 购物车, 用户), the last of which opens the account menu that holds
+ * 我的订单 and the way out. The word 订货平台 is gone from it: a storefront
+ * header carries the BRAND, and the app's full name still names the browser tab
+ * (`common.appName` in `layout.tsx`) and titles the login page.
  *
- * Server component: the only interactive thing IT renders is the staff logout
- * form; the storefront's icon row is one client leaf (`StorefrontNav`).
- * The customer variant additionally wraps the page in `CartProvider` and hands
- * the cart's three client leaves — the header count, the refusal banner and the
- * phone's bottom bar — the cookie it just read. Staff pages mount none of it:
- * there is no cart in that half of the portal, so there is no reason to ship it.
+ * Server component: nothing it renders itself is interactive; the icon row is
+ * one client leaf (`StorefrontNav`). It wraps the page in `CartProvider` and
+ * hands the cart's three client leaves — the header count, the refusal banner
+ * and the phone's bottom bar — the cookie it just read.
  *
  * A page may READ the cart cookie; only the cart server actions write it. The
  * read below seeds the provider, and it is the reason every page under this
@@ -55,15 +35,14 @@ type ShellUser = { name: string; role?: string | null };
  */
 export async function AppShell({
   locale,
-  nav,
   user,
   cartPrices,
   showPrices = true,
   children,
 }: {
   locale: Locale;
-  nav: "customer" | "staff";
-  user: ShellUser;
+  /** The restaurant's own name — it is already the whole label. */
+  user: { name: string };
   /**
    * Price of one CAJA in cents for the products THIS page rendered, keyed by
    * product id — the mobile bar's only source of money, and the unit the cart's
@@ -77,129 +56,57 @@ export async function AppShell({
    * bar needs it here — every other amount is rendered by the page itself, which
    * simply omits the markup.
    *
-   * Defaults to TRUE, and that default is the fail-open rule again rather than
-   * convenience: staff pages pass nothing (they have no cart bar and always show
-   * prices), and a customer page that somehow forgot to pass it shows prices, as
-   * it did before this setting existed.
+   * Defaults to TRUE, and that default is the fail-open rule rather than
+   * convenience: a page that somehow forgot to pass it shows prices, as it did
+   * before this setting existed.
    */
   showPrices?: boolean;
   children: React.ReactNode;
 }) {
-  const tc = await getTranslations("common");
-  const tStaff = await getTranslations("staff");
+  const cart = parseCart((await cookies()).get(CART_COOKIE)?.value);
 
-  const home = nav === "staff" ? `/${locale}/staff` : `/${locale}/catalogo`;
-  const customer = nav === "customer";
-
-  const cart = customer
-    ? parseCart((await cookies()).get(CART_COOKIE)?.value)
-    : {};
-
-  const staffLinks: NavLink[] = customer
-    ? []
-    : [
-        { href: `/${locale}/staff/pedidos`, label: tStaff("ordersQueue") },
-        { href: `/${locale}/staff/productos`, label: tStaff("products") },
-        // Manager and owner only. Hiding it is a courtesy, not the gate: the
-        // page re-checks with `requireStaff` + `canManageUsers` and so does
-        // every action behind it, because a nav array cannot stop a POST.
-        ...(canManageUsers(user.role)
-          ? [{ href: `/${locale}/staff/usuarios`, label: tStaff("usersAdmin") }]
-          : []),
-        // Owner only — 项目设置 changes what EVERY restaurant sees, so it is the
-        // narrower of the two gates. Same courtesy/gate split as above: the page
-        // redirects a manager back to /staff and `updateSetting` throws.
-        ...(canManageStaff(user.role)
-          ? [{ href: `/${locale}/staff/ajustes`, label: tStaff("settingsAdmin") }]
-          : []),
-      ];
-
-  /* Sized by CSS in its own square aspect; the width/height pair is only the
-     intrinsic ratio, so a new export of the mark drops in with no code change.
-     `sizes` is what keeps the optimizer from shipping a 1080px source for a
-     28px mark. */
-  const mark = (
-    <Image
-      src="/brand/dada-logo.png"
-      alt="DADA"
-      width={512}
-      height={512}
-      sizes="28px"
-      className="h-7 w-7"
-    />
-  );
-
-  const shell = (
-    <>
+  return (
+    <CartProvider cart={cart} prices={cartPrices ?? {}}>
       <header className="sticky top-0 z-40 border-b border-border bg-background/85 backdrop-blur-[14px]">
-        {customer ? (
-          // One row that never wraps: mark on the left, icons pinned right. No
-          // `flex-wrap` here on purpose — four 44px targets and a wordmark fit
-          // inside 375px, and a wrapping header would push the catalogue down a
-          // line on exactly the phones this layout is for.
-          <div className="mx-auto flex max-w-5xl items-center gap-3 px-4 py-2">
-            <Link
-              href={home}
-              className="flex items-center gap-2 transition-colors hover:text-brand-ink"
-            >
-              {mark}
-              {/* The BRAND, not the app name. `alt="DADA"` above says the same
-                  word, so the mark is decorative beside it — but an empty alt
-                  would make the link's whole name depend on this span, and it
-                  is the one thing here that could be styled away. */}
-              <span className="text-lg font-semibold tracking-tight">DADA</span>
-            </Link>
+        {/* One row that never wraps: mark on the left, icons pinned right. No
+            `flex-wrap` here on purpose — four 44px targets and a wordmark fit
+            inside 375px, and a wrapping header would push the catalogue down a
+            line on exactly the phones this layout is for. */}
+        <div className="mx-auto flex max-w-5xl items-center gap-3 px-4 py-2">
+          <Link
+            href={`/${locale}/catalogo`}
+            className="flex items-center gap-2 transition-colors hover:text-brand-ink"
+          >
+            {/* Sized by CSS in its own square aspect; the width/height pair is
+                only the intrinsic ratio, so a new export of the mark drops in
+                with no code change. `sizes` is what keeps the optimizer from
+                shipping a 1080px source for a 28px mark. */}
+            <Image
+              src="/brand/dada-logo.png"
+              alt="DADA"
+              width={512}
+              height={512}
+              sizes="28px"
+              className="h-7 w-7"
+            />
+            {/* The BRAND, not the app name. `alt="DADA"` above says the same
+                word, so the mark is decorative beside it — but an empty alt
+                would make the link's whole name depend on this span, and it
+                is the one thing here that could be styled away. */}
+            <span className="text-lg font-semibold tracking-tight">DADA</span>
+          </Link>
 
-            <StorefrontNav locale={locale} userName={user.name} />
-          </div>
-        ) : (
-          <div className="mx-auto flex max-w-5xl flex-wrap items-center gap-x-5 gap-y-2 px-4 py-3">
-            <Link href={home} className="flex items-center gap-2">
-              {mark}
-              <span className="font-semibold tracking-tight">
-                {tc("appName")}
-              </span>
-            </Link>
-
-            <nav className="flex flex-wrap items-center gap-x-5 gap-y-1">
-              {staffLinks.map((link) => (
-                <Link key={link.href} href={link.href} className={NAV_LINK}>
-                  {link.label}
-                </Link>
-              ))}
-            </nav>
-
-            <div className="ml-auto flex items-center gap-4">
-              <span className="max-w-[12rem] truncate text-xs text-muted">
-                {user.name}
-                {user.role ? ` · ${user.role}` : ""}
-              </span>
-              <form action={signOut}>
-                <input type="hidden" name="locale" value={locale} />
-                <button type="submit" className={NAV_LINK}>
-                  {tc("logout")}
-                </button>
-              </form>
-            </div>
-          </div>
-        )}
+          <StorefrontNav locale={locale} userName={user.name} />
+        </div>
       </header>
 
       <main className="mx-auto max-w-5xl px-4 pb-16">
         {/* Where the `?cartError` banner used to land after a redirect. Same
             copy, same red, no round trip to get here. */}
-        {customer && <CartErrorBanner />}
+        <CartErrorBanner />
         {children}
-        {customer && <CartBar locale={locale} showPrices={showPrices} />}
+        <CartBar locale={locale} showPrices={showPrices} />
       </main>
-    </>
-  );
-
-  if (!customer) return shell;
-
-  return (
-    <CartProvider cart={cart} prices={cartPrices ?? {}}>
-      {shell}
     </CartProvider>
   );
 }

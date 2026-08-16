@@ -5,8 +5,8 @@ import {
   setCurrentVariant,
   setProductAvailability,
 } from "@/app/actions/staff-products";
-import { AppShell } from "@/components/app-shell";
 import { ProductThumb } from "@/components/product-thumb";
+import { StaffShell } from "@/components/staff-shell";
 import { BTN_PRIMARY, BTN_QUIET, FIELD, GLASS_CARD } from "@/components/ui";
 import { requireStaff } from "@/lib/auth/guards";
 import { localizedName, sanitizeSearch, unitLabel } from "@/lib/catalog/display";
@@ -112,18 +112,15 @@ export default async function StaffProductsPage({
   };
 
   return (
-    <AppShell
+    <StaffShell
       locale={locale}
-      nav="staff"
+      title={t("productsTitle")}
+      breadcrumb={t("nav.products")}
       user={{
         name: staffUser.display_name ?? staffUser.id,
         role: staffUser.role,
       }}
     >
-      <h1 className="mt-8 text-2xl font-bold tracking-tight">
-        {t("productsTitle")}
-      </h1>
-
       <form method="get" className="mt-4 flex gap-2">
         <input
           name="q"
@@ -149,13 +146,18 @@ export default async function StaffProductsPage({
         <div className={`${GLASS_CARD} mt-4 overflow-x-auto p-4 sm:p-5`}>
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-border text-left text-xs text-muted">
-                <th className="py-2">{t("colProduct")}</th>
-                <th>{t("colFlags")}</th>
-                <th>{t("colPrices")}</th>
+              {/* Headers step BACK: small, muted and unbolded, so the weight in
+                  the table belongs to the product names under them. */}
+              <tr className="border-b border-border text-left text-xs font-medium text-muted">
+                <th className="py-2 font-medium">{t("colProduct")}</th>
+                <th className="py-2 font-medium">{t("colFlags")}</th>
+                {/* A count, so it is aligned as one — with its column. */}
+                <th className="py-2 text-right font-medium">
+                  {t("colPrices")}
+                </th>
                 {/* Named for screen readers, blank on screen: the column holds
                     only buttons, which label themselves. */}
-                <th>
+                <th className="py-2 font-medium">
                   <span className="sr-only">{t("colActions")}</span>
                 </th>
               </tr>
@@ -167,7 +169,9 @@ export default async function StaffProductsPage({
                 return (
                   <tr
                     key={p.id}
-                    className={`align-top ${p.is_available ? "" : "opacity-50"}`}
+                    className={`align-top transition-colors hover:bg-white/50 ${
+                      p.is_available ? "" : "opacity-50"
+                    }`}
                   >
                     <td className="py-2">
                       {/* The row is align-top, so the thumbnail sits with the
@@ -225,7 +229,9 @@ export default async function StaffProductsPage({
                         )}
                       </div>
                     </td>
-                    <td className="py-2">{pricedTiers(p)}/6</td>
+                    <td className="py-2 text-right tabular-nums">
+                      {pricedTiers(p)}/6
+                    </td>
                     <td className="py-2 text-right">
                       <div className="flex justify-end gap-2">
                         <form action={setProductAvailability}>
@@ -295,6 +301,6 @@ export default async function StaffProductsPage({
           )}
         </nav>
       )}
-    </AppShell>
+    </StaffShell>
   );
 }

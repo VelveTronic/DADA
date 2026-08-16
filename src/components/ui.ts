@@ -39,21 +39,18 @@ export const BTN_QUIET =
   "rounded-lg border border-border bg-white/70 px-2 py-1 text-xs transition-colors hover:border-brand hover:text-brand-ink";
 
 /**
- * A shell nav entry, and the logout button that sits beside them.
+ * A quiet shell link: small, muted, brand-ink on hover. Today the staff
+ * breadcrumb's root crumb.
  *
- * These two live here rather than in `app-shell.tsx` because the cart entry is
- * now a CLIENT leaf (it counts a cart that changes without a navigation) and
- * the shell around it is a Server Component that reads `next/headers` — the one
+ * It lives here rather than in a shell file because both halves of the portal
+ * are built from client leaves (the cart entry counts a cart that changes
+ * without a navigation) and Server Components that read `next/headers` — the one
  * import a client component must never inherit. This module is the shared,
  * import-free vocabulary both halves can hold, which is exactly why it has no
  * imports of its own.
  */
 export const NAV_LINK =
   "text-sm text-muted transition-colors hover:text-brand-ink";
-
-/** The same entry once it has something to say — today, a non-empty cart. */
-export const NAV_PILL =
-  "rounded-full bg-brand-soft px-2.5 py-1 text-sm text-brand-ink transition-colors hover:bg-brand hover:text-white";
 
 /**
  * A storefront header icon — the shop, the search, the cart and the account
@@ -67,12 +64,23 @@ export const NAV_PILL =
  *
  * The glyph is drawn with `stroke="currentColor"` (see `icons.tsx`), so the
  * colour rules below reach it without the icon knowing anything about state.
+ *
+ * The resting INK is not in the shared half, and that is load-bearing. Two plain
+ * colour utilities on one element (`text-ink text-brand-ink`) are not resolved by
+ * the order they are written in — both are one-class selectors, so the winner is
+ * whichever Tailwind emitted last, and it was `text-ink`. Appending the accent to
+ * the base string therefore produced an "active" control that was tinted but
+ * still ink-coloured. Each state names its own colour exactly once instead.
+ * (`hover:`/`focus-visible:` are safe either way: a pseudo-class outranks a bare
+ * one.)
  */
-export const ICON_BTN =
-  "relative inline-flex size-11 shrink-0 items-center justify-center rounded-full text-ink transition-colors hover:bg-brand-soft hover:text-brand-ink focus-visible:bg-brand-soft focus-visible:text-brand-ink";
+const ICON_BTN_BASE =
+  "relative inline-flex size-11 shrink-0 items-center justify-center rounded-full transition-colors hover:bg-brand-soft hover:text-brand-ink focus-visible:bg-brand-soft focus-visible:text-brand-ink";
+
+export const ICON_BTN = `${ICON_BTN_BASE} text-ink`;
 
 /** The same control on the page it points at: the one accent, held. */
-export const ICON_BTN_ACTIVE = `${ICON_BTN} bg-brand-soft text-brand-ink`;
+export const ICON_BTN_ACTIVE = `${ICON_BTN_BASE} bg-brand-soft text-brand-ink`;
 
 /**
  * The `− n +` pill: one bordered glass capsule, rather than controls floating

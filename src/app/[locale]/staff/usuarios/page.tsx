@@ -2,7 +2,7 @@ import type { Locale } from "next-intl";
 import { getTranslations, setRequestLocale } from "next-intl/server";
 import { redirect } from "next/navigation";
 import { setStaffRole, setUserActive } from "@/app/actions/staff-users";
-import { AppShell } from "@/components/app-shell";
+import { StaffShell } from "@/components/staff-shell";
 import { BTN_QUIET, FIELD_SM, GLASS_CARD } from "@/components/ui";
 import { requireStaff } from "@/lib/auth/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -55,6 +55,14 @@ type StaffRow = Pick<
   "id" | "display_name" | "is_active" | "role"
 >;
 
+/**
+ * One account. The hover tint is the admin-table density the rest of the back
+ * office now reads with; `-mx-2 px-2` is what lets it reach past the text
+ * column instead of stopping at it.
+ */
+const ROW =
+  "-mx-2 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg px-2 py-2 text-sm transition-colors hover:bg-white/50";
+
 /** Active = the account can sign in; inactive is this app's delete. */
 const BADGE = "rounded-md px-1.5 py-0.5 text-xs";
 const BADGE_ON = `${BADGE} bg-green-100 text-green-800`;
@@ -77,6 +85,9 @@ export default async function StaffUsersPage({
   const owner = canManageStaff(staffUser.role);
 
   const t = await getTranslations("staff.users");
+  // Only for the shell's breadcrumb, which speaks the sidebar's short vocabulary
+  // (用户) rather than this page's own heading (用户管理).
+  const tStaff = await getTranslations("staff");
   // The eye toggle's two labels are the login page's; the same control, so the
   // same words rather than a second pair to keep in step.
   const tLogin = await getTranslations("login");
@@ -175,16 +186,15 @@ export default async function StaffUsersPage({
   ) as Record<UserAdminError, string>;
 
   return (
-    <AppShell
+    <StaffShell
       locale={locale}
-      nav="staff"
+      title={t("title")}
+      breadcrumb={tStaff("nav.users")}
       user={{
         name: staffUser.display_name ?? staffUser.id,
         role: staffUser.role,
       }}
     >
-      <h1 className="mt-8 text-2xl font-bold tracking-tight">{t("title")}</h1>
-
       {result && (
         <p
           role={result === "ok" ? "status" : "alert"}
@@ -208,10 +218,7 @@ export default async function StaffUsersPage({
             {customers.map((row) => {
               const name = nameOf(row.id, row.display_name);
               return (
-                <li
-                  key={row.id}
-                  className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2 text-sm"
-                >
+                <li key={row.id} className={ROW}>
                   {/* The truncating column holds only text: a badge inside it
                       would be the first thing an ellipsis eats. */}
                   <div className="min-w-0 flex-1">
@@ -303,10 +310,7 @@ export default async function StaffUsersPage({
                 // `assertNotSelf` refuses it server-side anyway.
                 const self = row.id === user.id;
                 return (
-                  <li
-                    key={row.id}
-                    className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2 text-sm"
-                  >
+                  <li key={row.id} className={ROW}>
                     <div className="min-w-0 flex-1">
                       <p className="truncate font-medium">{name}</p>
                       <p className="truncate text-xs text-muted">
@@ -397,6 +401,6 @@ export default async function StaffUsersPage({
           </div>
         </section>
       )}
-    </AppShell>
+    </StaffShell>
   );
 }

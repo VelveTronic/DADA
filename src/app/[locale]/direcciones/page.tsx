@@ -67,7 +67,6 @@ export default async function AddressesPage({
   return (
     <AppShell
       locale={locale}
-      nav="customer"
       user={{ name: portalUser.display_name ?? portalUser.companies.name }}
       showPrices={showPrices}
     >

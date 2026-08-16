@@ -194,7 +194,6 @@ export default async function CartPage({
   return (
     <AppShell
       locale={locale}
-      nav="customer"
       user={{ name: portalUser.display_name ?? portalUser.companies.name }}
       cartPrices={cartPrices}
       showPrices={showPrices}

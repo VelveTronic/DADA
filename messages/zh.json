@@ -16,9 +16,7 @@
     "errorInactive": "账号未激活，请联系 DADA"
   },
   "nav": {
-    "catalog": "商品目录",
     "orders": "我的订单",
-    "staff": "员工后台",
     "shop": "商店",
     "search": "搜索",
     "account": "我的账号",
@@ -138,6 +136,19 @@
   },
   "staff": {
     "title": "员工后台",
+    "nav": {
+      "home": "首页",
+      "orders": "订单",
+      "products": "商品",
+      "users": "用户",
+      "settings": "设置"
+    },
+    "shell": {
+      "nav": "后台导航",
+      "breadcrumb": "路径导航",
+      "openMenu": "打开菜单",
+      "closeMenu": "关闭菜单"
+    },
     "ordersQueue": "订单确认队列",
     "tabSubmitted": "待确认",
     "tabConfirmed": "已确认",
@@ -156,7 +167,6 @@
     "rpcOk": "操作已完成",
     "rpcWrongState": "订单状态已变化，未作任何修改。请刷新后再试。",
     "rpcFailed": "操作未完成，请稍后重试。",
-    "products": "商品管理",
     "productsTitle": "商品管理",
     "searchPlaceholder": "搜索编号或名称…",
     "colProduct": "商品",
@@ -170,8 +180,6 @@
     "current": "当前变体",
     "makeCurrent": "设为当前",
     "variantGroup": "变体组 {base}（{n} 个）",
-    "usersAdmin": "用户管理",
-    "settingsAdmin": "设置",
     "users": {
       "title": "用户管理",
       "customersTitle": "客户账号",

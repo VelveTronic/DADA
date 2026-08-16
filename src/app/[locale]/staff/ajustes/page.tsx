@@ -1,7 +1,7 @@
 import type { Locale } from "next-intl";
 import { getTranslations, setRequestLocale } from "next-intl/server";
 import { redirect } from "next/navigation";
-import { AppShell } from "@/components/app-shell";
+import { StaffShell } from "@/components/staff-shell";
 import { GLASS_CARD } from "@/components/ui";
 import { requireStaff } from "@/lib/auth/guards";
 import { getSetting, isSettingsResult } from "@/lib/settings";
@@ -39,6 +39,8 @@ export default async function StaffSettingsPage({
   if (!canManageStaff(staffUser.role)) redirect(`/${locale}/staff`);
 
   const t = await getTranslations("staff.settings");
+  // Only for the shell's breadcrumb, which speaks the sidebar's vocabulary.
+  const tStaff = await getTranslations("staff");
 
   // The action redirects with `?result=<CODE>`. The parameter is user-editable,
   // so it is proved to be one of the known codes BEFORE it is used as a message
@@ -50,16 +52,15 @@ export default async function StaffSettingsPage({
   const showPrices = await getSetting(supabase, "show_prices");
 
   return (
-    <AppShell
+    <StaffShell
       locale={locale}
-      nav="staff"
+      title={t("title")}
+      breadcrumb={tStaff("nav.settings")}
       user={{
         name: staffUser.display_name ?? staffUser.id,
         role: staffUser.role,
       }}
     >
-      <h1 className="mt-8 text-2xl font-bold tracking-tight">{t("title")}</h1>
-
       {result && (
         <p
           role={result === "ok" ? "status" : "alert"}
@@ -85,6 +86,6 @@ export default async function StaffSettingsPage({
           }}
         />
       </section>
-    </AppShell>
+    </StaffShell>
   );
 }

@@ -1,7 +1,6 @@
 import type { Locale } from "next-intl";
 import { getTranslations, setRequestLocale } from "next-intl/server";
-import Link from "next/link";
-import { AppShell } from "@/components/app-shell";
+import { StaffShell } from "@/components/staff-shell";
 import { GLASS_CARD } from "@/components/ui";
 import { requireStaff } from "@/lib/auth/guards";
 import {
@@ -14,7 +13,6 @@ import {
   type BridgeTone,
 } from "@/lib/bridge-status";
 import { createServerSupabase } from "@/lib/supabase/server";
-import { canManageStaff, canManageUsers } from "@/lib/user-admin";
 
 export const dynamic = "force-dynamic";
 
@@ -41,20 +39,13 @@ export default async function StaffHome({
   const { staffUser } = await requireStaff(locale);
   const t = await getTranslations("staff");
 
-  const sections = [
-    { href: `/${locale}/staff/pedidos`, label: t("ordersQueue") },
-    { href: `/${locale}/staff/productos`, label: t("products") },
-    // The same condition as the shell's nav entry, from the same role: a card
-    // to a page that would only redirect back here is worse than no card.
-    ...(canManageUsers(staffUser.role)
-      ? [{ href: `/${locale}/staff/usuarios`, label: t("usersAdmin") }]
-      : []),
-    // Owner only, matching the shell's nav entry and the page's own gate.
-    ...(canManageStaff(staffUser.role)
-      ? [{ href: `/${locale}/staff/ajustes`, label: t("settingsAdmin") }]
-      : []),
-  ];
-
+  // The grid of link cards that used to open this page is gone: the sidebar now
+  // carries those four destinations on every staff screen, role-gated by the
+  // same two predicates the cards used, and a home page whose whole content is a
+  // second copy of the nav beside it is a home page with nothing on it. What is
+  // left is the one thing only this page has ever shown — whether the bridge is
+  // running.
+  //
   // The ordinary session client, not the service-role one: `bridge_status`
   // grants `authenticated` a SELECT that RLS gates to staff, which is exactly
   // what this caller is. The admin client would also work and would cost more
@@ -92,33 +83,14 @@ export default async function StaffHome({
   };
 
   return (
-    <AppShell
+    <StaffShell
       locale={locale}
-      nav="staff"
+      title={t("title")}
       user={{
         name: staffUser.display_name ?? staffUser.id,
         role: staffUser.role,
       }}
     >
-      <h1 className="mt-8 text-2xl font-bold tracking-tight">{t("title")}</h1>
-      <nav className="mt-6">
-        <ul className="grid gap-4 sm:grid-cols-2">
-          {sections.map((section) => (
-            <li key={section.href}>
-              <Link
-                href={section.href}
-                className={`${GLASS_CARD} flex items-center justify-between gap-4 p-5 font-medium transition-colors hover:border-brand hover:text-brand-ink`}
-              >
-                {section.label}
-                <span aria-hidden="true" className="text-brand-ink">
-                  →
-                </span>
-              </Link>
-            </li>
-          ))}
-        </ul>
-      </nav>
-
       <section className={`${GLASS_CARD} mt-6 p-5`}>
         <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
           <h2 className="font-medium">{t("bridge.title")}</h2>
@@ -205,6 +177,6 @@ export default async function StaffHome({
           </div>
         )}
       </section>
-    </AppShell>
+    </StaffShell>
   );
 }

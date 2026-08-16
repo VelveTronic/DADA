@@ -26,7 +26,8 @@ import { GLASS_CARD, ICON_BTN, ICON_BTN_ACTIVE } from "@/components/ui";
  * - **Escape closes and returns focus to the trigger**, which is the half people
  *   skip: without it the keyboard user is left focused on a panel that no longer
  *   exists, and the next Tab starts again from the top of the document;
- * - Tab closes the menu and lets focus move on naturally;
+ * - Tab closes the menu and lets focus move on naturally — watched as focus
+ *   LEAVING the panel rather than as the keypress, see `onPanelFocusOut`;
  * - a press ANYWHERE else closes it without stealing focus — that press was
  *   already on its way somewhere deliberate.
  *
@@ -133,7 +134,31 @@ export function UserMenu({
     else if (event.key === "ArrowUp") move(event, -1);
     else if (event.key === "Home") move(event, "first");
     else if (event.key === "End") move(event, "last");
-    else if (event.key === "Tab") close(false);
+  };
+
+  /**
+   * Tab out of the panel, seen from the other side.
+   *
+   * Closing on the Tab KEYDOWN — which is what this used to do — races the
+   * browser: the panel is unmounted while the default action that moves focus is
+   * still pending, so focus lands on nothing and the next Tab starts again from
+   * the top of the document. Watching focus LEAVE instead means the browser has
+   * already chosen where it is going; `relatedTarget` is that element, and it is
+   * the whole test — focus moving between two items, or back to the trigger, is
+   * not a Tab out.
+   *
+   * The close is still deferred a microtask so React unmounts after the focus
+   * change has settled rather than in the middle of dispatching it.
+   */
+  const onPanelFocusOut = (event: React.FocusEvent<HTMLDivElement>) => {
+    const next = event.relatedTarget as Node | null;
+    if (
+      next &&
+      (panelRef.current?.contains(next) || triggerRef.current?.contains(next))
+    ) {
+      return;
+    }
+    queueMicrotask(() => close(false));
   };
 
   const entries = [
@@ -176,12 +201,22 @@ export function UserMenu({
           role="menu"
           aria-label={t("account")}
           onKeyDown={onPanelKeyDown}
+          // React's onBlur IS focusout: it bubbles, so one handler on the panel
+          // sees every item's turn to lose focus.
+          onBlur={onPanelFocusOut}
           // Right-aligned and narrower than a phone: the trigger is the last
           // control in the row, so a left-aligned panel would hang off-screen.
           className={`${GLASS_CARD} absolute right-0 top-full z-50 mt-2 w-56 p-1 shadow-lg`}
         >
-          {/* Whose account this is. Not a menuitem — there is nothing to press. */}
-          <p className="truncate px-3 py-2 text-xs text-muted">{userName}</p>
+          {/* Whose account this is. Not a menuitem — there is nothing to press —
+              and therefore `role="presentation"`: a `menu` may only own menu
+              items, and an anonymous `<p>` among them makes the whole widget
+              invalid (aria-required-children). Presentational strips the
+              paragraph's own semantics while leaving its text where a screen
+              reader still reaches it. */}
+          <p role="presentation" className="truncate px-3 py-2 text-xs text-muted">
+            {userName}
+          </p>
 
           {entries.map((entry) => (
             <Link
