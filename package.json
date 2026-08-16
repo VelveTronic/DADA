@@ -11,6 +11,8 @@
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "bridge:build": "esbuild src/bridge/main.ts --bundle --platform=node --target=node22 --outfile=bridge/dist/dada-bridge.js",
+    "bridge:build:check": "node bridge/dist/dada-bridge.js --help",
     "user:create": "tsx scripts/create-user.ts",
     "import:freepos": "tsx scripts/import-freepos.ts",
     "import:wingest-prices": "tsx scripts/import-wingest-prices.ts",

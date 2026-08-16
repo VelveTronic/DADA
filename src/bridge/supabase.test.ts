@@ -4,6 +4,7 @@ import {
   SupabaseNetworkError,
   SupabasePayloadError,
   createBridgeSupabase,
+  parseContentRangeTotal,
 } from "./supabase";
 
 const cfg = {
@@ -207,5 +208,94 @@ describe("heartbeat", () => {
   it("still raises a real failure", async () => {
     const { api } = client([json({ message: "permission denied" }, 401)]);
     await expect(api.heartbeat(row)).rejects.toBeInstanceOf(SupabaseHttpError);
+  });
+});
+
+describe("parseContentRangeTotal", () => {
+  it("reads the total off a page", () => {
+    expect(parseContentRangeTotal("0-24/3573")).toBe(3573);
+  });
+
+  it("reads the total off an empty page, which is what limit=0 returns", () => {
+    expect(parseContentRangeTotal("*/3573")).toBe(3573);
+  });
+
+  it("is null when nothing was counted", () => {
+    expect(parseContentRangeTotal("*/*")).toBeNull();
+    expect(parseContentRangeTotal(null)).toBeNull();
+    expect(parseContentRangeTotal(undefined)).toBeNull();
+    expect(parseContentRangeTotal("")).toBeNull();
+    expect(parseContentRangeTotal("nonsense")).toBeNull();
+  });
+
+  it("reads zero as zero, not as absent", () => {
+    expect(parseContentRangeTotal("*/0")).toBe(0);
+  });
+});
+
+describe("patchProduct", () => {
+  const patch = { price_1_cents: 1999, erp_synced_at: "2026-08-16T04:30:00.000Z" };
+
+  it("PATCHes one codart and asks for the row back", async () => {
+    const { api, calls } = client([json([{ codart: "4-007" }])]);
+    expect(await api.patchProduct("4-007", patch)).toBe(true);
+
+    expect(calls[0].method).toBe("PATCH");
+    expect(calls[0].url).toContain("/rest/v1/products?codart=eq.4-007");
+    expect(calls[0].url).toContain("select=codart");
+    expect(calls[0].headers.Prefer).toBe("return=representation");
+    expect(calls[0].body).toBe(JSON.stringify(patch));
+  });
+
+  it("is false when no product carries that codart", async () => {
+    // The distinction PostgREST's 204 cannot make, and the whole notInPortal count.
+    const { api } = client([json([])]);
+    expect(await api.patchProduct("9-999", patch)).toBe(false);
+  });
+
+  it("escapes a codart rather than pasting it into the query string", async () => {
+    const { api, calls } = client([json([])]);
+    await api.patchProduct("A&B 1", patch);
+    expect(calls[0].url).toContain("codart=eq.A%26B+1");
+  });
+
+  it("raises a real failure", async () => {
+    const { api } = client([json({ message: "permission denied" }, 403)]);
+    await expect(api.patchProduct("4-007", patch)).rejects.toBeInstanceOf(SupabaseHttpError);
+  });
+});
+
+describe("countProducts", () => {
+  function counted(total: string): Response {
+    return new Response("[]", {
+      status: 200,
+      headers: { "Content-Type": "application/json", "Content-Range": total },
+    });
+  }
+
+  it("asks for an exact count and no rows", async () => {
+    const { api, calls } = client([counted("*/102")]);
+    expect(await api.countProducts({ price_1_cents: "is.null" })).toBe(102);
+
+    expect(calls[0].method).toBe("GET");
+    expect(calls[0].url).toContain("price_1_cents=is.null");
+    expect(calls[0].url).toContain("limit=0");
+    expect(calls[0].headers.Prefer).toBe("count=exact");
+  });
+
+  it("encodes a PostgREST or() filter", async () => {
+    const { api, calls } = client([counted("*/1")]);
+    await api.countProducts({ or: "(price_1_cents.not.is.null,price_2_cents.not.is.null)" });
+    expect(calls[0].url).toContain("or=%28price_1_cents.not.is.null%2Cprice_2_cents.not.is.null%29");
+  });
+
+  it("is null when the server withheld the count", async () => {
+    const { api } = client([counted("*/*")]);
+    expect(await api.countProducts({})).toBeNull();
+  });
+
+  it("raises a real failure", async () => {
+    const { api } = client([json({ message: "boom" }, 500)]);
+    await expect(api.countProducts({})).rejects.toBeInstanceOf(SupabaseHttpError);
   });
 });

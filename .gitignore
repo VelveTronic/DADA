@@ -44,6 +44,12 @@ next-env.d.ts
 # subagent scratch
 .superpowers/
 
+# Bridge build output: `pnpm bridge:build` writes bridge/dist/dada-bridge.js, a
+# 3 MB single-file bundle rebuilt from src/bridge on demand. Only the README that
+# tells an operator what the folder is for is tracked.
+/bridge/*
+!/bridge/README.md
+
 # Wingest price export: the full six-tier price matrix for every article, which
 # 0002c revokes from authenticated readers. It lands next to the export script
 # when the owner runs it; it must never be committed. Delete it after merging.

@@ -81,6 +81,36 @@ export interface BridgeSupabase {
   listInjected(): Promise<InjectedOrderRef[]>;
   /** False when `bridge_status` does not exist yet (Task 3 adds it). */
   heartbeat(row: HeartbeatRow): Promise<boolean>;
+  /**
+   * False when no product carries that codart — the price-sync miss count.
+   *
+   * `object` rather than `Record<string, unknown>` because the patch that
+   * arrives is a `WingestPricePatch`, and a TypeScript INTERFACE has no implicit
+   * index signature: the record type would reject the one caller this method
+   * has. Anything JSON-serialisable is acceptable here; PostgREST validates the
+   * column names.
+   */
+  patchProduct(codart: string, patch: object): Promise<boolean>;
+  /** `products` matching `filters`, or null if PostgREST withheld the total. */
+  countProducts(filters: Record<string, string>): Promise<number | null>;
+}
+
+/**
+ * The total out of a PostgREST `Content-Range`.
+ *
+ * The header is `0-24/3573` on a page; an empty page (which is what `limit=0`
+ * asks for) puts a bare asterisk before the slash, and a request that did not
+ * ask for an exact count puts one after it too. Only the part after the slash
+ * matters, and an asterisk there means "not counted" — a null the caller reports
+ * rather than a zero it would print as a catalog that just emptied itself.
+ */
+export function parseContentRangeTotal(value: string | null | undefined): number | null {
+  if (!value) return null;
+  const slash = value.lastIndexOf("/");
+  if (slash < 0) return null;
+  const total = value.slice(slash + 1).trim();
+  if (!/^\d+$/.test(total)) return null;
+  return Number(total);
 }
 
 export interface SupabaseClientOptions {
@@ -140,7 +170,7 @@ export function createBridgeSupabase(
   async function send(
     path: string,
     init: { method: string; body?: string; extraHeaders?: Record<string, string> },
-  ): Promise<{ status: number; text: string }> {
+  ): Promise<{ status: number; text: string; headers: Headers }> {
     const url = `${cfg.supabaseUrl}${path}`;
     let lastError: unknown;
     for (let attempt = 0; attempt < 2; attempt++) {
@@ -155,7 +185,9 @@ export function createBridgeSupabase(
           signal: controller.signal,
         });
         const text = await response.text();
-        return { status: response.status, text };
+        // The count calls read Content-Range; every other caller destructures
+        // status and text and lets this fall on the floor.
+        return { status: response.status, text, headers: response.headers };
       } catch (error) {
         lastError = error;
       } finally {
@@ -281,6 +313,52 @@ export function createBridgeSupabase(
           numped: typeof order.numped === "number" ? order.numped : null,
         };
       });
+    },
+
+    /**
+     * One product's price/unit merge, matched by codart.
+     *
+     * `return=representation` with `select=codart` is what makes the return
+     * value mean anything: PostgREST answers 204 to a PATCH that matched
+     * nothing exactly as it does to one that matched a row, so without asking
+     * for the rows back, "this codart is not in the portal" would be
+     * indistinguishable from "updated". That distinction IS the price-sync
+     * accounting (matched vs notInPortal), the same one the CSV importer gets
+     * from supabase-js's `.select("codart")`.
+     */
+    async patchProduct(codart, patch) {
+      const query = new URLSearchParams({ codart: `eq.${codart}`, select: "codart" });
+      const path = `/rest/v1/products?${query.toString()}`;
+      const value = await call(path, {
+        method: "PATCH",
+        body: JSON.stringify(patch),
+        extraHeaders: { Prefer: "return=representation" },
+      });
+      if (!Array.isArray(value)) {
+        throw new SupabasePayloadError(path, `expected an array, got ${typeof value}`);
+      }
+      // codart is unique, so this is 0 or 1 and a row tally would only restate it.
+      return value.length > 0;
+    },
+
+    /**
+     * `count=exact` over `products`, for the post-sync diagnostics.
+     *
+     * `limit=0` because the count travels in the Content-Range header and the
+     * body is not wanted: the fully-unpriced query would otherwise drag several
+     * hundred rows over a domestic ADSL line to be thrown away.
+     */
+    async countProducts(filters) {
+      const query = new URLSearchParams({ ...filters, select: "codart", limit: "0" });
+      const path = `/rest/v1/products?${query.toString()}`;
+      const { status, text, headers: responseHeaders } = await send(path, {
+        method: "GET",
+        extraHeaders: { Prefer: "count=exact" },
+      });
+      if (status < 200 || status >= 300) {
+        throw new SupabaseHttpError(path, status, text.slice(0, MAX_ERROR_BODY));
+      }
+      return parseContentRangeTotal(responseHeaders.get("content-range"));
     },
 
     /**
