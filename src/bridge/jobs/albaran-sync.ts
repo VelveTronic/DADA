@@ -39,9 +39,20 @@ export interface AlbaranDeps {
  * removed from the waiting set the moment it matches, so the several albfacca
  * rows one pedido produces across partial deliveries count once.
  *
- * `marked` counts ORDER rows confirmed by `bridge_mark_albaran`, so it equals
- * `matched` in every normal run and exceeds it only if two portal orders somehow
- * share a NUMPED — the collision this job warns about rather than hides.
+ * `marked` counts ORDER rows confirmed by `bridge_mark_albaran`, and moves in
+ * BOTH directions away from `matched`:
+ *
+ * - **LESS than `matched`** whenever a mark does not land — the RPC returns
+ *   false (the order was no longer `injected`: staff cancelled it, or an earlier
+ *   run already marked it) or the call throws. Both are logged and neither stops
+ *   the run, so `marked < matched` is the ordinary shape of a run with one
+ *   problem order in it. `matched - marked` is the number of pedidos whose
+ *   albarán the portal has NOT recorded yet; the next run retries them.
+ * - **MORE than `matched`** only if two portal orders somehow share a NUMPED, in
+ *   which case one match marks both — the collision this job warns about rather
+ *   than hides.
+ *
+ * They are equal in a clean run, which is the only reason both are printed.
  */
 export interface AlbaranTally {
   injected: number;

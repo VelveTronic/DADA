@@ -34,7 +34,7 @@ import { runOrders } from "./jobs/orders";
 import { runPriceSync } from "./jobs/price-sync";
 import type { JobCounts, JobResult } from "./jobs/shared";
 import { LockError, acquireLock, type Lock } from "./lock";
-import { createLogger, type Logger } from "./log";
+import { createLogger, type Logger, type LoggerOptions } from "./log";
 import { createBridgeSupabase, type BridgeSupabase } from "./supabase";
 
 export const JOBS = ["orders", "albaran-sync", "price-sync"] as const;
@@ -99,7 +99,7 @@ export function resolveBridgeDir(scriptPath: string | undefined): string {
   return dirname(resolve(scriptPath));
 }
 
-async function runJob(
+export async function runJob(
   job: JobName,
   cfg: BridgeConfig,
   api: BridgeSupabase,
@@ -123,6 +123,37 @@ async function runJob(
 }
 
 /**
+ * Everything `runMain` touches that is not its own logic.
+ *
+ * The seam exists because the code below is the most decision-laden in the
+ * bridge and the least reachable from a test: which failures write a heartbeat
+ * and which cannot, which one gets a stack trace and which would bury the log in
+ * one, and the order of the three things the `finally` does. All of it is
+ * unreachable through `main()`, which reads a real `bridge.env`, opens a real
+ * lock file and talks to a real database. None of the fields have defaults — the
+ * wiring lives in `main()` below, in one place, where it can be read.
+ */
+export interface MainDeps {
+  argv: readonly string[];
+  /** Where `bridge.env`, `bridge.log` and `<job>.lock` live. */
+  dir: string;
+  loadConfig: (envPath: string) => BridgeConfig;
+  createLogger: (options: LoggerOptions) => Logger;
+  createApi: (cfg: BridgeConfig) => BridgeSupabase;
+  acquireLock: (dir: string, job: JobName, log: Logger) => Lock;
+  runJob: (
+    job: JobName,
+    cfg: BridgeConfig,
+    api: BridgeSupabase,
+    log: Logger,
+  ) => Promise<JobResult>;
+  /** The heartbeat's `last_run_at`. */
+  now: () => Date;
+  stdout: (text: string) => void;
+  stderr: (text: string) => void;
+}
+
+/**
  * The whole run. Returns the process exit code rather than calling `exit`, so
  * the entry point below owns the one place the process dies.
  *
@@ -131,23 +162,23 @@ async function runJob(
  * another run holds, an unreachable database. That distinction is what makes
  * Task Scheduler's "last result" column worth looking at.
  */
-export async function main(argv: readonly string[]): Promise<number> {
-  const parsed = parseArgv(argv);
+export async function runMain(deps: MainDeps): Promise<number> {
+  const parsed = parseArgv(deps.argv);
   if (parsed.kind === "help") {
-    process.stdout.write(`${USAGE}\n`);
+    deps.stdout(`${USAGE}\n`);
     return 0;
   }
   if (parsed.kind === "error") {
-    process.stderr.write(`${parsed.message}\n\n${USAGE}\n`);
+    deps.stderr(`${parsed.message}\n\n${USAGE}\n`);
     return 1;
   }
 
   const job = parsed.job;
-  const dir = resolveBridgeDir(process.argv[1]);
+  const dir = deps.dir;
   const logPath = join(dir, LOG_FILE);
   // Two loggers on the same file: this one exists to report a config failure,
   // which happens before there are any secrets to mask.
-  const bootstrap = createLogger({ filePath: logPath });
+  const bootstrap = deps.createLogger({ filePath: logPath });
 
   let cfg: BridgeConfig;
   try {
@@ -155,16 +186,18 @@ export async function main(argv: readonly string[]): Promise<number> {
     // Supabase URL and no service key to write one with. A bad `bridge.env` is
     // therefore invisible to the status card and visible only in `bridge.log` —
     // which is the right place for it, since the fix is on the server anyway.
-    cfg = loadBridgeConfigFromFile(join(dir, ENV_FILE));
+    // The staff card shows that job as 未运行 rather than as failed, which is
+    // the honest reading: from the portal's side, nothing ran.
+    cfg = deps.loadConfig(join(dir, ENV_FILE));
   } catch (error) {
     bootstrap.logError(error, { job, stage: "config", dir });
     return 1;
   }
 
-  const log = createLogger({ filePath: logPath, secrets: bridgeSecrets(cfg) });
+  const log = deps.createLogger({ filePath: logPath, secrets: bridgeSecrets(cfg) });
   log.info("start", { job, dir, ...describeConfig(cfg) });
 
-  const api = createBridgeSupabase(cfg);
+  const api = deps.createApi(cfg);
   /**
    * Telemetry, and telemetry never fails a run. This is also the try/catch the
    * supabase client cannot do for us: a 404 whose body is not PostgREST JSON
@@ -174,7 +207,7 @@ export async function main(argv: readonly string[]): Promise<number> {
     try {
       const written = await api.heartbeat({
         job,
-        last_run_at: new Date().toISOString(),
+        last_run_at: deps.now().toISOString(),
         ok,
         detail,
       });
@@ -188,7 +221,7 @@ export async function main(argv: readonly string[]): Promise<number> {
 
   let lock: Lock;
   try {
-    lock = acquireLock(dir, job, { log });
+    lock = deps.acquireLock(dir, job, log);
   } catch (error) {
     if (error instanceof LockError) {
       // No stack trace: the orders job overrunning its one-minute schedule is
@@ -206,7 +239,12 @@ export async function main(argv: readonly string[]): Promise<number> {
     // `code`, not `error`: the bridge's house style throughout is that `code` is
     // a short machine token an alert rule keys on and `error` is a human
     // message (see log.ts's describeError, which emits both). The status card
-    // reads this one.
+    // reads this one and renders LOCK_HELD as busy, never as a failure.
+    //
+    // The known cost of writing it: this row OVERWRITES the success a run that
+    // finished seconds ago wrote — one status row per job, last writer wins. The
+    // card therefore has to treat "busy" as neutral, and the next unblocked run
+    // (a minute later, for orders) puts the counts back.
     await beat(false, {
       code: error instanceof LockError ? error.code : "LOCK_FAILED",
     });
@@ -215,7 +253,7 @@ export async function main(argv: readonly string[]): Promise<number> {
 
   let result: JobResult = { ok: false, counts: {} };
   try {
-    result = await runJob(job, cfg, api, log);
+    result = await deps.runJob(job, cfg, api, log);
   } catch (error) {
     log.logError(error, { job, stage: "run" });
     result = { ok: false, counts: { code: "RUN_FAILED" } };
@@ -228,6 +266,29 @@ export async function main(argv: readonly string[]): Promise<number> {
   }
 
   return result.ok ? 0 : 1;
+}
+
+/**
+ * The real wiring: every dependency `runMain` needs, in one place.
+ *
+ * `process.argv[1]` rather than the working directory (see `resolveBridgeDir`),
+ * and `createBridgeSupabase`/`acquireLock`/`createLogger` at their defaults —
+ * this function exists to hold those choices and nothing else, so that anything
+ * worth a test lives on the other side of the seam.
+ */
+export async function main(argv: readonly string[]): Promise<number> {
+  return runMain({
+    argv,
+    dir: resolveBridgeDir(process.argv[1]),
+    loadConfig: loadBridgeConfigFromFile,
+    createLogger,
+    createApi: createBridgeSupabase,
+    acquireLock: (dir, job, log) => acquireLock(dir, job, { log }),
+    runJob,
+    now: () => new Date(),
+    stdout: (text) => process.stdout.write(text),
+    stderr: (text) => process.stderr.write(text),
+  });
 }
 
 /**

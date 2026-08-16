@@ -119,6 +119,49 @@
     "makeUnavailable": "Pausar",
     "current": "Variante actual",
     "makeCurrent": "Hacer actual",
-    "variantGroup": "Grupo {base} ({n})"
+    "variantGroup": "Grupo {base} ({n})",
+    "bridge": {
+      "title": "Estado del puente",
+      "subtitle": "Última ejecución de cada una de las tres tareas del puente",
+      "notDeployed": "El puente no está desplegado",
+      "notDeployedHint": "Ninguna de las tres tareas ha dado señal: el programa no está instalado en el servidor o las tareas programadas no se han creado.",
+      "never": "Sin ejecuciones",
+      "at": "{time} (hora de Madrid)",
+      "sample": "Códigos que no están en el portal",
+      "jobs": {
+        "orders": "Inyección de pedidos",
+        "albaran-sync": "Albaranes",
+        "price-sync": "Precios"
+      },
+      "state": {
+        "ok": "Correcto",
+        "busy": "Ejecución anterior en curso",
+        "failed": "Con error",
+        "stale": "Sin señal reciente",
+        "missing": "Nunca ha ejecutado"
+      },
+      "hint": {
+        "busy": "La ejecución anterior seguía en marcha y el bloqueo ha parado esta. Se recupera sola en la vuelta siguiente; no es un fallo.",
+        "failed": "Esta ejecución no ha terminado. El detalle está en bridge.log, en el servidor.",
+        "stale": "Ha pasado más tiempo del que permite su frecuencia; puede que la tarea programada esté desactivada.",
+        "missing": "No ha llegado ninguna señal: la tarea programada no existe o bridge.env está mal configurado (en ese caso no se escribe señal alguna)."
+      },
+      "counts": {
+        "claimed": "Tomados",
+        "injected": "Inyectados",
+        "recovered": "Recuperados",
+        "markFailed": "Sin confirmar",
+        "failed": "Fallidos",
+        "matched": "Emparejados",
+        "marked": "Anotados",
+        "articles": "Artículos ERP",
+        "notInPortal": "Sin producto",
+        "fullyUnpriced": "Sin tarifa",
+        "orderableWithPrice": "Con precio",
+        "skipped": "Omitidos",
+        "error": "Error",
+        "countError": "Error de recuento"
+      }
+    }
   }
 }

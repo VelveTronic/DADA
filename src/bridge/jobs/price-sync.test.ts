@@ -212,6 +212,28 @@ describe("priceSyncCounts", () => {
     });
     expect(counts).toMatchObject({ countError: "timeout", error: "network down" });
   });
+
+  it("carries the unmatched sample as an array, for the staff card", () => {
+    const counts = priceSyncCounts({
+      ...emptyPriceSyncTally(),
+      notInPortal: 2,
+      notInPortalSample: ["A-1", "B-2"],
+    });
+    // An array, not the log line's flat "A-1,B-2": `detail` is jsonb and the
+    // card renders the codarts one by one.
+    expect(counts.notInPortalSample).toEqual(["A-1", "B-2"]);
+  });
+
+  it("copies the sample rather than aliasing the tally's own array", () => {
+    const tally = { ...emptyPriceSyncTally(), notInPortalSample: ["A-1"] };
+    const counts = priceSyncCounts(tally);
+    tally.notInPortalSample.push("B-2");
+    expect(counts.notInPortalSample).toEqual(["A-1"]);
+  });
+
+  it("omits the sample when every article matched", () => {
+    expect(priceSyncCounts(emptyPriceSyncTally())).not.toHaveProperty("notInPortalSample");
+  });
 });
 
 describe("runPriceSync", () => {
@@ -291,10 +313,41 @@ describe("runPriceSync", () => {
 
   it("leaves the sample off when every article matched", async () => {
     const h = harness({ rows: [articulo()] });
-    await runPriceSync(h.deps);
+    const { counts } = await runPriceSync(h.deps);
 
     const merged = h.lines.find((l) => l.message === "merged");
     expect(merged?.fields.sample).toBeNull();
+    expect(counts).not.toHaveProperty("notInPortalSample");
+  });
+
+  it("sends the same first-twenty sample to the heartbeat as to the log", async () => {
+    const rows = Array.from({ length: 25 }, (_, i) => articulo({ codart: `X-${i}` }));
+    const h = harness({ rows, patch: () => Promise.resolve(false) });
+    const { counts } = await runPriceSync(h.deps);
+
+    const merged = h.lines.find((l) => l.message === "merged");
+    expect(counts.notInPortalSample).toHaveLength(20);
+    expect(counts.notInPortalSample).toEqual(String(merged?.fields.sample).split(","));
+    expect(counts.notInPortal).toBe(25);
+  });
+
+  it("reports what it saw even when the merge broke half way", async () => {
+    const rows = [
+      articulo({ codart: "A" }),
+      articulo({ codart: "B" }),
+      articulo({ codart: "C" }),
+    ];
+    const h = harness({
+      rows,
+      patch: (codart) => {
+        if (codart === "C") throw new Error("socket hang up");
+        return Promise.resolve(false);
+      },
+    });
+    const { ok, counts } = await runPriceSync(h.deps);
+
+    expect(ok).toBe(false);
+    expect(counts.notInPortalSample).toEqual(["A", "B"]);
   });
 
   it("keeps matched + notInPortal + skipped equal to articles", async () => {

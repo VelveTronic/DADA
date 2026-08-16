@@ -12,7 +12,16 @@
  * stops meaning anything. `ok` is false only when the run itself could not be
  * done: no config, no lock, no database, no Supabase.
  */
-export type JobCounts = Record<string, number | string | boolean | null>;
+/**
+ * A string ARRAY is allowed alongside the scalars for one case: price-sync's
+ * sample of codarts the portal has no product for. It travels to `bridge_status`
+ * as jsonb, where the staff card can render the codarts as a list, and through
+ * `log.ts`, which JSON-encodes anything non-scalar onto the one summary line.
+ */
+export type JobCounts = Record<
+  string,
+  number | string | boolean | null | readonly string[]
+>;
 
 export interface JobResult {
   ok: boolean;

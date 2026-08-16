@@ -14,6 +14,27 @@ export type Database = {
   }
   public: {
     Tables: {
+      bridge_status: {
+        Row: {
+          detail: Json | null
+          job: string
+          last_run_at: string
+          ok: boolean
+        }
+        Insert: {
+          detail?: Json | null
+          job: string
+          last_run_at: string
+          ok: boolean
+        }
+        Update: {
+          detail?: Json | null
+          job?: string
+          last_run_at?: string
+          ok?: boolean
+        }
+        Relationships: []
+      }
       categories: {
         Row: {
           created_at: string

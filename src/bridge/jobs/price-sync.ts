@@ -91,6 +91,13 @@ export interface PriceSyncTally {
   notInPortal: number;
   /** Rows with an empty CODART: nothing to match on. */
   skipped: number;
+  /**
+   * The first `NOT_IN_PORTAL_SAMPLE` unmatched codarts, in the order `articulo`
+   * returned them. Named as well as counted for the reason below — and carried
+   * in the tally, not only in the log line, because the staff card reads the
+   * heartbeat and never sees `bridge.log` at all.
+   */
+  notInPortalSample: string[];
   fullyUnpriced: number | null;
   orderableWithPrice: number | null;
   /** Set when the post-run diagnostics failed; the merge itself still stands. */
@@ -105,6 +112,7 @@ export function emptyPriceSyncTally(): PriceSyncTally {
     matched: 0,
     notInPortal: 0,
     skipped: 0,
+    notInPortalSample: [],
     fullyUnpriced: null,
     orderableWithPrice: null,
   };
@@ -114,6 +122,14 @@ export function emptyPriceSyncTally(): PriceSyncTally {
  * The summary line: the five fields the plan names, plus the two that only
  * appear when something went wrong and `skipped` only when it is not zero.
  * `matched + notInPortal + skipped === articles` on a complete run.
+ *
+ * `notInPortalSample` rides along as an ARRAY — the one non-scalar count in the
+ * bridge. `notInPortal=412` on the staff card is a number nobody can act on;
+ * four codarts beside it are what tells a human whether those are the ERP's own
+ * packaging articles or a product family the portal import missed. The merged
+ * log line keeps its own flat `sample=A,B,C` for the operator reading the file;
+ * this is the structured copy the card renders. Omitted entirely when every
+ * article matched.
  */
 export function priceSyncCounts(tally: PriceSyncTally): JobCounts {
   const counts: JobCounts = {
@@ -123,6 +139,9 @@ export function priceSyncCounts(tally: PriceSyncTally): JobCounts {
     fullyUnpriced: tally.fullyUnpriced,
     orderableWithPrice: tally.orderableWithPrice,
   };
+  if (tally.notInPortalSample.length > 0) {
+    counts.notInPortalSample = [...tally.notInPortalSample];
+  }
   if (tally.skipped > 0) counts.skipped = tally.skipped;
   if (tally.countError) counts.countError = tally.countError;
   if (tally.error) counts.error = tally.error;
@@ -185,7 +204,9 @@ export async function runPriceSync(deps: PriceSyncDeps): Promise<JobResult> {
   const syncedAt = now().toISOString();
   let withAnyPrice = 0;
   let ok = true;
-  const notInPortalSample: string[] = [];
+  // On the tally rather than local to this function: the heartbeat carries it to
+  // the staff card, and a run that breaks half way still reports what it saw.
+  const notInPortalSample = tally.notInPortalSample;
 
   for (const [index, raw] of rows.entries()) {
     const row = toPriceRow(raw);

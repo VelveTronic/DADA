@@ -119,6 +119,49 @@
     "makeUnavailable": "设为停售",
     "current": "当前变体",
     "makeCurrent": "设为当前",
-    "variantGroup": "变体组 {base}（{n} 个）"
+    "variantGroup": "变体组 {base}（{n} 个）",
+    "bridge": {
+      "title": "桥接状态",
+      "subtitle": "ERP 桥接三个任务的最近一次运行",
+      "notDeployed": "桥接未部署",
+      "notDeployedHint": "三个任务都还没写过心跳：程序还没装到 ERP 服务器上，或计划任务尚未创建。",
+      "never": "从未运行",
+      "at": "马德里时间 {time}",
+      "sample": "门户中没有的编号",
+      "jobs": {
+        "orders": "订单注入",
+        "albaran-sync": "出货单回写",
+        "price-sync": "价格同步"
+      },
+      "state": {
+        "ok": "正常",
+        "busy": "上一轮还在跑",
+        "failed": "失败",
+        "stale": "未运行（可能未调度）",
+        "missing": "未运行"
+      },
+      "hint": {
+        "busy": "上一轮尚未结束，锁生效中。下一轮会自动恢复，不是故障。",
+        "failed": "这一轮没有跑完。详情见服务器上的 bridge.log。",
+        "stale": "距上次心跳已超过该任务的调度间隔，计划任务可能被停用了。",
+        "missing": "没有收到过心跳：计划任务没建，或 bridge.env 配置失败（配置失败时不会写心跳）。"
+      },
+      "counts": {
+        "claimed": "认领",
+        "injected": "已注入",
+        "recovered": "已找回",
+        "markFailed": "回写失败",
+        "failed": "失败",
+        "matched": "已匹配",
+        "marked": "已回写",
+        "articles": "ERP 商品",
+        "notInPortal": "门户缺少",
+        "fullyUnpriced": "无价格",
+        "orderableWithPrice": "可售有价",
+        "skipped": "已跳过",
+        "error": "错误",
+        "countError": "统计错误"
+      }
+    }
   }
 }
