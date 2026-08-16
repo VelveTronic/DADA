@@ -58,9 +58,11 @@ export async function AppShell({
   nav: "customer" | "staff";
   user: ShellUser;
   /**
-   * Unit price in cents for the products THIS page rendered, keyed by product
-   * id — the mobile bar's only source of money. Omitted by pages that price
-   * nothing (order history), which is why the bar can fall back to a count.
+   * Price of one CAJA in cents for the products THIS page rendered, keyed by
+   * product id — the mobile bar's only source of money, and the unit the cart's
+   * quantities are counted in. Omitted by pages that price nothing (order
+   * history) and by any page rendering with `showPrices` false, which is why the
+   * bar can fall back to a count.
    */
   cartPrices?: Record<string, number>;
   /**

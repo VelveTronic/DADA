@@ -41,6 +41,10 @@ export interface WingestPriceRow {
  * A products UPDATE payload. `unit` and `is_weighed` are OPTIONAL on purpose —
  * an absent key leaves the stored value alone, which is not the same as writing
  * a default over it (see toWingestPricePatch).
+ *
+ * `units_per_case` is NOT nullable, unlike the six price tiers: a missing price
+ * means "do not sell this", which NULL says exactly, while a missing factor
+ * means "one caja is one unit", which is the number 1 (see `unitsPerCase`).
  */
 export interface WingestPricePatch {
   price_1_cents: number | null;
@@ -49,7 +53,7 @@ export interface WingestPricePatch {
   price_4_cents: number | null;
   price_5_cents: number | null;
   price_6_cents: number | null;
-  units_per_case: number | null;
+  units_per_case: number;
   erp_synced_at: string;
   unit?: string;
   is_weighed?: true;
@@ -128,20 +132,36 @@ function priceCents(
   return cents === 0 ? null : cents;
 }
 
-function unitsPerCase(text: string, codart: string): number | null {
-  const trimmed = text.trim();
-  if (!trimmed) return null;
-  const value = Number(trimmed);
-  // Non-numeric UNILOT means the file is not shaped the way we think it is;
-  // silently nulling it would hide that. Zero and negatives are ordinary ERP
-  // data ("not sold by the case") and products_units_per_case_pos rejects them,
-  // so those become NULL instead of an error.
-  if (!Number.isFinite(value)) {
-    throw new Error(
-      `Wingest units-per-case (UNILOT) for codart ${codart} is not a number: "${text}"`,
-    );
-  }
-  return value > 0 ? value : null;
+/** `integer` in Postgres; a factor past this would 400 the whole PATCH. */
+const MAX_UNITS_PER_CASE = 2_147_483_647;
+
+/**
+ * Wingest `UNILOT` → the portal's caja factor: how many base units (bottles) one
+ * caja holds. This is the number the portal MULTIPLIES a tarifa price by, so it
+ * is total by construction — every input has an answer and none of them is null.
+ *
+ * The fallback is 1, and 1 is chosen because it is the value that CHANGES
+ * NOTHING: one caja is one unit, the per-caja price equals the base price, and a
+ * line total is what it was before this column meant anything. Everything the
+ * ERP can hold that is not a whole number of units lands there — an empty cell,
+ * a NULL column, `0` and negatives (ordinary ERP data for "not sold by the
+ * case"), fractions like `6.5`, and text that is not a number at all.
+ *
+ * That last case USED to throw, as a canary for a CSV whose columns had shifted.
+ * It no longer does, for two reasons. The canary is still posted:
+ * `parseWingestPriceCsv` compares the header byte for byte and refuses any file
+ * that is not this export, which catches a shifted column before a single value
+ * is read. And the cost of throwing changed — this transform now runs inside the
+ * nightly price-sync, which stops the WHOLE run on a raised error, so one junk
+ * field in `articulo` would leave 3,000 products unpriced to protect a factor
+ * whose safe fallback was one line away.
+ */
+function unitsPerCase(text: string): number {
+  const value = Number(text.trim());
+  // `Number("")` and `Number("  ")` are 0, `Number("caja")` is NaN, `Number("2.0")`
+  // is 2: one test covers every shape the column can arrive in.
+  if (!Number.isSafeInteger(value)) return 1;
+  return value >= 1 && value <= MAX_UNITS_PER_CASE ? value : 1;
 }
 
 /**
@@ -158,6 +178,12 @@ function unitsPerCase(text: string, codart: string): number | null {
  * calls UNIDAD (fractional quantities depend on it; create_order rejects them
  * with BAD_QTY_STEP when is_weighed is false).
  *
+ * `units_per_case` is written on EVERY row, unlike those two: the portal's
+ * quantities mean cajas and its prices are per caja, so the factor is part of
+ * the money and a stale one silently misprices a product. Writing it
+ * unconditionally is also what makes the nightly price-sync the factor's only
+ * backfill — there is no separate script and no CSV to carry.
+ *
  * `syncedAt` is passed in rather than read from the clock so the transform stays
  * pure and one import run stamps a single timestamp on every row it touches.
  */
@@ -172,7 +198,7 @@ export function toWingestPricePatch(
     price_4_cents: priceCents(row.p4, row.codart, "p4"),
     price_5_cents: priceCents(row.p5, row.codart, "p5"),
     price_6_cents: priceCents(row.p6, row.codart, "p6"),
-    units_per_case: unitsPerCase(row.unilot, row.codart),
+    units_per_case: unitsPerCase(row.unilot),
     erp_synced_at: syncedAt,
   };
 

@@ -13,7 +13,7 @@ import { ProductThumb } from "@/components/product-thumb";
 import { BTN_PRIMARY, FIELD, GLASS_CARD } from "@/components/ui";
 import { requireCompanyUser } from "@/lib/auth/guards";
 import { CART_COOKIE, parseCart } from "@/lib/cart";
-import { localizedName } from "@/lib/catalog/display";
+import { localizedName, unitLabel } from "@/lib/catalog/display";
 import { formatEuros, lineTotalCents } from "@/lib/money";
 import {
   addDays,
@@ -37,9 +37,10 @@ type CartProduct = Pick<
   | "codart"
   | "name"
   | "unit"
+  | "units_per_case"
   | "is_weighed"
   | "is_orderable"
-  | "price_cents"
+  | "price_per_case_cents"
   | "image_url"
 >;
 
@@ -90,8 +91,14 @@ export default async function CartPage({
     ids.length > 0
       ? supabase
           .from("products_priced")
+          // `price_per_case_cents` and not `price_cents`: quantities in this cart
+          // are CAJAS, so the only unit price that may multiply them is the one
+          // the view already computed per caja.
+          //
+          // One string literal, never a concatenation: supabase-js types the row
+          // from the literal, and `"a, " + "b"` widens to `string` and loses it.
           .select(
-            "id, codart, name, unit, is_weighed, is_orderable, price_cents, image_url",
+            "id, codart, name, unit, units_per_case, is_weighed, is_orderable, price_per_case_cents, image_url",
           )
           .in("id", ids)
       : Promise.resolve(null),
@@ -113,7 +120,9 @@ export default async function CartPage({
       const product = byId.get(productId) ?? null;
       // A vanished or paused product has no price to charge, whatever the view
       // still says: both block the order, and both are fixed by removing the line.
-      const priceCents = product?.is_orderable ? product.price_cents : null;
+      const priceCents = product?.is_orderable
+        ? product.price_per_case_cents
+        : null;
       return {
         productId,
         product,
@@ -142,21 +151,37 @@ export default async function CartPage({
   // for the price. The same sentence explains the banner and the dead button.
   const hasUnavailable = rows.some((row) => !row.product?.is_orderable);
   const hasPendingPrice = rows.some(
-    (row) => row.product?.is_orderable && row.product.price_cents == null,
+    (row) => row.product?.is_orderable && row.product.price_per_case_cents == null,
   );
+  // …and with the owner's switch off, the price one is explained WITHOUT the
+  // word. This page has just hidden every amount on it, so "some prices are
+  // pending" would be the only mention of pricing left — on the banner AND in
+  // the dead submit button's tooltip, which is the same sentence twice. The
+  // price-free wording says the part the customer can act on: these lines cannot
+  // be ordered yet, and it is not something they did.
   const blockedMessage = hasUnavailable
     ? t("errors.PRODUCT_UNAVAILABLE")
     : hasPendingPrice
-      ? t("pendingPrices")
+      ? showPrices
+        ? t("pendingPrices")
+        : t("pendingUnavailable")
       : null;
 
-  // Every line this render could price, for the provider. On this page that is
-  // normally all of them, so the phone's bar could total the cart — it hides
-  // itself here instead, because the subtotal is already in the layout below.
-  const cartPrices: Record<string, number> = {};
-  for (const row of rows) {
-    if (row.product?.is_orderable && row.product.price_cents != null) {
-      cartPrices[row.productId] = row.product.price_cents;
+  // Every line this render could price, for the provider — per CAJA, which is
+  // what the quantity beside it counts. On this page that is normally all of
+  // them, so the phone's bar could total the cart; it hides itself here instead,
+  // because the subtotal is already in the layout below.
+  //
+  // With the owner's switch OFF the map is not built at all: the subtotal row
+  // and every line amount are omitted server-side, so the only consumer left
+  // (`CartSubtotal`) never renders, and there is no reason to ship the tarifa
+  // into the browser to be discarded. Same rule as the catalogue's.
+  const cartPrices: Record<string, number> | undefined = showPrices ? {} : undefined;
+  if (cartPrices) {
+    for (const row of rows) {
+      if (row.product?.is_orderable && row.product.price_per_case_cents != null) {
+        cartPrices[row.productId] = row.product.price_per_case_cents;
+      }
     }
   }
 
@@ -230,7 +255,10 @@ export default async function CartPage({
                             still carries the id, which is all that has to travel. */}
                         <span>
                           {row.product
-                            ? `${row.product.codart} · ${row.product.unit}`
+                            ? `${row.product.codart} · ${unitLabel(
+                                row.product.unit,
+                                row.product.units_per_case,
+                              )}`
                             : tCatalog("unavailable")}
                         </span>
                         {weighed && (

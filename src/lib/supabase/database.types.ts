@@ -202,6 +202,7 @@ export type Database = {
           sort_order: number
           unit: string
           unit_price_cents: number
+          units_per_case: number
         }
         Insert: {
           codart: string
@@ -216,6 +217,7 @@ export type Database = {
           sort_order?: number
           unit: string
           unit_price_cents: number
+          units_per_case?: number
         }
         Update: {
           codart?: string
@@ -230,6 +232,7 @@ export type Database = {
           sort_order?: number
           unit?: string
           unit_price_cents?: number
+          units_per_case?: number
         }
         Relationships: [
           {
@@ -419,7 +422,7 @@ export type Database = {
           price_6_cents: number | null
           sort_order: number
           unit: string
-          units_per_case: number | null
+          units_per_case: number
           updated_at: string
           variant_suffix: string
         }
@@ -446,7 +449,7 @@ export type Database = {
           price_6_cents?: number | null
           sort_order?: number
           unit?: string
-          units_per_case?: number | null
+          units_per_case?: number
           updated_at?: string
           variant_suffix?: string
         }
@@ -473,7 +476,7 @@ export type Database = {
           price_6_cents?: number | null
           sort_order?: number
           unit?: string
-          units_per_case?: number | null
+          units_per_case?: number
           updated_at?: string
           variant_suffix?: string
         }
@@ -531,6 +534,7 @@ export type Database = {
           iva_rate: number | null
           name: Json | null
           price_cents: number | null
+          price_per_case_cents: number | null
           sort_order: number | null
           unit: string | null
           units_per_case: number | null

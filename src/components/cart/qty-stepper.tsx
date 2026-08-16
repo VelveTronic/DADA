@@ -13,10 +13,18 @@ import { useCart } from "./cart-provider";
  * return).
  *
  * It replaces a `<form action={addToCart}>` per row. Everything the form used
- * to say still gets said: the same two aria labels (`cart.add` when the row can
- * be ordered, `cart.addNoPrice` when it cannot), the same `title` naming the
- * price as the blocker, the same disabled `+`. What changes is that the press
- * no longer costs the customer the page they were on.
+ * to say still gets said: the same aria labels (`cart.add` when the row can be
+ * ordered, a refusal when it cannot), the same `title` naming the price as the
+ * blocker, the same disabled `+`. What changes is that the press no longer costs
+ * the customer the page they were on.
+ *
+ * **The refusal has to stop mentioning prices when prices are off.** The row's
+ * whole price cell is gone in that mode — 价格待定 included, because it is the
+ * price column's placeholder — and this button is the last thing on the row that
+ * could put the word back, in a `title` tooltip and in the sentence a screen
+ * reader announces. `cart.addUnavailable` says the same thing without it: this
+ * one cannot go in the basket. The BLOCKER is unchanged either way; only the
+ * wording is, and the customer sees no amount they were not meant to.
  *
  * **`−` at 1 removes the line**, shrinking the pill back to its lone `+`. That
  * is the cart's own contract (`setQty` at 0 deletes) and TOKACHI's, so the pill
@@ -31,12 +39,19 @@ export function QtyStepper({
   productId,
   name,
   priced,
+  showPrices,
 }: {
   productId: string;
   /** Already localized by the server row; it names the buttons for a screen reader. */
   name: string;
   /** False while this product still has no tarifa price. Blocks the `+`, as today. */
   priced: boolean;
+  /**
+   * The owner's `show_prices` setting, as the page read it. It changes only what
+   * the disabled `+` SAYS — never whether it is disabled — so a row this build
+   * cannot price stays unorderable in both modes.
+   */
+  showPrices: boolean;
 }) {
   const { qtyOf, setQty } = useCart();
   const t = useTranslations("cart");
@@ -46,8 +61,13 @@ export function QtyStepper({
   const qty = qtyOf(productId);
   const addLabel = priced
     ? t("add", { name })
-    : t("addNoPrice", { name });
-  const addTitle = priced ? undefined : tCatalog("noPrice");
+    : showPrices
+      ? t("addNoPrice", { name })
+      : t("addUnavailable", { name });
+  // The tooltip is the price cell's own vocabulary, so it goes with the cell:
+  // with prices off there is no title at all rather than a price-free one, since
+  // the aria-label above already carries the whole reason.
+  const addTitle = priced || !showPrices ? undefined : tCatalog("noPrice");
 
   // ONE wrapper for both states, and the `+` keyed inside it, so the element
   // the customer just pressed is the same DOM node before and after the 0→1

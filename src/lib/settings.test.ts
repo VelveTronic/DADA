@@ -10,6 +10,7 @@ import {
   parseSettingInput,
   parseSettingKey,
   parseSettingValue,
+  parseToggleFormData,
   type SettingsClient,
 } from "./settings";
 
@@ -158,6 +159,60 @@ describe("parseSettingInput — the toggle's two values", () => {
       }
     });
   }
+});
+
+describe("parseToggleFormData — the hidden/checkbox pair", () => {
+  /** The two inputs `settings-form.tsx` posts, in the order a browser sends them. */
+  const posted = (...values: string[]): FormData => {
+    const formData = new FormData();
+    for (const value of values) formData.append("value", value);
+    return formData;
+  };
+
+  /**
+   * THE test. The form always sends the hidden `0`, and the checkbox appends
+   * `1` after it when the switch is on — so a reader that took the FIRST entry
+   * (which is what `FormData.get` does) would answer `false` for BOTH positions
+   * and hide every price from every restaurant, permanently, from a save the
+   * owner made to turn prices ON. Nothing else in this suite would notice.
+   */
+  it("reads the LAST entry, so an ON switch is not read as its own hidden 0", () => {
+    expect(parseToggleFormData(posted("0", "1"), "show_prices")).toEqual({
+      ok: true,
+      value: true,
+    });
+  });
+
+  it("reads the lone hidden 0 an OFF switch leaves behind", () => {
+    expect(parseToggleFormData(posted("0"), "show_prices")).toEqual({
+      ok: true,
+      value: false,
+    });
+  });
+
+  it("refuses a body with no value field at all rather than reading it as off", () => {
+    expect(parseToggleFormData(posted(), "show_prices")).toEqual({
+      ok: false,
+      error: "BAD_VALUE",
+    });
+  });
+
+  it("refuses when the last entry is not one of the two values", () => {
+    expect(parseToggleFormData(posted("0", "on"), "show_prices")).toEqual({
+      ok: false,
+      error: "BAD_VALUE",
+    });
+  });
+
+  it("ignores fields that are not the toggle's own", () => {
+    const formData = posted("0", "1");
+    formData.append("key", "show_prices");
+    formData.append("locale", "zh");
+    expect(parseToggleFormData(formData, "show_prices")).toEqual({
+      ok: true,
+      value: true,
+    });
+  });
 });
 
 describe("the registry", () => {

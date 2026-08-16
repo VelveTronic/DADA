@@ -7,8 +7,10 @@
  * CSV are left untouched, and so are the products whose CSV row carries no unit.
  *
  * The ERP owns prices and units_per_case, so those columns are OVERWRITTEN from
- * the CSV on every run, NULL included. `unit` and `is_weighed` are only ever
- * given a value, never cleared: staff may have corrected them by hand.
+ * the CSV on every run, NULL prices included. `unit` and `is_weighed` are only
+ * ever given a value, never cleared: staff may have corrected them by hand.
+ * `units_per_case` is never NULL — a UNILOT the ERP does not have means "one
+ * caja is one unit", which is the number 1 (see `toWingestPricePatch`).
  *
  * Usage: pnpm import:wingest-prices <prices.csv> [--dry-run]
  * --dry-run parses and reports without reading .env.local or touching the DB,
@@ -195,7 +197,10 @@ async function main(): Promise<void> {
     csvFullyZeroPriced: patches.length - priced,
     unitWrites: patches.filter((entry) => entry.patch.unit !== undefined).length,
     weighedFromKg: patches.filter((entry) => entry.patch.is_weighed).length,
-    unitsPerCaseSet: patches.filter((entry) => entry.patch.units_per_case !== null)
+    // Products the ERP really does sell by the case. A factor of 1 is the
+    // fallback as much as it is a value, so counting it would report the whole
+    // catalogue as cased and tell the operator nothing.
+    unitsPerCaseSet: patches.filter((entry) => entry.patch.units_per_case > 1)
       .length,
     unidadValues: unidadHistogram(rows),
   };

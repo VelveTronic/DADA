@@ -7,7 +7,7 @@ import { QtyStepper } from "@/components/cart/qty-stepper";
 import { ProductThumb } from "@/components/product-thumb";
 import { BTN_PRIMARY, FIELD, GLASS_CARD } from "@/components/ui";
 import { requireCompanyUser } from "@/lib/auth/guards";
-import { localizedName, sanitizeSearch } from "@/lib/catalog/display";
+import { localizedName, sanitizeSearch, unitLabel } from "@/lib/catalog/display";
 import { formatEuros } from "@/lib/money";
 import { getSetting } from "@/lib/settings";
 import type { CustomerCatalogProduct } from "@/lib/supabase/public.types";
@@ -131,14 +131,27 @@ export default async function CatalogPage({
     return `/${locale}/catalogo${s ? `?${s}` : ""}`;
   };
 
-  // What the phone's bottom bar is allowed to add up: the price this render
-  // resolved for each row it can actually order. A cart line that is not on
-  // this page (or has no price, or has stopped being orderable) is missing from
-  // the map, and the bar answers with a count instead of a wrong total.
-  const cartPrices: Record<string, number> = {};
-  for (const product of products) {
-    if (product.id && product.is_orderable && product.price_cents != null) {
-      cartPrices[product.id] = product.price_cents;
+  // What the phone's bottom bar is allowed to add up: the CAJA price this render
+  // resolved for each row it can actually order — the same figure the row shows,
+  // because the cart's quantities are cajas too. A cart line that is not on this
+  // page (or has no price, or has stopped being orderable) is missing from the
+  // map, and the bar answers with a count instead of a wrong total.
+  //
+  // With the owner's switch OFF the map is not built at all. The bar renders no
+  // amount either way, and a page that deliberately shows no prices has no
+  // business shipping the whole visible tarifa down to the browser inside its
+  // RSC payload. Nothing else reads it: every other amount on a customer page is
+  // server-rendered behind the same flag.
+  const cartPrices: Record<string, number> | undefined = showPrices ? {} : undefined;
+  if (cartPrices) {
+    for (const product of products) {
+      if (
+        product.id &&
+        product.is_orderable &&
+        product.price_per_case_cents != null
+      ) {
+        cartPrices[product.id] = product.price_per_case_cents;
+      }
     }
   }
 
@@ -236,10 +249,18 @@ export default async function CatalogPage({
             const id = p.id as string;
             const isFav = favoriteIds.has(id);
             const name = localizedName(p.name, locale);
-            // Every price is NULL until the owner's Wingest merge, so today this
-            // renders as a disabled button explaining why; the moment a tarifa
-            // price lands the same row becomes orderable with no code change.
-            const priced = p.price_cents != null;
+            // The price of ONE CAJA, computed in the view as
+            // `price_cents x units_per_case` — exact integer multiplication, and
+            // the only money figure this page knows. Quantities are cajas, so
+            // this is the number that belongs beside them.
+            //
+            // It is null exactly when the tarifa price is (the factor is NOT
+            // NULL), which is why it also answers "can this row be ordered": every
+            // price is NULL until the owner's Wingest merge, so today an unpriced
+            // row renders as a disabled button explaining why, and the moment a
+            // tarifa price lands the same row becomes orderable with no code change.
+            const caseCents = p.price_per_case_cents;
+            const priced = caseCents != null;
             return (
               <li
                 key={id}
@@ -259,8 +280,11 @@ export default async function CatalogPage({
                         view on a narrow phone. */}
                     <p className="truncate font-medium">{name}</p>
                     <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted">
+                      {/* `1-002 · CAJA×24`: the factor is what turns the price
+                          beside it into an offer a restaurant can judge. It is
+                          silent at 1 — see `unitLabel`. */}
                       <span>
-                        {p.codart} · {p.unit}
+                        {p.codart} · {unitLabel(p.unit, p.units_per_case)}
                       </span>
                       {p.is_weighed && (
                         <span className="rounded-md bg-amber-100 px-1.5 py-0.5 text-amber-800">
@@ -283,8 +307,8 @@ export default async function CatalogPage({
                     resolved either way. */}
                 {showPrices && (
                   <p className="w-24 text-right text-sm font-semibold">
-                    {p.price_cents != null ? (
-                      formatEuros(p.price_cents, locale)
+                    {caseCents != null ? (
+                      formatEuros(caseCents, locale)
                     ) : (
                       <span className="font-normal text-muted">
                         {t("noPrice")}
@@ -300,7 +324,12 @@ export default async function CatalogPage({
                     list however many products are already in the cart. */}
                 <div className="flex w-24 shrink-0 justify-end">
                   {p.is_orderable && (
-                    <QtyStepper productId={id} name={name} priced={priced} />
+                    <QtyStepper
+                      productId={id}
+                      name={name}
+                      priced={priced}
+                      showPrices={showPrices}
+                    />
                   )}
                 </div>
                 <form action={toggleFavorite}>

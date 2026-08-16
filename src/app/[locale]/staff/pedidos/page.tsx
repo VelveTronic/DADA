@@ -6,7 +6,7 @@ import { AppShell } from "@/components/app-shell";
 import { OrderStatusBadge } from "@/components/order-status-badge";
 import { FIELD_SM, GLASS_CARD } from "@/components/ui";
 import { requireStaff } from "@/lib/auth/guards";
-import { localizedName } from "@/lib/catalog/display";
+import { localizedName, unitLabel } from "@/lib/catalog/display";
 import { formatEuros } from "@/lib/money";
 import type { QueueTab } from "@/lib/orders";
 import { formatOrderDate, QUEUE_TABS, safeQueueTab } from "@/lib/orders";
@@ -40,6 +40,7 @@ type QueueItem = Pick<
   | "name"
   | "qty"
   | "unit"
+  | "units_per_case"
   | "unit_price_cents"
   | "line_total_cents"
 >;
@@ -88,8 +89,10 @@ export default async function StaffOrdersPage({
   if (orderIds.length > 0) {
     const { data: itemData, error: itemError } = await supabase
       .from("order_items")
+      // One string literal, never a concatenation: supabase-js types the row from
+      // the literal, and `"a, " + "b"` widens to `string` and loses it.
       .select(
-        "id, order_id, codart, name, qty, unit, unit_price_cents, line_total_cents",
+        "id, order_id, codart, name, qty, unit, units_per_case, unit_price_cents, line_total_cents",
       )
       .in("order_id", orderIds)
       .order("sort_order", { ascending: true });
@@ -243,9 +246,19 @@ export default async function StaffOrdersPage({
                         <span className="min-w-0 flex-1 truncate">
                           {localizedName(line.name, locale)}
                         </span>
+                        {/* `qty` is CAJAS and `unit_price_cents` is the ERP's
+                            per-base-unit price, so the two do not multiply out
+                            to the total beside them. The per-caja price does —
+                            `units_per_case x unit_price_cents`, both snapshotted
+                            on the line — so `qty x this = line_total_cents`
+                            exactly, and the row reads the way a staff member
+                            checking an albarán needs it to. */}
                         <span className="text-xs text-muted">
-                          {line.qty} {line.unit} ×{" "}
-                          {formatEuros(line.unit_price_cents, locale)}
+                          {line.qty} {unitLabel(line.unit, line.units_per_case)} ×{" "}
+                          {formatEuros(
+                            line.units_per_case * line.unit_price_cents,
+                            locale,
+                          )}
                         </span>
                         <span className="w-20 text-right">
                           {formatEuros(line.line_total_cents, locale)}

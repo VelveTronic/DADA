@@ -146,6 +146,16 @@ describe("ARTICULO_PRICE_SQL", () => {
     expect(ARTICULO_PRICE_SQL).toContain("FROM articulo");
   });
 
+  /**
+   * UNILOT is the caja factor, and this run IS its backfill: the portal
+   * multiplies every price by it, so a projection that stopped selecting it
+   * would leave 3,000 products silently priced per bottle on a page that says
+   * caja.
+   */
+  it("selects UNILOT, the factor the whole caja price rests on", () => {
+    expect(ARTICULO_PRICE_SQL).toContain("UNILOT");
+  });
+
   it("reads and nothing else", () => {
     expect(ARTICULO_PRICE_SQL).not.toMatch(/INSERT|UPDATE|DELETE|MERGE/i);
   });
@@ -261,8 +271,9 @@ describe("runPriceSync", () => {
       price_4_cents: null,
       price_5_cents: null,
       price_6_cents: null,
-      // UNILOT 0 is "not sold by the case", which the column constraint rejects.
-      units_per_case: null,
+      // UNILOT 0 is "not sold by the case": the factor is 1, the value that
+      // leaves the per-caja price equal to the base price.
+      units_per_case: 1,
       erp_synced_at: NOW.toISOString(),
       unit: "KG",
       is_weighed: true,

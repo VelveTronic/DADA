@@ -85,9 +85,10 @@ export function CartProvider({
   /** The server-parsed cookie. New object every render; that is the point. */
   cart: Cart;
   /**
-   * Unit price in cents for the products THIS page rendered, and only those.
-   * The bar shows a subtotal when it covers every line and stays count-only
-   * when it does not.
+   * Price of one CAJA in cents for the products THIS page rendered, and only
+   * those — the same unit `cart` counts in. The bar shows a subtotal when it
+   * covers every line and stays count-only when it does not, which is also what
+   * an empty map buys a page that renders no amounts at all.
    */
   prices: Record<string, number>;
   children: ReactNode;

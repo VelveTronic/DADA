@@ -6,8 +6,8 @@ import { redirect } from "next/navigation";
 import { routing } from "@/i18n/routing";
 import { requireStaff } from "@/lib/auth/guards";
 import {
-  parseSettingInput,
   parseSettingKey,
+  parseToggleFormData,
   type SettingsError,
 } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -22,7 +22,7 @@ import { canManageStaff } from "@/lib/user-admin";
  *   requireStaff(locale)     → who is asking, and are they still active
  *   canManageStaff(role)     → owner only; a Server Action is an open POST
  *                              endpoint, so the page hiding the tab proves nothing
- *   parseSettingKey/Input    → is the request even about a setting we have
+ *   parseSettingKey/Toggle   → is the request even about a setting we have
  *
  * Only then is the admin client created. It bypasses RLS completely — that is
  * why the two gates above are not optimisations.
@@ -66,24 +66,6 @@ function finish(locale: string, result: "ok" | SettingsError): never {
 }
 
 /**
- * The toggle's value, from the hidden/checkbox pair the form posts.
- *
- * A checkbox sends NOTHING when it is off, so the form pairs it with a hidden
- * `0` that is always sent (the classic Rails/Django idiom, see
- * `settings-form.tsx`). Both fields carry the same name, so the browser posts
- * `0` alone when the switch is off and `0, 1` when it is on — the LAST entry is
- * the answer, and `FormData.get` would always return the first.
- *
- * The alternative, reading an absent field as `false`, is exactly the guess
- * `parseSettingInput` refuses to make: a truncated body would then read as "hide
- * every price from every restaurant".
- */
-function lastValue(formData: FormData, name: string): FormDataEntryValue | null {
-  const values = formData.getAll(name);
-  return values.length > 0 ? values[values.length - 1] : null;
-}
-
-/**
  * Save one setting. Owner only.
  *
  * `upsert` rather than `update`: the seeded row exists, but a settings write
@@ -101,7 +83,10 @@ export async function updateSetting(formData: FormData): Promise<void> {
   const key = parseSettingKey(formData.get("key"));
   if (!key.ok) return finish(locale, key.error);
 
-  const value = parseSettingInput(key.value, lastValue(formData, "value"));
+  // The hidden `0` and the checkbox's `1` share a field name, and the answer is
+  // the LAST of them — see `parseToggleFormData`, which is where that rule and
+  // its test live.
+  const value = parseToggleFormData(formData, key.value);
   if (!value.ok) return finish(locale, value.error);
 
   const admin = createAdminClient();

@@ -152,23 +152,44 @@ describe("toWingestPricePatch", () => {
     expect("is_weighed" in patch).toBe(false);
   });
 
-  it("maps UNILOT to units_per_case, non-positive to NULL", () => {
-    expect(toWingestPricePatch(row({ unilot: "12" }), SYNCED_AT).units_per_case)
-      .toBe(12);
-    expect(toWingestPricePatch(row({ unilot: "6.5" }), SYNCED_AT).units_per_case)
-      .toBe(6.5);
-    expect(toWingestPricePatch(row({ unilot: "0" }), SYNCED_AT).units_per_case)
-      .toBeNull();
-    expect(toWingestPricePatch(row({ unilot: "-3" }), SYNCED_AT).units_per_case)
-      .toBeNull();
-    expect(toWingestPricePatch(row({ unilot: "" }), SYNCED_AT).units_per_case)
-      .toBeNull();
-  });
+  /**
+   * The factor multiplies MONEY — the catalogue's per-caja price is
+   * `price_cents x units_per_case` and so is every order line — so the only
+   * question each case answers is "how many base units is one caja". Everything
+   * that is not a whole number of them is 1, the value that leaves the price
+   * exactly as it was.
+   */
+  describe("UNILOT → units_per_case", () => {
+    const factor = (unilot: string) =>
+      toWingestPricePatch(row({ unilot }), SYNCED_AT).units_per_case;
 
-  it("throws on a non-numeric UNILOT, naming the codart", () => {
-    expect(() =>
-      toWingestPricePatch(row({ codart: "7-123", unilot: "caja" }), SYNCED_AT),
-    ).toThrow(/7-123/);
+    const cases: Array<{ name: string; unilot: string; expected: number }> = [
+      { name: "a real case size survives", unilot: "24", expected: 24 },
+      { name: "the driver's trailing .0 is still a whole number", unilot: "2.0", expected: 2 },
+      { name: "0 means 'not sold by the case'", unilot: "0", expected: 1 },
+      { name: "a NULL column arrives as an empty cell", unilot: "", expected: 1 },
+      { name: "so does a blank one", unilot: "   ", expected: 1 },
+      { name: "a negative is ERP junk", unilot: "-3", expected: 1 },
+      // A fraction of a bottle is not a caja anyone can order, and 33 products
+      // in the live catalogue actually hold one.
+      { name: "a fraction cannot be a case size", unilot: "6.5", expected: 1 },
+      // No longer an exception: the header check is the shape canary, and the
+      // nightly sync must not stop on one junk field. See `unitsPerCase`.
+      { name: "text that is not a number at all", unilot: "caja", expected: 1 },
+      { name: "a value too big for the integer column", unilot: "1e21", expected: 1 },
+    ];
+
+    for (const { name, unilot, expected } of cases) {
+      it(`${name}: "${unilot}" → ${expected}`, () => {
+        expect(factor(unilot)).toBe(expected);
+      });
+    }
+
+    it("is never null, so nothing downstream needs a fallback", () => {
+      for (const { unilot } of cases) {
+        expect(typeof factor(unilot)).toBe("number");
+      }
+    });
   });
 
   it("stamps the caller's sync timestamp", () => {

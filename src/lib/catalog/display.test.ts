@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { localizedName, sanitizeSearch } from "./display";
+import { localizedName, sanitizeSearch, unitLabel } from "./display";
 
 describe("localizedName", () => {
   it("picks the requested locale", () => {
@@ -21,6 +21,36 @@ describe("localizedName", () => {
   });
   it("ignores non-string values", () => {
     expect(localizedName({ zh: 123 } as unknown, "zh")).toBe("");
+  });
+});
+
+describe("unitLabel", () => {
+  it("names the case content when a caja really holds several units", () => {
+    expect(unitLabel("CAJA", 24)).toBe("CAJA×24");
+    expect(unitLabel("UNIDAD", 2)).toBe("UNIDAD×2");
+  });
+
+  /**
+   * 1 is the column's default and the fallback for every UNILOT the ERP could
+   * not answer, so it is not a statement about packaging and must not read as
+   * one. It is also most of the catalogue.
+   */
+  it("says nothing at all when the factor is 1", () => {
+    expect(unitLabel("CAJA", 1)).toBe("CAJA");
+    expect(unitLabel("KG", 1)).toBe("KG");
+  });
+
+  it("tolerates the nulls the priced view's types allow", () => {
+    expect(unitLabel("CAJA", null)).toBe("CAJA");
+    expect(unitLabel(null, 24)).toBe("");
+    expect(unitLabel(undefined, undefined)).toBe("");
+  });
+
+  it("ignores a factor the DB constraint should have made impossible", () => {
+    expect(unitLabel("CAJA", 0)).toBe("CAJA");
+    expect(unitLabel("CAJA", -4)).toBe("CAJA");
+    expect(unitLabel("CAJA", 6.5)).toBe("CAJA");
+    expect(unitLabel("CAJA", Number.NaN)).toBe("CAJA");
   });
 });
 

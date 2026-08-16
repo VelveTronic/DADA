@@ -152,6 +152,36 @@ export function parseSettingInput<K extends SettingKey>(
 }
 
 /**
+ * The toggle's value, read off the form the owner just posted.
+ *
+ * A checkbox sends NOTHING when it is off, so the form pairs it with a hidden
+ * `0` that is always sent (the classic Rails/Django idiom — see
+ * `settings-form.tsx`). Both fields carry the SAME name, so the browser posts
+ * `0` alone when the switch is off and `0, 1` when it is on: the LAST entry is
+ * the answer, and `FormData.get` returns the FIRST.
+ *
+ * That off-by-one is the whole reason this lives here rather than in the server
+ * action. Reading the first entry would make every save read `0` — "hide every
+ * price from every restaurant", permanently, from a form the owner used to turn
+ * prices ON — and a `"use server"` module is not a place a test can reach. Here
+ * it is four lines of pure function with the duplicate-entry case pinned by a
+ * test, and the action is left with nothing to get wrong.
+ *
+ * The field name is fixed rather than passed in: the pair is this form's
+ * convention, and stating it once is the point of the helper.
+ */
+export function parseToggleFormData<K extends SettingKey>(
+  formData: Pick<FormData, "getAll">,
+  key: K,
+): ParsedSetting<SettingValue<K>> {
+  const values = formData.getAll("value");
+  // Empty means the field never arrived — `parseSettingInput` refuses it rather
+  // than guessing, which is the whole rule this module is built on.
+  const last = values.length > 0 ? values[values.length - 1] : null;
+  return parseSettingInput(key, last);
+}
+
+/**
  * The narrow client this module needs: anything that can read a table.
  *
  * Both callers satisfy it — the session client (`createServerSupabase`, which is
