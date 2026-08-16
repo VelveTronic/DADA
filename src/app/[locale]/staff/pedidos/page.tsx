@@ -9,11 +9,17 @@ import { beginStaff, finishStaff } from "@/lib/auth/guards";
 import { localizedName, unitLabel } from "@/lib/catalog/display";
 import { formatEuros } from "@/lib/money";
 import type { QueueTab } from "@/lib/orders";
-import { formatOrderDate, QUEUE_TABS, safeQueueTab } from "@/lib/orders";
+import {
+  formatOrderDate,
+  isLineEditResult,
+  QUEUE_TABS,
+  safeQueueTab,
+} from "@/lib/orders";
 import { perfRun } from "@/lib/perf";
 import type { Database } from "@/lib/supabase/database.types";
 import type { PublicOrder } from "@/lib/supabase/public.types";
 import { PUBLIC_ORDER_COLUMNS } from "@/lib/supabase/public.types";
+import { LineQtyForm } from "./line-qty-form";
 
 export const dynamic = "force-dynamic";
 
@@ -31,7 +37,18 @@ type QueueOrder = PublicOrder & {
   companies: { name: string; codcli: number | null } | null;
 };
 
-/** Exactly the line columns this page renders, off the order's own snapshot. */
+/**
+ * Exactly the line columns this page renders, off the order's own snapshot —
+ * plus the one thing that is deliberately NOT a snapshot.
+ *
+ * `is_weighed` exists in both places and they mean different things. The line's
+ * copy is what the order was placed under and what the bridge sends Wingest; the
+ * product's is the rule for what a quantity may look like TODAY, which is what
+ * the editor below needs, and what `staff_update_order_line` re-reads for itself.
+ * Flagging an article as weighed has to reach the orders already sitting in this
+ * queue, so the live flag wins and the snapshot is the fallback for a line whose
+ * product row is gone.
+ */
 type QueueItem = Pick<
   Database["public"]["Tables"]["order_items"]["Row"],
   | "id"
@@ -43,17 +60,26 @@ type QueueItem = Pick<
   | "units_per_case"
   | "unit_price_cents"
   | "line_total_cents"
->;
+  | "is_weighed"
+> & { products: { is_weighed: boolean } | null };
 
 export default async function StaffOrdersPage({
   params,
   searchParams,
 }: {
   params: Promise<{ locale: Locale }>;
-  searchParams: Promise<{ estado?: string; rpcResult?: string }>;
+  searchParams: Promise<{
+    estado?: string;
+    rpcResult?: string;
+    lineResult?: string;
+  }>;
 }) {
   const { locale } = await params;
-  const { estado: rawEstado, rpcResult: rawResult } = await searchParams;
+  const {
+    estado: rawEstado,
+    rpcResult: rawResult,
+    lineResult: rawLineResult,
+  } = await searchParams;
   setRequestLocale(locale);
   const perf = perfRun(`/${locale}/staff/pedidos`);
   const { supabase, pendingStaff } = await beginStaff(locale);
@@ -62,6 +88,8 @@ export default async function StaffOrdersPage({
   // reused rather than duplicated into the staff namespace.
   const tOrders = await getTranslations("orders");
   const tCart = await getTranslations("cart");
+  // …and the 称重 badge is the catalogue's, for the same reason.
+  const tCatalog = await getTranslations("catalog");
 
   // Both query strings are user-editable. The tab reaches `.eq("status", …)`,
   // so it is validated before it is used, not after.
@@ -69,6 +97,13 @@ export default async function StaffOrdersPage({
   const rpcResult =
     rawResult === "ok" || rawResult === "wrong-state" || rawResult === "error"
       ? rawResult
+      : null;
+  // The line editor answers on its own parameter rather than sharing `rpcResult`:
+  // its vocabulary is six codes wide (a quantity can be refused four ways), and a
+  // redirect only ever sets one of the two.
+  const lineResult =
+    typeof rawLineResult === "string" && isLineEditResult(rawLineResult)
+      ? rawLineResult
       : null;
 
   let query = supabase
@@ -103,8 +138,11 @@ export default async function StaffOrdersPage({
         .from("order_items")
         // One string literal, never a concatenation: supabase-js types the row
         // from the literal, and `"a, " + "b"` widens to `string` and loses it.
+        // The embed is the product's live `is_weighed`, joined through the line's
+        // own FK column exactly as the orders query joins `companies` — one more
+        // join on the same round trip, rather than a second query per card.
         .select(
-          "id, order_id, codart, name, qty, unit, units_per_case, unit_price_cents, line_total_cents",
+          "id, order_id, codart, name, qty, unit, units_per_case, unit_price_cents, line_total_cents, is_weighed, products:product_id(is_weighed)",
         )
         .in("order_id", orderIds)
         .order("sort_order", { ascending: true }),
@@ -163,6 +201,24 @@ export default async function StaffOrdersPage({
         </p>
       )}
 
+      {lineResult && (
+        <p
+          role={lineResult === "ok" ? "status" : "alert"}
+          className={`mt-4 rounded-lg px-3 py-2 text-sm ${
+            lineResult === "ok"
+              ? "bg-green-50 text-green-800"
+              : // The order moved on under the staff member's feet. Amber, like
+                // the transitions' own version of the same news: nothing broke,
+                // and nothing was written either.
+                lineResult === "WRONG_STATE"
+                ? "bg-amber-50 text-amber-800"
+                : "bg-red-50 text-red-700"
+          }`}
+        >
+          {t(`lineResults.${lineResult}`)}
+        </p>
+      )}
+
       <nav className="mt-6 flex gap-5 border-b border-border text-sm">
         {QUEUE_TABS.map((target) => (
           <Link
@@ -191,6 +247,12 @@ export default async function StaffOrdersPage({
             // state these buttons could only ever come back false. The queue
             // shows the order and leaves out the controls that cannot work.
             const actionable = order.status === "submitted";
+            // The quantity boxes belong to the 待确认 view and nowhere else. A
+            // submitted order is reachable from 全部 too, and an editable field
+            // there would be an invitation to change a pedido somebody opened
+            // the tab to READ. `staff_update_order_line` would accept it; this
+            // page does not offer it.
+            const editable = actionable && tab === "submitted";
             return (
               // The queue is read by scanning down it, so the row answers the
               // pointer the way an admin table does. `-mx-2 px-2` is what lets
@@ -252,39 +314,76 @@ export default async function StaffOrdersPage({
                     {t("orderLines", { n: lines.length })}
                   </summary>
                   <ul className="mt-1 space-y-1 text-sm">
-                    {lines.map((line) => (
-                      <li
-                        key={line.id}
-                        className="flex flex-wrap items-center gap-x-2 gap-y-0.5"
-                      >
-                        <span className="font-mono text-xs text-muted">
-                          {line.codart}
-                        </span>
-                        {/* The name is the order's own snapshot, not the
-                            product's — a renamed article still reads the way
-                            the customer ordered it. */}
-                        <span className="min-w-0 flex-1 truncate">
-                          {localizedName(line.name, locale)}
-                        </span>
-                        {/* `qty` is CAJAS and `unit_price_cents` is the ERP's
-                            per-base-unit price, so the two do not multiply out
-                            to the total beside them. The per-caja price does —
-                            `units_per_case x unit_price_cents`, both snapshotted
-                            on the line — so `qty x this = line_total_cents`
-                            exactly, and the row reads the way a staff member
-                            checking an albarán needs it to. */}
-                        <span className="text-xs text-muted tabular-nums">
-                          {line.qty} {unitLabel(line.unit, line.units_per_case)} ×{" "}
-                          {formatEuros(
-                            line.units_per_case * line.unit_price_cents,
-                            locale,
+                    {lines.map((line) => {
+                      // The live flag, with the line's own snapshot as the
+                      // fallback — the same coalesce the RPC makes, so the box
+                      // this row draws and the rule that judges it agree.
+                      const weighed =
+                        line.products?.is_weighed ?? line.is_weighed;
+                      // The per-caja price. `qty` is CAJAS and
+                      // `unit_price_cents` is the ERP's per-base-unit price, so
+                      // those two do not multiply out to the total beside them —
+                      // `units_per_case x unit_price_cents` does, both
+                      // snapshotted on the line, so `qty x this =
+                      // line_total_cents` exactly and the row reads the way a
+                      // staff member checking an albarán needs it to.
+                      const perCase = formatEuros(
+                        line.units_per_case * line.unit_price_cents,
+                        locale,
+                      );
+                      const name = localizedName(line.name, locale);
+                      return (
+                        <li
+                          key={line.id}
+                          className="flex flex-wrap items-center gap-x-2 gap-y-0.5"
+                        >
+                          <span className="font-mono text-xs text-muted">
+                            {line.codart}
+                          </span>
+                          {/* The name is the order's own snapshot, not the
+                              product's — a renamed article still reads the way
+                              the customer ordered it. */}
+                          <span className="min-w-0 flex-1 truncate">{name}</span>
+                          {/* Why this line's box takes decimals, said once, in
+                              the vocabulary the catalogue already uses. */}
+                          {weighed && (
+                            <span className="rounded-md bg-amber-100 px-1.5 py-0.5 text-xs text-amber-800">
+                              {tCatalog("weighed")}
+                            </span>
                           )}
-                        </span>
-                        <span className="w-20 text-right tabular-nums">
-                          {formatEuros(line.line_total_cents, locale)}
-                        </span>
-                      </li>
-                    ))}
+                          {editable ? (
+                            <>
+                              <LineQtyForm
+                                orderId={order.id}
+                                itemId={line.id}
+                                qty={line.qty}
+                                isWeighed={weighed}
+                                locale={locale}
+                                tab={tab}
+                                labels={{
+                                  save: t("saveQty"),
+                                  saveFor: t("saveQtyFor", { name }),
+                                  qtyFor: t("lineQtyFor", { name }),
+                                  kg: t("kg"),
+                                }}
+                              />
+                              <span className="text-xs text-muted tabular-nums">
+                                × {perCase}
+                              </span>
+                            </>
+                          ) : (
+                            <span className="text-xs text-muted tabular-nums">
+                              {line.qty}{" "}
+                              {unitLabel(line.unit, line.units_per_case)} ×{" "}
+                              {perCase}
+                            </span>
+                          )}
+                          <span className="w-20 text-right tabular-nums">
+                            {formatEuros(line.line_total_cents, locale)}
+                          </span>
+                        </li>
+                      );
+                    })}
                   </ul>
                 </details>
 

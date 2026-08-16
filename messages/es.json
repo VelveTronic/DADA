@@ -169,6 +169,18 @@
     "rpcOk": "Operación realizada",
     "rpcWrongState": "El pedido ya no estaba en ese estado. No se ha cambiado nada; actualice la página.",
     "rpcFailed": "No se ha podido completar la operación. Inténtelo de nuevo.",
+    "kg": "KG",
+    "saveQty": "Guardar",
+    "saveQtyFor": "Guardar cantidad: {name}",
+    "lineQtyFor": "Cantidad: {name}",
+    "lineResults": {
+      "ok": "Cantidad actualizada; el importe se ha recalculado.",
+      "WRONG_STATE": "El pedido ya no estaba pendiente. No se ha cambiado la cantidad; actualice la página.",
+      "BAD_LINE": "No se ha encontrado esa línea. Actualice la página e inténtelo de nuevo.",
+      "BAD_QTY": "Cantidad no válida: mayor que 0, con 3 decimales como máximo y no más de 9999.",
+      "BAD_QTY_STEP": "Este artículo no es por peso, así que la cantidad debe ser un número entero. Márquelo como «Por peso» en Gestión de productos si se vende al kilo.",
+      "DB_ERROR": "No se ha podido guardar la cantidad. Inténtelo de nuevo."
+    },
     "productsTitle": "Gestión de productos",
     "searchPlaceholder": "Buscar código o nombre…",
     "colProduct": "Producto",

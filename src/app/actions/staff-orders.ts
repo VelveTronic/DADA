@@ -5,8 +5,13 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { routing } from "@/i18n/routing";
 import { getSessionUser } from "@/lib/auth/session";
-import type { QueueTab } from "@/lib/orders";
-import { isUuid, safeQueueTab } from "@/lib/orders";
+import type { LineEditResult, QueueTab } from "@/lib/orders";
+import {
+  isUuid,
+  mapLineEditError,
+  safeQueueTab,
+  validateLineQty,
+} from "@/lib/orders";
 import { createServerSupabase } from "@/lib/supabase/server";
 
 /** The locale arrives in a form field, so it is never trusted as a path segment. */
@@ -137,4 +142,95 @@ export async function cancelOrder(formData: FormData) {
     });
     return { data, error };
   });
+}
+
+/** Back to the queue with the line editor's own banner code. */
+function lineHref(
+  locale: string,
+  tab: QueueTab,
+  result: LineEditResult,
+): string {
+  const params = new URLSearchParams({ lineResult: result });
+  if (tab !== "submitted") params.set("estado", tab);
+  return `/${locale}/staff/pedidos?${params}`;
+}
+
+/**
+ * Set the real quantity on ONE line of a pending order — the weighed-goods edit,
+ * and the partial-stock one.
+ *
+ * `staff_update_order_line` is the authority on every rule here and this action
+ * repeats none of them: the factor, the price and the product's weighed flag are
+ * all re-read inside the RPC, which is the only place they can be read without
+ * asking the form that is being validated. What the action owns is the shape of
+ * the request and the banner code that comes back.
+ *
+ * The ONE check it makes first is the shape of the number itself, and it makes it
+ * on the PERMISSIVE branch (`isWeighed: true`): NaN, zero, a negative, four
+ * decimals and anything over the cart's own 9,999 cap are answered here rather
+ * than a round trip later, while the integer-vs-fractional question is left
+ * entirely to the RPC — the action cannot know whether this product is weighed,
+ * and a form field claiming so would be exactly the input we refuse to trust.
+ *
+ * Like the two transitions above, this runs on the AUTHENTICATED client: the RPC
+ * gates on `private.is_staff()` and files the `line_adjusted` event under
+ * `auth.uid()`, which a service-role call would record as nobody.
+ */
+export async function updateOrderLineQty(formData: FormData) {
+  await assertStaff();
+  const locale = safeLocale(formData.get("locale"));
+  const tab = safeQueueTab(String(formData.get("estado") ?? ""));
+  const orderId = String(formData.get("order_id") ?? "");
+  // `order_items.id` is a bigint identity, so the wire value is a plain integer.
+  const itemId = Number(formData.get("item_id"));
+  // Neither can come out of the rendered page malformed; both would otherwise
+  // reach Postgres as a cast error. Silent, like the cart actions.
+  if (!isUuid(orderId) || !Number.isSafeInteger(itemId) || itemId <= 0) return;
+
+  // `<input type="number">` always posts a dot-decimal string or an empty one —
+  // a comma typed into it never reaches here, it makes the field blank, and a
+  // blank field is a quantity of zero, which is a BAD_QTY like any other.
+  const qty = Number(String(formData.get("qty") ?? "").trim());
+  // Named like the other two forms' field. The card has no per-line note box
+  // today; the RPC takes one and records it in the audit row, so the action
+  // forwards whatever the form carries rather than hard-coding its absence.
+  const rawNote = String(formData.get("note") ?? "").trim();
+  const note = rawNote === "" ? undefined : rawNote;
+
+  let result: LineEditResult;
+  const shape = validateLineQty(qty, true);
+  if (shape) {
+    result = shape;
+  } else {
+    const supabase = await createServerSupabase();
+    // Only the RPC round trip lives in this block — `redirect()` throws
+    // NEXT_REDIRECT, which a catch-all try would swallow.
+    try {
+      const { data, error } = await supabase.rpc("staff_update_order_line", {
+        p_order_id: orderId,
+        p_item_id: itemId,
+        p_qty: qty,
+        p_note: note,
+      });
+      if (error) {
+        console.error("staff line edit:", error);
+        result = mapLineEditError(error.message);
+      } else {
+        // `false` is NOT success: the RPC updates `where status = 'submitted'`
+        // and answers whether that still held, so a false means the order was
+        // confirmed or cancelled first and this quantity never landed.
+        result =
+          data === true ? "ok" : data === false ? "WRONG_STATE" : "DB_ERROR";
+      }
+    } catch (cause) {
+      console.error("staff line edit:", cause);
+      result = "DB_ERROR";
+    }
+  }
+
+  // The customer's own /pedidos needs nothing: it is `force-dynamic` and reads
+  // the same rows on its next request, which is why the two transitions above
+  // revalidate only this path either.
+  revalidatePath(`/${locale}/staff/pedidos`);
+  redirect(lineHref(locale, tab, result));
 }

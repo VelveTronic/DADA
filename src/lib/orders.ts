@@ -187,3 +187,97 @@ export function mapOrderError(message: string | null | undefined): {
   const candidate = raw.slice(colon + 1).split(":")[0].trim();
   return { key, detail: isOrderErrorDetail(candidate) ? candidate : null };
 }
+
+/**
+ * The cart cookie's own per-line cap, restated for the staff queue's editor.
+ *
+ * `staff_update_order_line` does NOT enforce this one — it enforces exactly what
+ * `create_order` enforces, and neither of them has ever known about a number a
+ * COOKIE could not hold. It is here so the queue refuses, in words, the quantity
+ * the cart page would have refused silently: a staff member correcting 3 cajas to
+ * 2 has no business typing 40,000, and a stray keypress that produces one should
+ * come back as "revise la cantidad" rather than as a €400,000 pedido.
+ */
+export const MAX_LINE_QTY = 9999;
+
+/**
+ * Is this a quantity a line may hold? `null` when it is.
+ *
+ * The two codes are `create_order`'s and `staff_update_order_line`'s, deliberately
+ * — this is the same question asked one round trip earlier, so a staff member who
+ * sees BAD_QTY_STEP here is reading the sentence the RPC would have sent back.
+ *
+ * `isWeighed` is the ONE thing this function cannot be told by a form. The RPC
+ * re-reads it from the product at call time and is the authority; the queue passes
+ * what it rendered the row with, and the action passes `true` — the permissive
+ * branch — so that the integer rule is decided once, by the side that actually
+ * knows. Everything else (finite, positive, ≤ 3 decimals, under the cap) is the
+ * same answer wherever it is asked.
+ *
+ * Three decimals are checked the way the cart rounds them (`× 1000`, round, back)
+ * rather than by counting characters: the caller has a `number`, and 5.2 is not
+ * exactly 5.2 in binary — but `Math.round(5.2 * 1000) / 1000` is exactly the 5.2
+ * it started from, while 0.1234 is not.
+ */
+export function validateLineQty(
+  qty: number,
+  isWeighed: boolean,
+): "BAD_QTY" | "BAD_QTY_STEP" | null {
+  if (!Number.isFinite(qty) || qty <= 0 || qty > MAX_LINE_QTY) return "BAD_QTY";
+  if (Math.round(qty * 1000) / 1000 !== qty) return "BAD_QTY";
+  if (!isWeighed && !Number.isInteger(qty)) return "BAD_QTY_STEP";
+  return null;
+}
+
+/**
+ * Every outcome the queue's line editor reports, as it travels back in
+ * `?lineResult=` and indexes `staff.lineResults.*`.
+ *
+ * `WRONG_STATE` is `staff_update_order_line` returning `false`: the order was
+ * confirmed or cancelled by somebody else while this page was open, and the edit
+ * did NOT apply. It is the one outcome that is neither a success nor a fault, and
+ * it is reported rather than assumed away — the same contract the confirm and
+ * cancel buttons already have.
+ */
+export const LINE_EDIT_RESULTS = [
+  "ok",
+  "WRONG_STATE",
+  "BAD_LINE",
+  "BAD_QTY",
+  "BAD_QTY_STEP",
+  "DB_ERROR",
+] as const;
+
+export type LineEditResult = (typeof LINE_EDIT_RESULTS)[number];
+
+/** Guards `?lineResult=` on the way back in: the query string is user-editable. */
+export function isLineEditResult(value: string): value is LineEditResult {
+  return LINE_EDIT_RESULTS.some((result) => result === value);
+}
+
+/**
+ * The codes `staff_update_order_line` RAISES — `BAD_QTY_STEP` with the codart
+ * appended, as `create_order` does it. `ok` and `WRONG_STATE` are not among them
+ * on purpose: neither is ever an exception, so a Postgres message that happened
+ * to read "WRONG_STATE" must not be able to redraw a failed edit as a handled one.
+ */
+const LINE_EDIT_RAISED: readonly LineEditResult[] = [
+  "BAD_LINE",
+  "BAD_QTY",
+  "BAD_QTY_STEP",
+];
+
+/**
+ * Map a Postgres error message onto a line-editor result. Anything the RPC did
+ * not raise — a revoked grant, a lost connection, `integer out of range` from a
+ * line total that does not fit its column — is DB_ERROR: the edit did not happen
+ * and nothing more specific can honestly be said about why.
+ */
+export function mapLineEditError(
+  message: string | null | undefined,
+): LineEditResult {
+  const raw = String(message ?? "");
+  const colon = raw.indexOf(":");
+  const code = (colon === -1 ? raw : raw.slice(0, colon)).trim();
+  return LINE_EDIT_RAISED.find((result) => result === code) ?? "DB_ERROR";
+}

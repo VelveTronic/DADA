@@ -595,6 +595,15 @@ export type Database = {
         Args: { p_order_id: string; p_staff_note?: string }
         Returns: boolean
       }
+      staff_update_order_line: {
+        Args: {
+          p_item_id: number
+          p_note?: string
+          p_order_id: string
+          p_qty: number
+        }
+        Returns: boolean
+      }
     }
     Enums: {
       [_ in never]: never

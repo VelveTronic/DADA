@@ -2,16 +2,21 @@ import { describe, expect, it } from "vitest";
 import {
   addDays,
   formatOrderDate,
+  isLineEditResult,
   isOrderErrorDetail,
   isOrderErrorKey,
   isOrderStatus,
   isUuid,
+  LINE_EDIT_RESULTS,
   madridDay,
+  mapLineEditError,
   mapOrderError,
+  MAX_LINE_QTY,
   ORDER_STATUSES,
   parseOrderNumber,
   QUEUE_TABS,
   safeQueueTab,
+  validateLineQty,
 } from "./orders";
 
 describe("madridDay", () => {
@@ -224,5 +229,96 @@ describe("formatOrderDate", () => {
   it("renders nothing for a value it cannot parse", () => {
     expect(formatOrderDate("", "es")).toBe("");
     expect(formatOrderDate("not a date", "zh")).toBe("");
+  });
+});
+
+describe("validateLineQty", () => {
+  /**
+   * The table IS the contract `staff_update_order_line` enforces one round trip
+   * later, so each row is a quantity the RPC was actually asked about against the
+   * live database (2026-08-16) and answered the same way.
+   */
+  const cases: [number, boolean, string | null][] = [
+    // Whole quantities are fine either way — a weighed line may be exactly 5 kg.
+    [1, false, null],
+    [1, true, null],
+    [3, false, null],
+    [MAX_LINE_QTY, false, null],
+    [MAX_LINE_QTY, true, null],
+    // The owner's own example: 柠檬 ordered as 1, weighed at 5.2 kg.
+    [5.2, true, null],
+    [0.5, true, null],
+    [1.235, true, null],
+    // …and the same fraction on a product nobody has flagged as weighed.
+    [5.2, false, "BAD_QTY_STEP"],
+    [0.5, false, "BAD_QTY_STEP"],
+    // Four decimals are past what `numeric(10,3)` can hold, weighed or not.
+    [1.2345, true, "BAD_QTY"],
+    [1.2345, false, "BAD_QTY"],
+    // Zero is removal, and removal is out of scope: cancel the order instead.
+    [0, true, "BAD_QTY"],
+    [0, false, "BAD_QTY"],
+    [-1, true, "BAD_QTY"],
+    [-0.5, true, "BAD_QTY"],
+    // Over the cookie's cap, and the two values a bad parse produces.
+    [MAX_LINE_QTY + 1, true, "BAD_QTY"],
+    [Number.NaN, true, "BAD_QTY"],
+    [Number.POSITIVE_INFINITY, true, "BAD_QTY"],
+  ];
+
+  for (const [qty, isWeighed, expected] of cases) {
+    it(`${qty} on a ${isWeighed ? "weighed" : "non-weighed"} line → ${expected ?? "ok"}`, () => {
+      expect(validateLineQty(qty, isWeighed)).toBe(expected);
+    });
+  }
+
+  it("agrees with the cart on what three decimals means", () => {
+    // Binary floating point: 5.2 * 1000 is not 5200, and 1.005 * 1000 is not
+    // 1005. Both are still three-decimal quantities, and both round-trip — which
+    // is the whole reason the check is written as a round-trip rather than as a
+    // digit count on `String(qty)`.
+    expect(validateLineQty(5.2, true)).toBe(null);
+    expect(validateLineQty(1.005, true)).toBe(null);
+    expect(validateLineQty(0.001, true)).toBe(null);
+    expect(validateLineQty(0.0001, true)).toBe("BAD_QTY");
+  });
+});
+
+describe("mapLineEditError", () => {
+  it("maps what staff_update_order_line raises", () => {
+    expect(mapLineEditError("BAD_LINE")).toBe("BAD_LINE");
+    expect(mapLineEditError("BAD_QTY")).toBe("BAD_QTY");
+    // The RPC appends the codart, exactly as create_order does.
+    expect(mapLineEditError("BAD_QTY_STEP:F-003")).toBe("BAD_QTY_STEP");
+  });
+
+  it("calls everything else a DB_ERROR rather than guessing", () => {
+    expect(mapLineEditError("STAFF_ONLY")).toBe("DB_ERROR");
+    expect(mapLineEditError("NOTE_TOO_LONG")).toBe("DB_ERROR");
+    expect(mapLineEditError("integer out of range")).toBe("DB_ERROR");
+    expect(mapLineEditError("permission denied for function")).toBe("DB_ERROR");
+    expect(mapLineEditError("")).toBe("DB_ERROR");
+    expect(mapLineEditError(null)).toBe("DB_ERROR");
+    expect(mapLineEditError(undefined)).toBe("DB_ERROR");
+  });
+
+  it("never reports a failure as a handled outcome", () => {
+    // Neither is ever an exception, so neither may be read out of one: a message
+    // that happens to start with the word must not redraw a failed edit as an
+    // applied one, nor as the amber "somebody else got there first".
+    expect(mapLineEditError("ok")).toBe("DB_ERROR");
+    expect(mapLineEditError("WRONG_STATE")).toBe("DB_ERROR");
+  });
+});
+
+describe("isLineEditResult", () => {
+  it("guards `?lineResult=` against a hand-edited query string", () => {
+    for (const result of LINE_EDIT_RESULTS) {
+      expect(isLineEditResult(result), result).toBe(true);
+    }
+    expect(isLineEditResult("")).toBe(false);
+    expect(isLineEditResult("toString")).toBe(false);
+    expect(isLineEditResult("STAFF_ONLY")).toBe(false);
+    expect(isLineEditResult("bad_qty")).toBe(false);
   });
 });

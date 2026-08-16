@@ -169,6 +169,18 @@
     "rpcOk": "操作已完成",
     "rpcWrongState": "订单状态已变化，未作任何修改。请刷新后再试。",
     "rpcFailed": "操作未完成，请稍后重试。",
+    "kg": "公斤",
+    "saveQty": "保存",
+    "saveQtyFor": "保存数量：{name}",
+    "lineQtyFor": "数量：{name}",
+    "lineResults": {
+      "ok": "数量已更新，金额已重新计算。",
+      "WRONG_STATE": "订单已不在待确认状态，数量未修改。请刷新后再试。",
+      "BAD_LINE": "找不到该明细行，请刷新后重试。",
+      "BAD_QTY": "数量无效：必须大于 0，最多 3 位小数，且不超过 9999。",
+      "BAD_QTY_STEP": "该商品不是称重商品，数量必须是整数。如需按重量下单，请先在商品管理中设为称重。",
+      "DB_ERROR": "数量未能保存，请稍后重试。"
+    },
     "productsTitle": "商品管理",
     "searchPlaceholder": "搜索编号或名称…",
     "colProduct": "商品",

@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { ORDER_ERROR_KEYS, ORDER_STATUSES } from "@/lib/orders";
+import {
+  LINE_EDIT_RESULTS,
+  ORDER_ERROR_KEYS,
+  ORDER_STATUSES,
+} from "@/lib/orders";
 import { PROFILE_ERRORS } from "@/lib/profile";
 import { SETTINGS_ERRORS } from "@/lib/settings";
 import { STAFF_ROLES, USER_ADMIN_ERRORS } from "@/lib/user-admin";
@@ -76,6 +80,21 @@ describe("translations", () => {
     for (const key of [...PROFILE_ERRORS, "ok"]) {
       expect(zhResults[key], `zh profile.results.${key}`).toBeTypeOf("string");
       expect(esResults[key], `es profile.results.${key}`).toBeTypeOf("string");
+    }
+  });
+
+  /**
+   * `updateOrderLineQty` redirects with `?lineResult=<CODE>` and the queue draws
+   * `staff.lineResults.<CODE>` off it. A code with no message here reaches a
+   * staff member as the raw token while they are correcting the weight on an
+   * order that is about to be injected into Wingest.
+   */
+  it("carries a staff.lineResults message for every line-edit outcome", () => {
+    const zhResults: Record<string, string> = zh.staff.lineResults;
+    const esResults: Record<string, string> = es.staff.lineResults;
+    for (const key of LINE_EDIT_RESULTS) {
+      expect(zhResults[key], `zh staff.lineResults.${key}`).toBeTypeOf("string");
+      expect(esResults[key], `es staff.lineResults.${key}`).toBeTypeOf("string");
     }
   });
 
