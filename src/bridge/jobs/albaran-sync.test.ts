@@ -167,8 +167,13 @@ describe("buildAlbaranQuery", () => {
   it("parameterises every NUMPED", () => {
     expect(buildAlbaranQuery(3)).toBe(
       "SELECT NUMPED, NUMALB FROM albfacca " +
-        "WHERE CAN=@can AND EJEALB=@eje AND NUMPED IN (@p0, @p1, @p2)",
+        "WHERE CAN=@can AND EJEALB=@eje AND NUMPED IN (@p0, @p1, @p2) " +
+        "ORDER BY NUMPED, NUMALB",
     );
+  });
+
+  it("orders by NUMALB so the lowest albarán of a split delivery comes first", () => {
+    expect(buildAlbaranQuery(1)).toContain("ORDER BY NUMPED, NUMALB");
   });
 
   it("puts no literal value in the statement, whatever the batch size", () => {
@@ -344,6 +349,62 @@ describe("runAlbaranSync", () => {
     expect(h.marks).toEqual([]);
     expect(result.counts).toEqual({ injected: 1, matched: 0, marked: 0 });
     expect(h.lines.some((l) => l.level === "WARN")).toBe(true);
+  });
+
+  it("marks a split delivery ONCE, on its first albarán", async () => {
+    // One pedido, delivered in two goes: albfacca holds a row per delivery, and
+    // ORDER BY NUMALB puts the lowest first. The portal shows one number.
+    const h = harness({
+      injected: [{ id: "a", numped: 501 }],
+      rows: [
+        [
+          { NUMPED: 501, NUMALB: 88 },
+          { NUMPED: 501, NUMALB: 91 },
+        ],
+      ],
+    });
+    const result = await runAlbaranSync(h.deps);
+
+    expect(h.marks).toEqual([{ orderId: "a", numalb: 88 }]);
+    expect(result.counts).toEqual({ injected: 1, matched: 1, marked: 1 });
+    expect(h.lines.filter((l) => l.level === "ERROR")).toEqual([]);
+  });
+
+  it("does not re-mark a pedido whose second albarán lands in a later chunk", async () => {
+    const injected = Array.from({ length: ALBARAN_CHUNK_SIZE + 1 }, (_, i) => ({
+      id: `o${i}`,
+      numped: 1000 + i,
+    }));
+    const h = harness({
+      injected,
+      rows: [[{ NUMPED: 1000, NUMALB: 88 }], [{ NUMPED: 1000, NUMALB: 91 }]],
+    });
+    const result = await runAlbaranSync(h.deps);
+
+    expect(h.marks).toEqual([{ orderId: "o0", numalb: 88 }]);
+    expect(result.counts.matched).toBe(1);
+    expect(result.counts.marked).toBe(1);
+  });
+
+  it("keeps matched at or below the number of pedidos it asked about", async () => {
+    const h = harness({
+      injected: [
+        { id: "a", numped: 501 },
+        { id: "b", numped: 502 },
+      ],
+      rows: [
+        [
+          { NUMPED: 501, NUMALB: 88 },
+          { NUMPED: 501, NUMALB: 89 },
+          { NUMPED: 502, NUMALB: 90 },
+          { NUMPED: 502, NUMALB: 92 },
+        ],
+      ],
+    });
+    const { counts } = await runAlbaranSync(h.deps);
+
+    expect(Number(counts.matched)).toBeLessThanOrEqual(Number(counts.injected));
+    expect(counts).toEqual({ injected: 2, matched: 2, marked: 2 });
   });
 
   it("ignores a NUMPED the portal is not waiting for", async () => {

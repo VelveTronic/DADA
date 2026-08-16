@@ -107,6 +107,12 @@ export function describeError(error: unknown): LogFields {
   const fields: LogFields = { error: `${error.name}: ${error.message}` };
   const code = (error as { code?: unknown }).code;
   if (typeof code === "string" || typeof code === "number") fields.code = code;
+  // `path` is lifted for the same reason as `code`: a LockError's path is the
+  // file the operator has to go and delete, and a remedy buried inside a message
+  // is one a grep for `path=` will not find. SupabaseHttpError and
+  // SupabaseNetworkError carry one too — the endpoint that failed.
+  const path = (error as { path?: unknown }).path;
+  if (typeof path === "string") fields.path = path;
   const cause = error.cause;
   if (cause instanceof Error) {
     fields.cause = `${cause.name}: ${cause.message}`;

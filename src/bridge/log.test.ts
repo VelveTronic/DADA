@@ -87,6 +87,21 @@ describe("describeError", () => {
   it("survives a non-Error throw", () => {
     expect(describeError("plain string")).toEqual({ error: "plain string" });
   });
+
+  it("lifts a path, so the file to delete is a field and not buried in prose", () => {
+    const error = Object.assign(new Error("orders is already running"), {
+      code: "LOCK_HELD",
+      path: "C:\\dada\\bridge\\orders.lock",
+    });
+    expect(describeError(error)).toMatchObject({
+      code: "LOCK_HELD",
+      path: "C:\\dada\\bridge\\orders.lock",
+    });
+  });
+
+  it("leaves path out when the error has none", () => {
+    expect(describeError(new Error("plain"))).not.toHaveProperty("path");
+  });
 });
 
 describe("createLogger", () => {

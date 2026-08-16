@@ -32,8 +32,8 @@ import { connectWingest, injectOrder } from "./injector";
 import { runAlbaranSync } from "./jobs/albaran-sync";
 import { runOrders } from "./jobs/orders";
 import { runPriceSync } from "./jobs/price-sync";
-import type { JobResult } from "./jobs/shared";
-import { acquireLock } from "./lock";
+import type { JobCounts, JobResult } from "./jobs/shared";
+import { LockError, acquireLock, type Lock } from "./lock";
 import { createLogger, type Logger } from "./log";
 import { createBridgeSupabase, type BridgeSupabase } from "./supabase";
 
@@ -151,6 +151,10 @@ export async function main(argv: readonly string[]): Promise<number> {
 
   let cfg: BridgeConfig;
   try {
+    // The ONE exit that writes no heartbeat: without config there is no
+    // Supabase URL and no service key to write one with. A bad `bridge.env` is
+    // therefore invisible to the status card and visible only in `bridge.log` —
+    // which is the right place for it, since the fix is on the server anyway.
     cfg = loadBridgeConfigFromFile(join(dir, ENV_FILE));
   } catch (error) {
     bootstrap.logError(error, { job, stage: "config", dir });
@@ -160,45 +164,66 @@ export async function main(argv: readonly string[]): Promise<number> {
   const log = createLogger({ filePath: logPath, secrets: bridgeSecrets(cfg) });
   log.info("start", { job, dir, ...describeConfig(cfg) });
 
-  const lock = (() => {
-    try {
-      return acquireLock(dir, job, { log });
-    } catch (error) {
-      // Not an error worth a stack trace every minute: the orders job overrunning
-      // its one-minute schedule is exactly what the lock is for.
-      log.logError(error, { job, stage: "lock" });
-      return null;
-    }
-  })();
-  if (!lock) return 1;
-
   const api = createBridgeSupabase(cfg);
-  let result: JobResult = { ok: false, counts: {} };
-  try {
-    result = await runJob(job, cfg, api, log);
-  } catch (error) {
-    log.logError(error, { job, stage: "run" });
-    result = { ok: false, counts: { error: "RUN_FAILED" } };
-  } finally {
-    // The summary first: it is the line the operator reads and pastes, and it
-    // must survive anything the heartbeat does next.
-    log.info(`${job} summary`, { ...result.counts, ok: result.ok });
+  /**
+   * Telemetry, and telemetry never fails a run. This is also the try/catch the
+   * supabase client cannot do for us: a 404 whose body is not PostgREST JSON
+   * still escapes `heartbeat` as a thrown error.
+   */
+  const beat = async (ok: boolean, detail: JobCounts): Promise<void> => {
     try {
       const written = await api.heartbeat({
         job,
         last_run_at: new Date().toISOString(),
-        ok: result.ok,
-        detail: result.counts,
+        ok,
+        detail,
       });
       if (!written) {
         log.warn("heartbeat skipped: bridge_status is not deployed yet", { job });
       }
     } catch (error) {
-      // Telemetry must never fail a run that already injected orders. This is
-      // the try/catch the supabase client cannot do for us: a 404 whose body is
-      // not PostgREST JSON still escapes `heartbeat` as a thrown error.
       log.logError(error, { job, stage: "heartbeat" });
     }
+  };
+
+  let lock: Lock;
+  try {
+    lock = acquireLock(dir, job, { log });
+  } catch (error) {
+    if (error instanceof LockError) {
+      // No stack trace: the orders job overrunning its one-minute schedule is
+      // the ordinary case this lock exists for, and a 1.2 KB stack every minute
+      // would bury the run it is waiting on. `code` and `path` are the two
+      // things a remedy needs — the second names the file to delete.
+      log.error(error.message, { job, stage: "lock", code: error.code, path: error.path });
+    } else {
+      log.logError(error, { job, stage: "lock" });
+    }
+    // Config IS loaded here, so a heartbeat is possible — and worth writing.
+    // Without it, a job blocked every single minute by a lock nobody deleted
+    // looks exactly like a job that was never scheduled: both leave a stale
+    // `last_run_at`. With it, the status card can name the difference.
+    // `code`, not `error`: the bridge's house style throughout is that `code` is
+    // a short machine token an alert rule keys on and `error` is a human
+    // message (see log.ts's describeError, which emits both). The status card
+    // reads this one.
+    await beat(false, {
+      code: error instanceof LockError ? error.code : "LOCK_FAILED",
+    });
+    return 1;
+  }
+
+  let result: JobResult = { ok: false, counts: {} };
+  try {
+    result = await runJob(job, cfg, api, log);
+  } catch (error) {
+    log.logError(error, { job, stage: "run" });
+    result = { ok: false, counts: { code: "RUN_FAILED" } };
+  } finally {
+    // The summary first: it is the line the operator reads and pastes, and it
+    // must survive anything the heartbeat does next.
+    log.info(`${job} summary`, { ...result.counts, ok: result.ok });
+    await beat(result.ok, result.counts);
     lock.release();
   }
 

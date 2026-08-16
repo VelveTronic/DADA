@@ -276,6 +276,27 @@ describe("runPriceSync", () => {
     expect(result.ok).toBe(true);
   });
 
+  it("names the first unmatched codarts, as the CSV importer does", async () => {
+    const rows = Array.from({ length: 25 }, (_, i) => articulo({ codart: `X-${i}` }));
+    const h = harness({ rows, patch: () => Promise.resolve(false) });
+    await runPriceSync(h.deps);
+
+    const merged = h.lines.find((l) => l.message === "merged");
+    const sample = String(merged?.fields.sample).split(",");
+    // Twenty is the cap: a count alone cannot tell "the ERP's own packaging
+    // articles" from "a product family the portal import missed".
+    expect(sample).toHaveLength(20);
+    expect(sample[0]).toBe("X-0");
+  });
+
+  it("leaves the sample off when every article matched", async () => {
+    const h = harness({ rows: [articulo()] });
+    await runPriceSync(h.deps);
+
+    const merged = h.lines.find((l) => l.message === "merged");
+    expect(merged?.fields.sample).toBeNull();
+  });
+
   it("keeps matched + notInPortal + skipped equal to articles", async () => {
     const h = harness({
       rows: [articulo({ codart: "A" }), articulo({ codart: "  " }), articulo({ codart: "C" })],

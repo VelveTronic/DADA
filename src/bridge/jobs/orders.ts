@@ -18,7 +18,7 @@
 import type * as sql from "mssql";
 import type { BridgeConfig } from "../config";
 import type { InjectResult } from "../injector";
-import type { Logger } from "../log";
+import type { LogFields, Logger } from "../log";
 import type { ClaimedOrder } from "../payload";
 import type { BridgeSupabase } from "../supabase";
 import type { JobCounts, JobResult } from "./shared";
@@ -79,7 +79,7 @@ export function ordersCounts(tally: OrdersTally): JobCounts {
  * failed" is one nobody can action; these three are what an operator types into
  * the portal and into Wingest to see the same order from both sides.
  */
-function orderFields(order: ClaimedOrder): JobCounts {
+function orderFields(order: ClaimedOrder): LogFields {
   return {
     orderId: order.id,
     orderNumber: order.order_number,
@@ -112,8 +112,9 @@ export async function runOrders(deps: OrdersDeps): Promise<JobResult> {
   try {
     // Sequential on purpose: the injector reserves counters in `newcontador`
     // inside a SERIALIZABLE transaction, and two orders in flight would take
-    // those same rows in the same order and block each other. The queue is
-    // twenty orders at most.
+    // those same rows in the same order and block each other. The batch is
+    // CLAIM_LIMIT orders — 20 by default, 200 at the ceiling `config.ts`
+    // enforces — so the whole run is seconds even at the top of that range.
     for (const order of orders) {
       let result: InjectResult;
       try {

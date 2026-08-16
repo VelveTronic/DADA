@@ -64,6 +64,16 @@ export const ORDERABLE_WITH_PRICE_FILTERS: Record<string, string> = {
 /** ~3k single-row PATCHes take minutes; say something so it does not look hung. */
 const PROGRESS_EVERY = 500;
 
+/**
+ * How many unmatched codarts the summary names, as the CSV importer does.
+ *
+ * A bare `notInPortal=412` cannot be acted on: the operator needs to see whether
+ * those are the ERP's internal articles (packaging, services) or a whole product
+ * family the portal import missed. Twenty is enough to tell those apart and
+ * short enough to stay on one log line.
+ */
+const NOT_IN_PORTAL_SAMPLE = 20;
+
 export interface PriceSyncDeps {
   cfg: BridgeConfig;
   api: Pick<BridgeSupabase, "patchProduct" | "countProducts">;
@@ -175,6 +185,7 @@ export async function runPriceSync(deps: PriceSyncDeps): Promise<JobResult> {
   const syncedAt = now().toISOString();
   let withAnyPrice = 0;
   let ok = true;
+  const notInPortalSample: string[] = [];
 
   for (const [index, raw] of rows.entries()) {
     const row = toPriceRow(raw);
@@ -190,6 +201,9 @@ export async function runPriceSync(deps: PriceSyncDeps): Promise<JobResult> {
         tally.matched++;
       } else {
         tally.notInPortal++;
+        if (notInPortalSample.length < NOT_IN_PORTAL_SAMPLE) {
+          notInPortalSample.push(row.codart);
+        }
       }
     } catch (error) {
       // Name the codart AND the position: the rows before it are already merged,
@@ -214,6 +228,9 @@ export async function runPriceSync(deps: PriceSyncDeps): Promise<JobResult> {
     notInPortal: tally.notInPortal,
     withAnyPrice,
     syncedAt,
+    // Named, not just counted — see NOT_IN_PORTAL_SAMPLE. Absent when every
+    // article matched, because `sample=` with nothing after it is noise.
+    sample: notInPortalSample.length ? notInPortalSample.join(",") : null,
   });
 
   // Diagnostics, not results. A failure here is recorded in the summary and

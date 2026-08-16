@@ -32,12 +32,20 @@ export interface AlbaranDeps {
   connect: (cfg: BridgeConfig) => Promise<SqlParent & { close(): Promise<unknown> }>;
 }
 
+/**
+ * `injected` counts DISTINCT NUMPEDs, not portal orders — it is the size of the
+ * set this run asked `albfacca` about. `matched` counts the NUMPEDs that came
+ * back with a usable albarán, and can never exceed `injected`: a pedido is
+ * removed from the waiting set the moment it matches, so the several albfacca
+ * rows one pedido produces across partial deliveries count once.
+ *
+ * `marked` counts ORDER rows confirmed by `bridge_mark_albaran`, so it equals
+ * `matched` in every normal run and exceeds it only if two portal orders somehow
+ * share a NUMPED — the collision this job warns about rather than hides.
+ */
 export interface AlbaranTally {
-  /** Portal orders in `injected` carrying a NUMPED — what we asked about. */
   injected: number;
-  /** Of those, the ones Wingest has already converted into an albarán. */
   matched: number;
-  /** Of those, the ones `bridge_mark_albaran` confirmed. */
   marked: number;
 }
 
@@ -80,7 +88,13 @@ export function buildAlbaranQuery(numpedCount: number): string {
   const placeholders = Array.from({ length: numpedCount }, (_, i) => `@p${i}`).join(", ");
   return (
     "SELECT NUMPED, NUMALB FROM albfacca " +
-    `WHERE CAN=@can AND EJEALB=@eje AND NUMPED IN (${placeholders})`
+    `WHERE CAN=@can AND EJEALB=@eje AND NUMPED IN (${placeholders}) ` +
+    // ORDER BY is what makes "the first row wins" mean "the LOWEST albarán
+    // wins": one pedido delivered in two goes has two albfacca rows, and the
+    // portal shows a single NUMALB. The first one issued is the one the customer
+    // was told about, and an unordered recordset would pick whichever the query
+    // plan happened to emit first — a number that could change between runs.
+    "ORDER BY NUMPED, NUMALB"
   );
 }
 
@@ -166,15 +180,26 @@ export async function runAlbaranSync(deps: AlbaranDeps): Promise<JobResult> {
       for (const raw of result.recordset ?? []) {
         const { numped, numalb } = readAlbaranRow(raw);
         if (numped === null) continue;
+        // Absent from the map means either "not a pedido this portal is waiting
+        // for" or "already handled by an earlier row of this same run" — a
+        // pedido delivered in parts has one albfacca row per delivery.
         const orderIds = byNumped.get(numped);
         if (!orderIds) continue;
         if (numalb === null || numalb <= 0) {
           // An albfacca row with no albarán number is not a conversion we can
-          // report; leave the order in `injected` and say so.
+          // report; leave the order in `injected` and say so. The pedido stays
+          // in the waiting set, so a later row that DOES carry a number still
+          // gets its chance.
           log.warn("albfacca row has no usable NUMALB", { numped, numalb });
           continue;
         }
         tally.matched++;
+        // Claim the pedido before marking, not after: this is what keeps
+        // `matched` at one per pedido and stops a second delivery's row — in
+        // this chunk or a later one — from marking the same order twice. A mark
+        // that fails is not retried inside the run; the next run re-reads the
+        // same albfacca rows and tries again.
+        byNumped.delete(numped);
         if (orderIds.length > 1) {
           log.warn("several portal orders carry the same numped", {
             numped,
