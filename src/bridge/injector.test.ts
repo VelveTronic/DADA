@@ -118,13 +118,16 @@ const V32_LOT_FALLBACK_SQL =
  *
  * Read against the v3.2 pair above, the differences are the whole deviation:
  * raw `CANT` became `CANT` minus the open pedidos' outstanding quantity, and the
- * fallback sorts by that instead of by what is on the shelf.
+ * fallback sorts by that instead of by what is on the shelf. The three
+ * `COLLATE DATABASE_DEFAULT` labels are what makes that subquery compile at all
+ * across Wingest's mixed collations — see the test that pins them.
  */
 const LOT_RESERVATION_SQL =
   "(s.CANT - ISNULL((SELECT SUM(ISNULL(l.CANPED,0) - ISNULL(l.CANSER,0)) FROM pedclili l" +
   " JOIN pedclica c ON c.CAN=l.CAN AND c.EJE=l.EJE AND c.NUMPED=l.NUMPED" +
-  " WHERE c.ESTPED='Abierto' AND l.CODALM=s.CODALM" +
-  " AND l.CODART=s.CODART AND l.CODLOT=s.CODLOT), 0))";
+  " WHERE c.ESTPED='Abierto' AND l.CODALM=s.CODALM COLLATE DATABASE_DEFAULT" +
+  " AND l.CODART=s.CODART COLLATE DATABASE_DEFAULT" +
+  " AND l.CODLOT=s.CODLOT COLLATE DATABASE_DEFAULT), 0))";
 
 const LOT_HEAD_SQL =
   "SELECT TOP 1 RTRIM(s.CODLOT) AS LOT, s.FECCAD FROM stolot s" +
@@ -512,6 +515,31 @@ describe("pickLot vs the v3.2 reference — the 2026-08-16 availability deviatio
       expect(reservation).toContain(pair);
     }
     expect(reservation).not.toContain("RTRIM");
+  });
+
+  it("labels the collation of every correlation predicate, on the s side only", () => {
+    // The 2026-08-16 sandbox run (order 1006) failed PREFLIGHT with "Cannot
+    // resolve the collation conflict between Modern_Spanish_CS_AS and
+    // Modern_Spanish_CI_AS in the equal to operation": pedclili and stolot do
+    // not share a collation, and two IMPLICIT labels give SQL Server no rule to
+    // pick between them. An EXPLICIT label wins over an implicit one, so one
+    // side carrying it resolves the comparison whichever table is the odd one
+    // out. It is the `s` side — one outer-row value per evaluation — so the
+    // pedclili/pedclica lookups stay seekable when pedclili already matches the
+    // database default; if it does not, that costs a seek, never correctness.
+    const reservation = LOT_AVAILABLE_SQL;
+    for (const col of ["CODALM", "CODART", "CODLOT"]) {
+      expect(reservation).toContain(`l.${col}=s.${col} COLLATE DATABASE_DEFAULT`);
+      // The l side stays bare: labelling the subquery's own column is what
+      // would make its index unusable.
+      expect(reservation).not.toContain(`l.${col} COLLATE`);
+    }
+    // Three predicates, three labels — no more (a stray one on `s.CODALM=@alm`
+    // or on the ESTPED literal would be dead weight) and no fewer.
+    expect(reservation.match(/COLLATE DATABASE_DEFAULT/g)).toHaveLength(3);
+    // The literal comparison takes the column's collation and needs nothing.
+    expect(reservation).toContain("c.ESTPED='Abierto' AND");
+    expect(reservation).not.toMatch(/ESTPED\s*=\s*'Abierto'\s+COLLATE/);
   });
 
   it("does not scope the reservation to an ejercicio", async () => {

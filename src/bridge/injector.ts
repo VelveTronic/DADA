@@ -908,6 +908,23 @@ export async function loadArticle(
  * outer query's `RTRIM(s.CODART)=@codart` compares against a PARAMETER, not a
  * column, and stays as v3.2 wrote it.
  *
+ * They ARE wrapped in `COLLATE DATABASE_DEFAULT`, on the `s` side. Wingest's
+ * tables carry mixed collations, and the sandbox run of **2026-08-16** (order
+ * 1006, `PREFLIGHT_FAILED`) hit it: `Cannot resolve the collation conflict
+ * between "Modern_Spanish_CS_AS" and "Modern_Spanish_CI_AS" in the equal to
+ * operation.` Each of these three predicates compares a `pedclili` column to a
+ * `stolot` one, and when the two columns' collations differ SQL Server has two
+ * IMPLICIT labels and no rule to pick between them, so the statement fails to
+ * compile — in the read phase, before any write, which is why that order lost
+ * nothing but its lease. An EXPLICIT collation label beats an implicit one, so
+ * labelling either side makes the comparison resolve no matter which table
+ * turns out to be the odd one out. It goes on `s` because that is the outer
+ * row — one value per evaluation, not a column the subquery has to seek on —
+ * which keeps the `pedclili`/`pedclica` lookups seekable whenever `pedclili`
+ * already matches the database default; if it does not, the cost is a seek,
+ * not a wrong answer. `c.ESTPED='Abierto'` compares against a literal, which
+ * takes the column's collation, and needs nothing.
+ *
  * `ISNULL` appears twice over: once per quantity, so a Wingest-written row with
  * a NULL `CANPED` or `CANSER` contributes what it holds instead of turning the
  * whole `SUM` NULL, and once around the subquery, so a lot nobody has booked
@@ -919,8 +936,9 @@ export async function loadArticle(
 export const LOT_AVAILABLE_SQL =
   "(s.CANT - ISNULL((SELECT SUM(ISNULL(l.CANPED,0) - ISNULL(l.CANSER,0)) FROM pedclili l" +
   " JOIN pedclica c ON c.CAN=l.CAN AND c.EJE=l.EJE AND c.NUMPED=l.NUMPED" +
-  " WHERE c.ESTPED='Abierto' AND l.CODALM=s.CODALM" +
-  " AND l.CODART=s.CODART AND l.CODLOT=s.CODLOT), 0))";
+  " WHERE c.ESTPED='Abierto' AND l.CODALM=s.CODALM COLLATE DATABASE_DEFAULT" +
+  " AND l.CODART=s.CODART COLLATE DATABASE_DEFAULT" +
+  " AND l.CODLOT=s.CODLOT COLLATE DATABASE_DEFAULT), 0))";
 
 /**
  * The half both lot queries share: this almacén, this article, sellable, not
