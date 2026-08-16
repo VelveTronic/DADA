@@ -249,11 +249,39 @@ describe("lineParams", () => {
   });
 
   /**
+   * The pair this check depends on, and the incident that proved it needed
+   * saying out loud.
+   *
+   * Order 1007 (2026-08-16): F-003 was flagged weighed AFTER the order was
+   * placed. The RPC judged the 5.2 kg edit against the LIVE product flag and
+   * accepted it — right — but left `order_items.is_weighed` at the false it was
+   * submitted with, and the claim payload is built from `order_items`. So the
+   * bridge was handed `qty: 5.2, is_weighed: false`, refused it below, and
+   * refused it again on every lease retry: a poison loop that had to be undone
+   * by hand.
+   *
+   * `staff_update_order_line` v2 closes it from the other side — an accepted
+   * edit writes the coalesced flag back onto the line — so a claim can only
+   * carry this pair if something OTHER than the portal's two write paths
+   * changed the row. That is what makes refusing it the right answer rather
+   * than an inconvenience.
+   */
+  it("accepts the pair the RPC now guarantees for a weighed line", () => {
+    const line = lineParams(item({ qty: 5.2, is_weighed: true, line_total_cents: 723 }));
+    expect(line.qty).toBe(5.2);
+    expect(line.isWeighed).toBe(true);
+    // The invariant, stated as the bridge sees it: every claimed line is either
+    // weighed or carries a whole number of cajas.
+    expect(line.isWeighed || Number.isInteger(line.qty)).toBe(true);
+  });
+
+  /**
    * No portal write path can produce this: `create_order` and
    * `staff_update_order_line` both raise BAD_QTY_STEP for a fraction on a
-   * product nobody flagged as weighed. A claim carrying one means the row was
-   * changed by something else, and the old code would have TRUNCATED it into
-   * `CAJ` — 2.5 cajas silently becoming 2 on the albarán.
+   * product nobody flagged as weighed, and v2 of the latter keeps the line's own
+   * snapshot in step with that judgement (see above). A claim carrying one means
+   * the row was changed by something else, and the old code would have
+   * TRUNCATED it into `CAJ` — 2.5 cajas silently becoming 2 on the albarán.
    */
   it("refuses a fractional quantity on a line that is not weighed", () => {
     expect(() => lineParams(item({ qty: 2.5 }))).toThrow(PayloadError);

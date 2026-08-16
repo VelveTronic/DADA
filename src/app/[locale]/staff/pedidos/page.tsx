@@ -48,6 +48,13 @@ type QueueOrder = PublicOrder & {
  * Flagging an article as weighed has to reach the orders already sitting in this
  * queue, so the live flag wins and the snapshot is the fallback for a line whose
  * product row is gone.
+ *
+ * The two can no longer drift apart on a line anyone has touched: since v2 of
+ * the RPC (2026-08-17, after order 1007 stranded the bridge) an accepted edit
+ * WRITES the coalesced value back onto the line, so the snapshot always records
+ * the terms the quantity beside it was last judged under. Unedited lines keep
+ * the value they were placed with, which is why this fallback still has work to
+ * do.
  */
 type QueueItem = Pick<
   Database["public"]["Tables"]["order_items"]["Row"],
@@ -317,7 +324,9 @@ export default async function StaffOrdersPage({
                     {lines.map((line) => {
                       // The live flag, with the line's own snapshot as the
                       // fallback — the same coalesce the RPC makes, so the box
-                      // this row draws and the rule that judges it agree.
+                      // this row draws and the rule that judges it agree. Saving
+                      // the row also writes that value onto the line, so the
+                      // snapshot the bridge later reads agrees with it too.
                       const weighed =
                         line.products?.is_weighed ?? line.is_weighed;
                       // The per-caja price. `qty` is CAJAS and
