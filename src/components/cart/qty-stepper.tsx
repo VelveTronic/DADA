@@ -104,7 +104,14 @@ export function QtyStepper({
         <span
           key="qty"
           aria-live="polite"
-          className="min-w-6 text-center text-sm font-semibold tabular-nums"
+          // Between 1.5rem and 2rem wide, and that CEILING is what the
+          // catalogue row's fixed action column is sized against: the pill can
+          // never grow past 98px, so no quantity — 9999 is the cookie's cap, and
+          // a weighed line can carry decimals typed on the cart page — can make
+          // it overhang its track and reach back over the product name. Four
+          // tabular digits fit the 32px; anything longer ellipsises here and
+          // stays exact on the cart page, which is where such a number is read.
+          className="min-w-6 max-w-8 truncate text-center text-sm font-semibold tabular-nums"
         >
           {qty}
         </span>

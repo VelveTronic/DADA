@@ -1,17 +1,15 @@
 import type { Locale } from "next-intl";
 import { getTranslations, setRequestLocale } from "next-intl/server";
 import Link from "next/link";
-import { toggleFavorite } from "@/app/actions/favorites";
 import { AppShell } from "@/components/app-shell";
-import { QtyStepper } from "@/components/cart/qty-stepper";
-import { ProductThumb } from "@/components/product-thumb";
+import { SearchIcon } from "@/components/icons";
 import { BTN_PRIMARY, FIELD, GLASS_CARD } from "@/components/ui";
 import { requireCompanyUser } from "@/lib/auth/guards";
-import { localizedName, sanitizeSearch, unitLabel } from "@/lib/catalog/display";
-import { formatEuros } from "@/lib/money";
+import { localizedName, sanitizeSearch } from "@/lib/catalog/display";
 import { getSetting } from "@/lib/settings";
 import type { CustomerCatalogProduct } from "@/lib/supabase/public.types";
 import { createServerSupabase } from "@/lib/supabase/server";
+import { ProductRow } from "./product-row";
 
 export const dynamic = "force-dynamic";
 
@@ -165,17 +163,25 @@ export default async function CatalogPage({
     }
   }
 
+  // 44px tall, which is the whole reason for the inline-flex: an anchor is only
+  // as tall as its text, and these two are the page's main switch on a phone.
   const tabClass = (active: boolean) =>
     active
-      ? "-mb-px border-b-2 border-brand pb-2 font-semibold"
-      : "-mb-px border-b-2 border-transparent pb-2 text-muted transition-colors hover:text-ink";
+      ? "-mb-px inline-flex h-11 items-center border-b-2 border-brand font-semibold"
+      : "-mb-px inline-flex h-11 items-center border-b-2 border-transparent text-muted transition-colors hover:text-ink";
 
-  // The tabs' underline, minus the -mb-px that makes it sit ON the nav's border:
-  // inside a horizontal scroller that overhang would be clipped away.
+  // Chips, not a second row of underlined tabs: the categories are a FILTER over
+  // whatever the tabs above are showing, and they used to be drawn in the same
+  // vocabulary as the thing they filter. A pill also gives the touch target its
+  // own visible edges — 44px tall, wide enough for one Chinese category name.
   const chipClass = (active: boolean) =>
     active
-      ? "shrink-0 whitespace-nowrap border-b-2 border-brand pb-1 font-semibold"
-      : "shrink-0 whitespace-nowrap border-b-2 border-transparent pb-1 text-muted transition-colors hover:text-ink";
+      ? "inline-flex h-11 shrink-0 items-center whitespace-nowrap rounded-full border border-brand/30 bg-brand-soft px-4 font-semibold text-brand-ink"
+      : "inline-flex h-11 shrink-0 items-center whitespace-nowrap rounded-full border border-border bg-white/70 px-4 text-muted transition-colors hover:border-brand hover:text-brand-ink";
+
+  // Search, a category or the favourites tab: anything that can make the list
+  // come back empty, so the empty state can offer the way back out of it.
+  const filtered = Boolean(q) || activeCategory !== null || tab === "favoritos";
 
   return (
     <AppShell
@@ -186,7 +192,7 @@ export default async function CatalogPage({
     >
       <h1 className="mt-8 text-2xl font-bold tracking-tight">{t("title")}</h1>
 
-      <form method="get" className="mt-4 flex gap-2">
+      <form method="get" className="mt-4 flex items-center gap-2">
         {tab === "favoritos" && (
           <input type="hidden" name="tab" value="favoritos" />
         )}
@@ -203,10 +209,24 @@ export default async function CatalogPage({
           autoFocus={focusSearch}
           aria-label={t("searchPlaceholder")}
           placeholder={t("searchPlaceholder")}
-          className={`w-full ${FIELD}`}
+          className={`h-11 w-full ${FIELD}`}
         />
-        <button type="submit" className={BTN_PRIMARY}>
-          {t("searchButton")}
+        {/* The oversized red block on the owner's phone was this button losing a
+            fight with the input's `w-full`: both are flex items, the input asked
+            for 100% of the row, and the overflow was settled by SHRINKING the
+            button to its min-content — which for 搜索 is one character wide, so
+            the label wrapped onto two lines and the button grew a head taller
+            than the field beside it. `shrink-0` is the fix; the icon is the
+            improvement. On a phone it is a 44px square carrying the loupe (the
+            same glyph the header's 搜索 uses, so the two read as one action) and
+            the word appears from `sm` up, where there is room for it. */}
+        <button
+          type="submit"
+          aria-label={t("searchButton")}
+          className={`${BTN_PRIMARY} inline-flex h-11 shrink-0 items-center justify-center gap-2 whitespace-nowrap`}
+        >
+          <SearchIcon />
+          <span className="hidden sm:inline">{t("searchButton")}</span>
         </button>
       </form>
 
@@ -228,7 +248,7 @@ export default async function CatalogPage({
       {categories.length > 0 && (
         // Full-bleed on a phone: the row scrolls past the page gutter, so the
         // last chip is visibly cut off rather than looking like the end of it.
-        <nav className="-mx-4 mt-3 flex gap-4 overflow-x-auto px-4 text-sm sm:mx-0 sm:px-0">
+        <nav className="-mx-4 mt-3 flex gap-2 overflow-x-auto px-4 py-1 text-sm sm:mx-0 sm:px-0">
           <Link
             href={href({ cat: "", page: 1 })}
             className={chipClass(!activeCategory)}
@@ -248,138 +268,67 @@ export default async function CatalogPage({
       )}
 
       {products.length === 0 ? (
-        <p className={`${GLASS_CARD} mt-4 p-10 text-center text-muted`}>
-          {t("noResults")}
-        </p>
+        // The empty state says what happened AND offers the way out of it: a
+        // search that matched nothing, or a category with nothing in it, used to
+        // be a grey sentence in the middle of a card with no control on it — the
+        // customer's only move was to find the filter they set and undo it by
+        // hand. The link is only there when something IS filtering; on a truly
+        // empty catalogue it would be a link to the same empty page.
+        <div
+          className={`${GLASS_CARD} mt-4 flex flex-col items-center gap-3 px-6 py-12 text-center`}
+        >
+          <span className="flex size-12 items-center justify-center rounded-full bg-border text-muted">
+            <SearchIcon />
+          </span>
+          <p className="text-muted">{t("noResults")}</p>
+          {filtered && (
+            <Link
+              href={href({ q: "", tab: "all", cat: "", page: 1 })}
+              // Same shape as the pager below — the two quiet navigations on
+              // this page, both 44px and both brand-ink on the glass.
+              className="inline-flex h-11 items-center rounded-lg px-3 text-sm text-brand-ink underline underline-offset-4 transition-colors hover:bg-brand-soft"
+            >
+              {t("clearFilters")}
+            </Link>
+          )}
+        </div>
       ) : (
         <ul
-          className={`${GLASS_CARD} mt-4 divide-y divide-border px-4 sm:px-5`}
+          className={`${GLASS_CARD} mt-4 divide-y divide-border px-3 sm:px-5`}
         >
-          {products.map((p) => {
-            // The view projects the products PK and NOT NULL columns; the
-            // generated view types widen every column to `| null`.
-            const id = p.id as string;
-            const isFav = favoriteIds.has(id);
-            const name = localizedName(p.name, locale);
-            // The price of ONE CAJA, computed in the view as
-            // `price_cents x units_per_case` — exact integer multiplication, and
-            // the only money figure this page knows. Quantities are cajas, so
-            // this is the number that belongs beside them.
-            //
-            // It is null exactly when the tarifa price is (the factor is NOT
-            // NULL), which is why it also answers "can this row be ordered": every
-            // price is NULL until the owner's Wingest merge, so today an unpriced
-            // row renders as a disabled button explaining why, and the moment a
-            // tarifa price lands the same row becomes orderable with no code change.
-            const caseCents = p.price_per_case_cents;
-            const priced = caseCents != null;
-            return (
-              <li
-                key={id}
-                // Wraps like the cart page's rows: the `− n +` pill is wider
-                // than the `+` it replaces, and on a phone the name would be
-                // squeezed to nothing if all four cells shared one line.
-                className={`flex flex-wrap items-center gap-x-3 gap-y-2 py-3 ${p.is_available ? "" : "opacity-45"}`}
-              >
-                {/* The thumbnail rides INSIDE the name cell rather than beside
-                    it: the cell is `basis-full` on a phone, so a sibling of it
-                    would be pushed onto a line of its own with nothing else. */}
-                <div className="flex min-w-0 flex-1 basis-full items-center gap-3 sm:basis-0">
-                  <ProductThumb src={p.image_url} />
-                  <div className="min-w-0 flex-1">
-                    {/* Only the name truncates. Badges live on the wrapping meta
-                        line below, where a long name can never clip them out of
-                        view on a narrow phone. */}
-                    <p className="truncate font-medium">{name}</p>
-                    <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted">
-                      {/* `1-002 · CAJA×24`: the factor is what turns the price
-                          beside it into an offer a restaurant can judge. It is
-                          silent at 1 — see `unitLabel`. */}
-                      <span>
-                        {p.codart} · {unitLabel(p.unit, p.units_per_case)}
-                      </span>
-                      {p.is_weighed && (
-                        <span className="rounded-md bg-amber-100 px-1.5 py-0.5 text-amber-800">
-                          {t("weighed")}
-                        </span>
-                      )}
-                      {!p.is_available && (
-                        <span className="rounded-md bg-gray-200 px-1.5 py-0.5 text-gray-600">
-                          {t("unavailable")}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                </div>
-                {/* The whole cell goes when the owner has prices off — 价格待定
-                    included. It is the price column's placeholder, so leaving it
-                    behind would put a note ABOUT pricing on a page that is
-                    deliberately not talking about prices. Ordering is unaffected:
-                    the stepper below is gated on `priced`, which the server
-                    resolved either way. */}
-                {showPrices && (
-                  <p className="w-24 text-right text-sm font-semibold">
-                    {caseCents != null ? (
-                      formatEuros(caseCents, locale)
-                    ) : (
-                      <span className="font-normal text-muted">
-                        {t("noPrice")}
-                      </span>
-                    )}
-                  </p>
-                )}
-                {/* Ordering gates on is_orderable (is_available AND
-                    is_current_variant): a row that cannot be ordered gets no
-                    control at all, rather than one that would fail. The cell
-                    keeps its width either way — sized for the `− n +` pill, not
-                    the bare `+` — so the star column stays aligned down the
-                    list however many products are already in the cart. */}
-                <div className="flex w-24 shrink-0 justify-end">
-                  {p.is_orderable && (
-                    <QtyStepper
-                      productId={id}
-                      name={name}
-                      priced={priced}
-                      showPrices={showPrices}
-                    />
-                  )}
-                </div>
-                <form action={toggleFavorite}>
-                  <input type="hidden" name="product_id" value={id} />
-                  <input type="hidden" name="locale" value={locale} />
-                  <input type="hidden" name="on" value={isFav ? "0" : "1"} />
-                  <button
-                    type="submit"
-                    aria-label={isFav ? t("favRemove") : t("favAdd")}
-                    // Amber, not brand: a starred product is a state of the
-                    // row, and the accent is spent on actions.
-                    className={`px-2 text-lg ${isFav ? "text-amber-500" : "text-muted/40"}`}
-                  >
-                    ★
-                  </button>
-                </form>
-              </li>
-            );
-          })}
+          {/* The row itself lives in `product-row.tsx`: it is where the layout
+              that this page's customers press lives, and it is the one piece of
+              the catalogue worth being able to mount on its own. */}
+          {products.map((p) => (
+            <ProductRow
+              key={p.id as string}
+              product={p}
+              locale={locale}
+              isFavorite={favoriteIds.has(p.id as string)}
+              showPrices={showPrices}
+            />
+          ))}
         </ul>
       )}
 
       {totalPages > 1 && (
-        <nav className="mt-6 flex items-center justify-center gap-4 text-sm">
+        <nav className="mt-6 flex items-center justify-center gap-2 text-sm">
+          {/* Two anchors at the bottom of a fifty-row list, thumbed on a phone:
+              44px tall and padded wide enough to hit without aiming. */}
           {page > 1 && (
             <Link
-              className="text-brand-ink hover:underline"
+              className="inline-flex h-11 items-center rounded-lg px-3 text-brand-ink transition-colors hover:bg-brand-soft"
               href={href({ page: page - 1 })}
             >
               {t("prev")}
             </Link>
           )}
-          <span className="text-muted">
+          <span className="px-2 text-muted tabular-nums">
             {t("pageOf", { page, total: totalPages })}
           </span>
           {page < totalPages && (
             <Link
-              className="text-brand-ink hover:underline"
+              className="inline-flex h-11 items-center rounded-lg px-3 text-brand-ink transition-colors hover:bg-brand-soft"
               href={href({ page: page + 1 })}
             >
               {t("next")}
