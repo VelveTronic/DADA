@@ -2,7 +2,7 @@
 
 The bridge's source is `src/bridge/`. This folder holds what the build produces
 and what an operator copies to the ERP server; everything in it except this file
-is git-ignored.
+and `bridge.env.sandbox` is git-ignored.
 
 ```
 pnpm bridge:build         # esbuild → bridge/dist/dada-bridge.js (one file, ~3 MB)
@@ -23,5 +23,11 @@ sits **beside it**, never in the working directory (Task Scheduler starts jobs i
 | `bridge.log` | append-only run log, one event per line |
 | `<command>.lock` | the singleton for a running command; stale after 30 minutes |
 
+`bridge.env` is written on the server and never here. `bridge.env.sandbox` is the
+starting point for it: the sandbox (`wg_test`) configuration with everything
+filled in except the two secrets, which are `<...>` placeholders. Copy it beside
+the bundle, rename it to `bridge.env`, fill those two lines there.
+
 Commands: `orders`, `albaran-sync`, `price-sync`, `--help`. Deployment,
-scheduling and the cutover checklist are in `docs/bridge-runbook.md` (Task 3).
+scheduling and the cutover checklist are in `docs/bridge-runbook.md` (Task 3);
+the owner-run sandbox walkthrough is its § ⑨.

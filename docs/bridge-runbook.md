@@ -447,3 +447,206 @@ ERP 里单子写成功了，门户没记上（租约过期或订单被人改过�
 **price-sync 跑到一半停了**
 日志里会写到第几个商品（`position=1234/3021`）。合并是按编号幂等的，直接重跑
 一次即可，不会重复计价。
+
+---
+
+## ⑨ 沙盒测试 / Prueba en sandbox
+
+上线前的一次性全链路验收：门户里一笔真实的**已确认**订单 → 沙盒库 `wg_test` 里
+的一张 Pedido → 在 Wingest 界面转成 Albarán → 门户显示「已出单」。
+
+> **只碰 `wg_test`。生产库 `wgdemo` 全程零写入。**
+>
+> 分工：**命令都在 SERVER 上由你跑**（RustDesk 过去即可），每一步把窗口里的输出
+> **整段**贴回来；门户那头（播种订单、核对结果）我们来做。
+>
+> 门户是**同一套线上门户**，沙盒的只是 ERP 这一头。所以这是测试账号下的一笔真
+> 订单，跑通之后它真的会变成「已出单」。
+>
+> 本节的步骤按 **1–8** 编号，和上面各节的 ①–⑧ 不是一回事；文中提到「第 ② 节」
+> 之类指的是上面的章节。
+
+### 开始之前 / Requisitos
+
+- [ ] SERVER 上已装 Node ≥ 22（第 ① 节），目录 `C:\dada\bridge\` 已建好。
+- [ ] **门户里已经有一笔「已确认」的订单**——控制器提前用测试账号下单并在员工后台
+      确认。你不用在门户上做任何事，只需要知道它的**订单号**和**客户号 codcli**
+      （我们会告诉你）。
+- [ ] 这个 codcli 在 `wg_test` 的 `clientes` 里存在。不存在的话注入会在写任何东西
+      **之前**失败（`PREFLIGHT_FAILED … clientes has no CODCLI …`）。先确认一下：
+
+```sql
+SELECT CODCLI, TARCLI, RTRIM(TIPIVACLI) AS TIPIVACLI, RTRIM(regiva) AS regiva
+FROM dbo.clientes WHERE CODCLI = 990001;   -- 换成这笔订单的客户号
+```
+
+- [ ] Wingest 能打开沙盒公司——沙盒入口当初摘掉了，怎么加回来见**步骤 6**。
+
+### 1）把两个文件拷到 SERVER
+
+开发机上的这两个文件：
+
+```
+F:\DADA Distribucion\DADA\bridge\dist\dada-bridge.js
+F:\DADA Distribucion\DADA\bridge\bridge.env.sandbox
+```
+
+拷到 SERVER 的 `C:\dada\bridge\`，**第二个要改名成 `bridge.env`**：
+
+```
+C:\dada\bridge\dada-bridge.js
+C:\dada\bridge\bridge.env
+```
+
+程序是按**自己所在目录**找 `bridge.env` 的（第 ② 节），名字不对会直接报
+`MISSING_BRIDGE_ENV`。拷完先空跑一次确认文件没坏：
+
+```
+node C:\dada\bridge\dada-bridge.js --help
+```
+
+### 2）填两个密钥
+
+用记事本打开 `C:\dada\bridge\bridge.env`，把两处 `<...>` 换成真值：
+
+| 这一行 | 填什么 |
+| --- | --- |
+| `SUPABASE_SERVICE_ROLE_KEY=` | 门户的 service_role 密钥（从保险库取） |
+| `WINGEST_PASSWORD=` | SQL 登录 `dada_bridge` 的密码 |
+
+其余各行沙盒值已经填好了（`WINGEST_SERVER=SERVER,50352`、`WINGEST_DB=wg_test`、
+`WINGEST_USER=dada_bridge`），不用动。一行一条、不加引号、密钥不要换行。
+**填好的 `bridge.env` 不要外传、不要截图。**
+
+### 3）订单已经在等着了（前置条件，不用你做）
+
+控制器在门户里下单并在员工后台点了「确认」，订单此刻是「已确认」状态。桥接只认领
+这个状态的订单——所以这一步不用你操作，只要它没做，第 4 步就会是 `claimed=0`。
+
+### 4）手动跑一次 orders
+
+```
+node C:\dada\bridge\dada-bridge.js orders
+```
+
+**把窗口里的输出整段贴回来。** 期待看到 `claimed … count=1`、一行
+`injected … numped=<单号>`，最后 `orders summary claimed=1 injected=1 recovered=0
+markFailed=0 failed=0 ok=true`（健康输出的样子见第 ④ 节）。同样的内容也追加在
+`C:\dada\bridge\bridge.log` 里，密钥在写出前已经打码，**贴日志是安全的**。
+
+### 5）在 SQL 里验证
+
+在 SERVER 上开 CMD（密码不写进命令行，回车后 sqlcmd 会提示输入）：
+
+```
+sqlcmd -S SERVER,50352 -d wg_test -U dada_bridge -W -s " | "
+```
+
+把下面整段粘进去，最后单独一行 `GO` 回车：
+
+```sql
+SELECT TOP 5 z.ORIGEN, z.EJE, z.NUMPED, RTRIM(z.NUMPEDCLI) AS NUMPEDCLI, z.CODCLI,
+       z.FECPED, z.FECENT, RTRIM(z.ESTPED) AS ESTPED, z.ALBARAN, z.NETO, z.TOTPED
+FROM (
+  SELECT CAST('pedclica' AS varchar(10)) AS ORIGEN, EJE, NUMPED, NUMPEDCLI, CODCLI,
+         FECPED, FECENT, ESTPED, ALBARAN, NETO, TOTPED
+  FROM dbo.pedclica  WHERE CAN='B' AND NUMPEDCLI LIKE 'PORTAL-%'
+  UNION ALL
+  SELECT CAST('pedclicah' AS varchar(10)), EJE, NUMPED, NUMPEDCLI, CODCLI,
+         FECPED, FECENT, ESTPED, ALBARAN, NETO, TOTPED
+  FROM dbo.pedclicah WHERE CAN='B' AND NUMPEDCLI LIKE 'PORTAL-%'
+) z ORDER BY z.EJE DESC, z.NUMPED DESC;
+GO
+SELECT RTRIM(c.NUMPEDCLI) AS NUMPEDCLI, c.NUMPED, l.NUMLIN, RTRIM(l.CODART) AS CODART,
+       l.CANPED, l.CANSER, l.PREVEN, l.SUBTOT, RTRIM(l.CODLOT) AS CODLOT, l.CAJ
+FROM dbo.pedclica c
+JOIN dbo.pedclili l ON l.CAN=c.CAN AND l.EJE=c.EJE AND l.NUMPED=c.NUMPED
+WHERE c.CAN='B' AND c.NUMPEDCLI LIKE 'PORTAL-%'
+ORDER BY c.NUMPED DESC, l.NUMLIN;
+GO
+```
+
+要看的四件事：
+
+1. `NUMPEDCLI` = `PORTAL-<门户订单号>`，`NUMPED` 和第 4 步日志里那个数字一致；
+2. `ESTPED='Abierto'`、`ALBARAN=0`（还没转单）；
+3. `FECPED` / `FECENT` 是**马德里当天且时分秒 00:00:00**（带时分秒的单 Wingest
+   的转换工具选不出来，这是当初踩过的坑）；
+4. 每一行 **`CANSER = CANPED` 且 > 0**，`PREVEN`/`SUBTOT` 与门户上客户确认的价格
+   一致，`CODLOT` 是 FIFO 挑的批次（无批次商品为空是正常的）。
+
+> 完整版查询（多带计数器、单位、批次有效期，以及转单后归档到 `pedclicah` /
+> `pedclilih` 的那一半）在代码库里：`scripts/wingest/verify-sandbox-pedido.sql`，
+> 只读，可以整个文件在 SSMS 里打开跑。
+
+**把查询结果也贴回来。**
+
+### 6）在 Wingest 界面里转成 Albarán
+
+沙盒公司入口在 2026-08-13 之后是摘掉的（`WG_EMPRESAS.dbo.empresas` 只剩 `wgdemo`
+一行），要先加回来：
+
+```sql
+INSERT INTO WG_EMPRESAS.dbo.empresas (nomdb, des) VALUES ('wg_test', 'SANDBOX TEST');
+```
+
+- ⚠️ 这张表**所有工作站共用**：加回去之后别人也会看到「SANDBOX TEST」这个公司。
+  挑个没人下单的时段做，**测完立刻删掉**：
+
+```sql
+DELETE FROM WG_EMPRESAS.dbo.empresas WHERE nomdb = 'wg_test';
+```
+
+- Wingest 里 `Archivo > Cambiar empresa` 切到 SANDBOX TEST。公司选择框上那个
+  「No mostrar más esta pantalla」勾过之后会直接进上次的公司——当初切不过去就是
+  它。
+- **认标题栏**：沙盒是 `… / Empresa de Ejemplo`，生产是 `… / DADA UNIVERSAL S.L`。
+  看到 DADA UNIVERSAL 就是切错了，立刻退出，什么都别按。
+- 打开步骤 5 查到的那张 pedido（`NUMPEDCLI = PORTAL-<订单号>`），用**单据表单上的
+  「Albarán」按钮**转换——2026-08-13 和 08-14 两张验证单走通的就是这条路；批量转换
+  那个入口当时会无声中止，不要用。
+- 转换后会弹「Impresión de albaranes」打印框，点 **Salir** 就行。
+- 转换成功后 **pedido 会从 `pedclica` 消失、归档进 `pedclicah`
+  （`ESTPED='Servido Total'`）**。再跑一次步骤 5 的第一段查询，那张单会出现在
+  `pedclicah` 那一半——**查不到反而是成功的特征**，不是丢单。
+- 把新的 **Albarán 号**记下来贴回来。
+
+### 7）手动跑一次 albaran-sync
+
+```
+node C:\dada\bridge\dada-bridge.js albaran-sync
+```
+
+**输出整段贴回来。** 期待 `albarán matched orderId=… numped=… numalb=…`，最后
+`albaran-sync summary injected=1 matched=1 marked=1 ok=true`。
+
+### 8）门户核对（我们来看，你不用操作）
+
+- 客户端「我的订单」和员工后台「全部」标签里，这笔订单显示 **已出单**，并带
+  `ERP 单号 <numped>` 和 `送货单号 <numalb>`，两个号和你贴回来的一致。
+- 员工后台首页「桥接状态」卡片（第 ⑦ 节）：**订单注入**和**出货单回写**两行是绿色
+  「正常」，下面带这两轮的计数。**「价格同步」那行显示「未运行」是正常的**——沙盒
+  里根本没跑过它。
+- 三样都对上，Task 4 收工。
+
+### 收尾 / Al terminar
+
+- 删掉 `empresas` 里的 `wg_test` 行（步骤 6 的 DELETE），别让员工再看到沙盒公司。
+- `C:\dada\bridge\` 里的东西可以留着：上线时按第 ⑥ 节的清单把 `WINGEST_DB` 改成
+  `wgdemo`、重新确认 `BRIDGE_ERP_USER`、跑第 ⑤ 节的最小权限脚本、再建第 ③ 节的三个
+  计划任务即可。**但 `bridge.env` 里有真实密钥，不要复制到别处、不要留副本。**
+
+### 如果不对 / Si algo falla
+
+| 看到什么 | 多半是什么 | 怎么办 |
+| --- | --- | --- |
+| 连不上 SQL、`ConnectionError`、超时 | `WINGEST_SERVER` 的写法 | 见第 ② 节「⚠️ `WINGEST_SERVER`」：必须是 `SERVER,50352`，**不要**用带反斜杠的实例名 |
+| `Login failed for user 'dada_bridge'` | 密码或用户名不对 | 核对 `WINGEST_PASSWORD` / `WINGEST_USER`；拿同一对账号密码在 SSMS 里连一次 `wg_test` 验证 |
+| `claimed=0` / `nothing to inject` | 门户里没有「已确认」的订单 | 那笔订单确认了吗？还是上一轮已经把它认领走了（状态变「处理中」）？等 60 秒（`LEASE_SECONDS`）再跑一次 |
+| `mark_injected returned false` / `markFailed=1` | **可报警**：pedido 已经进 ERP，门户没记上 | 把整段日志贴回来。下一轮会靠 `PORTAL-<订单号>` 去重找回同一个 NUMPED 重试，**不会写出第二张单** |
+| `clientes has no CODCLI …` | `wg_test` 里没有这个客户 | 见「开始之前」：换一个沙盒里真实存在的客户重新播种，或在沙盒里建这个客户 |
+| `articulo has no CODART "…"` | 门户里的某个商品在 `wg_test` 里没有 | 贴回来，控制器换一笔只含 Wingest 有的商品的订单重新播种 |
+| 任何 `CONTRATO:` 开头的行 | 提交前自检没过，**整单已回滚**，ERP 里什么都没留下 | 整行贴回来（`usuario … no existe` 是 `BRIDGE_ERP_USER` 的问题） |
+
+其它症状先查第 ⑧ 节「常见故障速查」。拿不准就把 `bridge.log` 里对应时间的那几行
+整段贴回来——密钥已打码。
