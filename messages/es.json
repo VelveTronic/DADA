@@ -191,6 +191,8 @@
     "unavailable": "Pausado",
     "makeAvailable": "Reactivar",
     "makeUnavailable": "Pausar",
+    "makeWeighed": "Marcar por peso",
+    "makeNotWeighed": "Quitar por peso",
     "current": "Variante actual",
     "makeCurrent": "Hacer actual",
     "variantGroup": "Grupo {base} ({n})",

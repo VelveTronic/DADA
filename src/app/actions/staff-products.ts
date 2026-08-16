@@ -57,6 +57,48 @@ export async function setProductAvailability(formData: FormData) {
 }
 
 /**
+ * Flag a product as sold BY WEIGHT, or take the flag off.
+ *
+ * One statement, like `setProductAvailability` above and unlike
+ * `setCurrentVariant` below: `is_weighed` carries no unique index and no
+ * generated column depends on it, so there is nothing to demote first.
+ *
+ * What the flag turns on is spread across three places that already read it, and
+ * this action changes none of them — flipping it on is the whole feature:
+ * the catalogue and cart draw the 称重 badge, the cart's quantity box switches to
+ * `step=0.001` (the cookie already rounds to three decimals), and `create_order`
+ * stops raising BAD_QTY_STEP for a fractional quantity on this product. The staff
+ * queue's line editor reads it live for the same reason.
+ *
+ * The unit TEXT is deliberately left alone. It is whatever Wingest says, and the
+ * badge is what carries the meaning; relabelling a product KG here would put the
+ * portal and the ERP in disagreement about a column the nightly price-sync owns.
+ *
+ * **Turning it OFF does not stick on a KG article.** `toWingestPricePatch`
+ * derives `is_weighed = true` from unit KG and never clears it, so the next
+ * price-sync run will set the flag again on any product the ERP calls KG. That
+ * one-way rule is what protects a hand-set flag on a product the ERP still calls
+ * UNIDAD, which is the case this toggle exists for; the reverse is the ERP being
+ * right about its own article.
+ */
+export async function setProductWeighed(formData: FormData) {
+  await assertStaff();
+  const productId = String(formData.get("product_id") ?? "");
+  const locale = safeLocale(formData.get("locale"));
+  const weighed = formData.get("weighed") === "1";
+  if (!productId) return;
+
+  const admin = createAdminClient();
+  const { error } = await admin
+    .from("products")
+    .update({ is_weighed: weighed })
+    .eq("id", productId);
+  if (error) console.error("setProductWeighed:", error);
+
+  revalidatePath(`/${locale}/staff/productos`);
+}
+
+/**
  * Promote a variant to current. Two-phase (demote the whole base_sku group, then
  * promote the target) because products_one_current_variant is a partial unique
  * index and cannot be deferred. The brief no-current window is acceptable for a

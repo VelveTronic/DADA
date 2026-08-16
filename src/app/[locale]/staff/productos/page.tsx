@@ -4,6 +4,7 @@ import Link from "next/link";
 import {
   setCurrentVariant,
   setProductAvailability,
+  setProductWeighed,
 } from "@/app/actions/staff-products";
 import { ProductThumb } from "@/components/product-thumb";
 import { StaffShell } from "@/components/staff-shell";
@@ -255,6 +256,25 @@ export default async function StaffProductsPage({
                             {p.is_available
                               ? t("makeUnavailable")
                               : t("makeAvailable")}
+                          </button>
+                        </form>
+                        {/* The 称重 switch, beside the 停售 one it is modelled
+                            on. It is the only source `is_weighed` has for an
+                            article the ERP calls UNIDAD — freepos never filled
+                            the column and Wingest can only say KG — and the
+                            badge on the row above is what it turns on. */}
+                        <form action={setProductWeighed}>
+                          <input type="hidden" name="product_id" value={p.id} />
+                          <input type="hidden" name="locale" value={locale} />
+                          <input
+                            type="hidden"
+                            name="weighed"
+                            value={p.is_weighed ? "0" : "1"}
+                          />
+                          <button type="submit" className={BTN_QUIET}>
+                            {p.is_weighed
+                              ? t("makeNotWeighed")
+                              : t("makeWeighed")}
                           </button>
                         </form>
                         {!p.is_current_variant && (

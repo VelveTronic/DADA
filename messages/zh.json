@@ -191,6 +191,8 @@
     "unavailable": "停售",
     "makeAvailable": "恢复可售",
     "makeUnavailable": "设为停售",
+    "makeWeighed": "设为称重",
+    "makeNotWeighed": "取消称重",
     "current": "当前变体",
     "makeCurrent": "设为当前",
     "variantGroup": "变体组 {base}（{n} 个）",
