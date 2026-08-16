@@ -9,6 +9,8 @@
     "title": "登录",
     "email": "邮箱",
     "password": "密码",
+    "showPassword": "显示密码",
+    "hidePassword": "隐藏密码",
     "submit": "登录",
     "errorInvalid": "邮箱或密码不正确",
     "errorInactive": "账号未激活，请联系 DADA"

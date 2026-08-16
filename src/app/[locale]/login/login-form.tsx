@@ -1,6 +1,7 @@
 "use client";
 
 import { signIn } from "@/app/actions/auth";
+import { PasswordInput } from "@/components/password-input";
 import { BTN_PRIMARY, FIELD } from "@/components/ui";
 
 export function LoginForm({
@@ -8,7 +9,14 @@ export function LoginForm({
   labels,
 }: {
   locale: string;
-  labels: { email: string; password: string; submit: string };
+  labels: {
+    email: string;
+    password: string;
+    submit: string;
+    /** Names the eye toggle in each of its two states. */
+    showPassword: string;
+    hidePassword: string;
+  };
 }) {
   return (
     <form action={signIn} className="flex flex-col gap-4">
@@ -25,12 +33,11 @@ export function LoginForm({
       </label>
       <label className="flex flex-col gap-1 text-sm">
         {labels.password}
-        <input
+        <PasswordInput
           name="password"
-          type="password"
-          required
           autoComplete="current-password"
-          className={FIELD}
+          required
+          labels={{ show: labels.showPassword, hide: labels.hidePassword }}
         />
       </label>
       <button type="submit" className={BTN_PRIMARY}>

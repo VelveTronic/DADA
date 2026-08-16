@@ -59,6 +59,8 @@ export default async function LoginPage({
             email: t("email"),
             password: t("password"),
             submit: t("submit"),
+            showPassword: t("showPassword"),
+            hidePassword: t("hidePassword"),
           }}
         />
       </div>
