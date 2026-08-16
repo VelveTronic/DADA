@@ -5,7 +5,6 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { routing } from "@/i18n/routing";
 import { requireStaff } from "@/lib/auth/guards";
-import { isUuid } from "@/lib/orders";
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
   assertNotSelf,
@@ -14,6 +13,8 @@ import {
   classifyCreateUserError,
   classifyDbError,
   describeDbError,
+  isUuid,
+  parseActiveFlag,
   parseStaffRole,
   parseUserKind,
   validateNewCustomer,
@@ -96,6 +97,26 @@ type AdminClient = ReturnType<typeof createAdminClient>;
 type ProvisionRequest =
   | { kind: "customer"; input: NewCustomerInput }
   | { kind: "staff"; input: NewStaffInput };
+
+/**
+ * One rollback step, whose own failure can never become the caller's.
+ *
+ * This runs on a path that has already failed, so nothing it does may throw:
+ * `deleteUser` REJECTS on a dead network rather than returning `{ error }`, and
+ * an escaping throw would both replace a legible code with a 500 and skip the
+ * cleanup that comes after it — leaving an orphan nobody was ever told about.
+ * The one thing that must survive is the MANUAL CLEANUP NEEDED line naming what
+ * a human has to go and remove by hand.
+ */
+async function cleanUp(what: string, step: () => Promise<void>): Promise<void> {
+  try {
+    await step();
+  } catch (error) {
+    const detail =
+      error instanceof Error ? error.message : describeDbError(error) || String(error);
+    console.error(`MANUAL CLEANUP NEEDED: ${what} — ${detail}`);
+  }
+}
 
 /**
  * Create the auth user, then the row that gives it a role — and undo both if the
@@ -189,22 +210,21 @@ async function provisionAccount(
       cause instanceof Error ? cause.message : String(cause),
     );
 
-    const { error: userCleanup } = await admin.auth.admin.deleteUser(userId);
-    if (userCleanup) {
-      console.error(
-        `MANUAL CLEANUP NEEDED: auth user ${userId} (${email}) — ${userCleanup.message}`,
-      );
-    }
+    // Two cleanups, two try/catch blocks, deliberately. `deleteUser` REJECTS on
+    // a network failure rather than returning `{ error }`, and one throw shared
+    // between them would skip the second orphan's log line — leaving the company
+    // row unnamed and the action answering the staff member with a 500 instead
+    // of the code that explains what happened.
+    await cleanUp(`auth user ${userId} (${email})`, async () => {
+      const { error } = await admin.auth.admin.deleteUser(userId);
+      if (error) throw error;
+    });
     if (createdCompanyId) {
-      const { error: companyCleanup } = await admin
-        .from("companies")
-        .delete()
-        .eq("id", createdCompanyId);
-      if (companyCleanup) {
-        console.error(
-          `MANUAL CLEANUP NEEDED: company ${createdCompanyId} — ${describeDbError(companyCleanup)}`,
-        );
-      }
+      const companyId = createdCompanyId;
+      await cleanUp(`company ${companyId}`, async () => {
+        const { error } = await admin.from("companies").delete().eq("id", companyId);
+        if (error) throw new Error(describeDbError(error));
+      });
     }
 
     return cause instanceof ProvisionFailure ? cause.code : "DB_ERROR";
@@ -323,17 +343,25 @@ export async function setUserActive(formData: FormData): Promise<void> {
   const locale = safeLocale(formData.get("locale"));
   const { user, staffUser } = await requireStaff(locale);
 
-  const kind = parseUserKind(formData.get("kind"));
-  // The kind is read BEFORE the gate because it decides which gate applies.
-  if (!kind.ok) return finish(locale, kind.error);
-  const allowed =
-    kind.value === "staff"
-      ? canManageStaff(staffUser.role)
-      : canManageUsers(staffUser.role);
-  if (!allowed) throw new Error("FORBIDDEN");
+  // The FLOOR first: a plain staff member may not touch either table, so they
+  // are turned away before the request is even parsed. Without this line a
+  // caller with no permissions could tell a malformed request (`BAD_KIND` in the
+  // URL) from a well-formed one (a thrown FORBIDDEN) and learn the field names
+  // of an action they can never run.
+  if (!canManageUsers(staffUser.role)) throw new Error("FORBIDDEN");
 
-  const active = formData.get("active") === "1";
-  const rawTarget = String(formData.get("user_id") ?? "").trim();
+  const kind = parseUserKind(formData.get("kind"));
+  // The kind is read next because it decides which of the two gates applies:
+  // customer rows are manager+, staff rows are the owner's alone.
+  if (!kind.ok) return finish(locale, kind.error);
+  if (kind.value === "staff" && !canManageStaff(staffUser.role)) {
+    throw new Error("FORBIDDEN");
+  }
+
+  const active = parseActiveFlag(formData.get("active"));
+  if (!active.ok) return finish(locale, active.error);
+
+  const rawTarget = formData.get("user_id");
 
   let targetId: string;
   if (kind.value === "staff") {
@@ -341,8 +369,11 @@ export async function setUserActive(formData: FormData): Promise<void> {
     if (!target.ok) return finish(locale, target.error);
     targetId = target.value;
   } else {
+    // Same `isUuid` as the staff branch uses through `assertNotSelf`: one
+    // spelling of "is this an id", so neither table can be reached by a value
+    // the other would refuse.
     if (!isUuid(rawTarget)) return finish(locale, "BAD_TARGET");
-    targetId = rawTarget;
+    targetId = String(rawTarget).trim();
   }
 
   const admin = createAdminClient();
@@ -350,12 +381,12 @@ export async function setUserActive(formData: FormData): Promise<void> {
     kind.value === "staff"
       ? await admin
           .from("staff_users")
-          .update({ is_active: active })
+          .update({ is_active: active.value })
           .eq("id", targetId)
           .select("id")
       : await admin
           .from("portal_users")
-          .update({ is_active: active })
+          .update({ is_active: active.value })
           .eq("id", targetId)
           .select("id");
   if (error) {

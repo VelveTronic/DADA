@@ -9,14 +9,21 @@ import { CartNavLink } from "@/components/cart/cart-nav-link";
 import { CartErrorBanner, CartProvider } from "@/components/cart/cart-provider";
 import { NAV_LINK } from "@/components/ui";
 import { CART_COOKIE, parseCart } from "@/lib/cart";
+import { canManageUsers } from "@/lib/user-admin";
 
 type NavLink = { href: string; label: string };
 
 /**
- * Who is signed in. `detail` is the staff member's role; customers have none —
- * the restaurant's own name is already the whole label.
+ * Who is signed in. `role` is the staff member's `staff_users.role`; customers
+ * have none — the restaurant's own name is already the whole label.
+ *
+ * It arrives as the ROLE rather than as a pre-formatted caption because the
+ * shell now asks it a question as well as printing it: whether this staff
+ * member sees 用户管理 in the nav. One field, one source — a page cannot show
+ * the link while captioning a different role. `user-admin` is a pure module
+ * with no imports, so a Server Component may hold it as safely as a lib.
  */
-type ShellUser = { name: string; detail?: string | null };
+type ShellUser = { name: string; role?: string | null };
 
 /**
  * The sticky glass header plus the page's `<main>`, for every signed-in page.
@@ -76,6 +83,12 @@ export async function AppShell({
     : [
         { href: `/${locale}/staff/pedidos`, label: tStaff("ordersQueue") },
         { href: `/${locale}/staff/productos`, label: tStaff("products") },
+        // Manager and owner only. Hiding it is a courtesy, not the gate: the
+        // page re-checks with `requireStaff` + `canManageUsers` and so does
+        // every action behind it, because a nav array cannot stop a POST.
+        ...(canManageUsers(user.role)
+          ? [{ href: `/${locale}/staff/usuarios`, label: tStaff("usersAdmin") }]
+          : []),
       ];
 
   const shell = (
@@ -114,7 +127,7 @@ export async function AppShell({
           <div className="ml-auto flex items-center gap-4">
             <span className="max-w-[12rem] truncate text-xs text-muted">
               {user.name}
-              {user.detail ? ` · ${user.detail}` : ""}
+              {user.role ? ` · ${user.role}` : ""}
             </span>
             <form action={signOut}>
               <input type="hidden" name="locale" value={locale} />

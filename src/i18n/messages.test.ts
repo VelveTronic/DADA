@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ORDER_ERROR_KEYS, ORDER_STATUSES } from "@/lib/orders";
+import { STAFF_ROLES, USER_ADMIN_ERRORS } from "@/lib/user-admin";
 import es from "../../messages/es.json";
 import zh from "../../messages/zh.json";
 
@@ -34,6 +35,31 @@ describe("translations", () => {
    * straight out of the database. A state with no label here reaches a customer
    * as the bare English word from the check constraint.
    */
+  /**
+   * Every user-admin action ends by redirecting with `?result=<CODE>`, and the
+   * page renders `staff.users.results.<CODE>` off it. A code with no message
+   * here reaches a staff member as a next-intl fallback — the raw SCREAMING
+   * SNAKE token — in the middle of creating somebody's account.
+   */
+  it("carries a staff.users.results message for every user-admin outcome", () => {
+    const zhResults: Record<string, string> = zh.staff.users.results;
+    const esResults: Record<string, string> = es.staff.users.results;
+    for (const key of [...USER_ADMIN_ERRORS, "ok"]) {
+      expect(zhResults[key], `zh staff.users.results.${key}`).toBeTypeOf("string");
+      expect(esResults[key], `es staff.users.results.${key}`).toBeTypeOf("string");
+    }
+  });
+
+  /** The role `<select>` and every staff row label a role read from the column. */
+  it("carries a staff.users.roles label for each of the three roles", () => {
+    const zhRoles: Record<string, string> = zh.staff.users.roles;
+    const esRoles: Record<string, string> = es.staff.users.roles;
+    for (const role of STAFF_ROLES) {
+      expect(zhRoles[role], `zh staff.users.roles.${role}`).toBeTypeOf("string");
+      expect(esRoles[role], `es staff.users.roles.${role}`).toBeTypeOf("string");
+    }
+  });
+
   it("carries an orders.status label for every state an order can hold", () => {
     const zhStatus: Record<string, string> = zh.orders.status;
     const esStatus: Record<string, string> = es.orders.status;

@@ -14,6 +14,7 @@ import {
   type BridgeTone,
 } from "@/lib/bridge-status";
 import { createServerSupabase } from "@/lib/supabase/server";
+import { canManageUsers } from "@/lib/user-admin";
 
 export const dynamic = "force-dynamic";
 
@@ -43,6 +44,11 @@ export default async function StaffHome({
   const sections = [
     { href: `/${locale}/staff/pedidos`, label: t("ordersQueue") },
     { href: `/${locale}/staff/productos`, label: t("products") },
+    // The same condition as the shell's nav entry, from the same role: a card
+    // to a page that would only redirect back here is worse than no card.
+    ...(canManageUsers(staffUser.role)
+      ? [{ href: `/${locale}/staff/usuarios`, label: t("usersAdmin") }]
+      : []),
   ];
 
   // The ordinary session client, not the service-role one: `bridge_status`
@@ -87,7 +93,7 @@ export default async function StaffHome({
       nav="staff"
       user={{
         name: staffUser.display_name ?? staffUser.id,
-        detail: staffUser.role,
+        role: staffUser.role,
       }}
     >
       <h1 className="mt-8 text-2xl font-bold tracking-tight">{t("title")}</h1>

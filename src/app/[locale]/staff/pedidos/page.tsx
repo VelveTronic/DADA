@@ -121,7 +121,7 @@ export default async function StaffOrdersPage({
       nav="staff"
       user={{
         name: staffUser.display_name ?? staffUser.id,
-        detail: staffUser.role,
+        role: staffUser.role,
       }}
     >
       <h1 className="mt-8 text-2xl font-bold tracking-tight">

@@ -8,10 +8,14 @@ import {
   describeDbError,
   isStaffRole,
   isUserAdminError,
-  MAX_PASSWORD_LENGTH,
+  isUuid,
+  MAX_NAME_LENGTH,
+  MAX_PASSWORD_BYTES,
   MIN_PASSWORD_LENGTH,
+  parseActiveFlag,
   parseStaffRole,
   parseUserKind,
+  passwordByteLength,
   STAFF_ROLES,
   validateNewCustomer,
   validateNewStaff,
@@ -103,6 +107,35 @@ describe("parseUserKind", () => {
   });
 });
 
+describe("isUuid", () => {
+  it("accepts a uuid in either case, trimmed, and nothing else", () => {
+    expect(isUuid(UUID)).toBe(true);
+    expect(isUuid(UUID.toUpperCase())).toBe(true);
+    expect(isUuid(` ${UUID} `)).toBe(true);
+    // Both target branches of `setUserActive` go through this one function, so
+    // the two tables cannot be reached by values of different strictness.
+    for (const value of ["", "not-a-uuid", UUID.slice(0, -1), 7, null, undefined, {}]) {
+      expect(isUuid(value)).toBe(false);
+    }
+  });
+});
+
+describe("parseActiveFlag", () => {
+  it("reads the two values the 停用/启用 buttons send", () => {
+    expect(parseActiveFlag("1")).toEqual({ ok: true, value: true });
+    expect(parseActiveFlag("0")).toEqual({ ok: true, value: false });
+  });
+
+  it("refuses anything else instead of defaulting to deactivate", () => {
+    // `value === "1"` would turn every one of these into "switch the account
+    // off", which is this app's delete. A request nobody can parse must change
+    // nothing at all.
+    for (const value of ["", "true", "false", "yes", "01", 1, null, undefined, {}]) {
+      expect(parseActiveFlag(value)).toEqual({ ok: false, error: "BAD_TARGET" });
+    }
+  });
+});
+
 describe("validateNewCustomer — happy paths", () => {
   it("normalises an existing-company submission", () => {
     expect(
@@ -171,6 +204,37 @@ describe("validateNewCustomer — happy paths", () => {
     });
     expect(result.ok).toBe(true);
   });
+
+  it("takes a password of exactly the maximum, counted in BYTES", () => {
+    // bcrypt hashes 72 bytes and GoTrue enforces the ceiling in bytes, so the
+    // boundary is 72 ASCII characters — and only 24 Chinese ones, which is the
+    // whole reason this is not a `.length` check.
+    for (const password of ["a".repeat(MAX_PASSWORD_BYTES), "长".repeat(24)]) {
+      expect(passwordByteLength(password)).toBe(MAX_PASSWORD_BYTES);
+      expect(validateNewCustomer({ ...CUSTOMER, password }).ok).toBe(true);
+    }
+  });
+
+  it("takes a display name and an email of exactly the maximum length", () => {
+    expect(
+      validateNewCustomer({ ...CUSTOMER, displayName: "名".repeat(MAX_NAME_LENGTH) }).ok,
+    ).toBe(true);
+    // 254 is the RFC ceiling and what `auth.users.email` will hold.
+    const email = `${"a".repeat(254 - "@dada.local".length)}@dada.local`;
+    expect(email).toHaveLength(254);
+    expect(validateNewCustomer({ ...CUSTOMER, email }).ok).toBe(true);
+  });
+
+  it("takes the largest codcli an integer column can hold", () => {
+    const result = validateNewCustomer({
+      ...CUSTOMER_NEW_COMPANY,
+      newCompany: { name: "陈记餐厅", codcli: "2147483647", tarcli: "1" },
+    });
+    expect(result.ok && result.value.company).toEqual({
+      kind: "new",
+      company: { name: "陈记餐厅", codcli: 2_147_483_647, tarcli: 1 },
+    });
+  });
 });
 
 describe("validateNewCustomer — rejections", () => {
@@ -201,11 +265,30 @@ describe("validateNewCustomer — rejections", () => {
     {
       // bcrypt truncates at 72 bytes and GoTrue rejects longer ones outright;
       // catching it here costs one comparison and saves an opaque auth error.
-      name: `a password longer than ${MAX_PASSWORD_LENGTH}`,
-      patch: { password: "a".repeat(MAX_PASSWORD_LENGTH + 1) },
+      name: `a password longer than ${MAX_PASSWORD_BYTES} bytes`,
+      patch: { password: "a".repeat(MAX_PASSWORD_BYTES + 1) },
+      error: "BAD_PASSWORD",
+    },
+    {
+      // 25 Chinese characters are 75 bytes: a `.length` ceiling waves this
+      // through and GoTrue answers with a 422 nobody can act on. Half the staff
+      // of this deployment type Chinese, so this is the realistic case.
+      name: "a 25-character Chinese passphrase — 75 bytes, not 25",
+      patch: { password: "长".repeat(25) },
       error: "BAD_PASSWORD",
     },
     { name: "an empty display name", patch: { displayName: "" }, error: "BAD_NAME" },
+    {
+      name: `a display name one character past ${MAX_NAME_LENGTH}`,
+      patch: { displayName: "名".repeat(MAX_NAME_LENGTH + 1) },
+      error: "BAD_NAME",
+    },
+    {
+      // 255 is one past what `auth.users.email` will take.
+      name: "an email one character past the RFC ceiling",
+      patch: { email: `${"a".repeat(255 - "@dada.local".length)}@dada.local` },
+      error: "BAD_EMAIL",
+    },
     {
       name: "a display name of only whitespace",
       patch: { displayName: "   " },
@@ -539,6 +622,37 @@ describe("classifyCreateUserError", () => {
     expect(classifyCreateUserError({ code: "email_address_invalid", status: 400 })).toBe(
       "BAD_EMAIL",
     );
+  });
+
+  it("recognises the 72-byte ceiling, which GoTrue does not call weak_password", () => {
+    // `validateAccountFields` should stop these first; this is the second line,
+    // for a GoTrue whose byte counting disagrees with ours. It arrives as a
+    // generic `validation_failed` with the answer in the prose.
+    expect(
+      classifyCreateUserError({
+        code: "validation_failed",
+        status: 422,
+        message: "Password cannot be longer than 72 characters",
+      }),
+    ).toBe("BAD_PASSWORD");
+    expect(
+      classifyCreateUserError({
+        status: 422,
+        message: "password is too long",
+      }),
+    ).toBe("BAD_PASSWORD");
+  });
+
+  it("does not claim the password field for every validation_failed", () => {
+    // The same code covers complaints that name no field this form has; a guess
+    // here sends a staff member to retype a password that was never the problem.
+    expect(
+      classifyCreateUserError({
+        code: "validation_failed",
+        status: 422,
+        message: "Only an email address or phone number should be provided on signup.",
+      }),
+    ).toBe("AUTH_ERROR");
   });
 
   it("keeps everything else as one auth failure, not as a guess", () => {

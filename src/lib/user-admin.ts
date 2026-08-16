@@ -102,10 +102,19 @@ export function canManageStaff(role: string | null | undefined): boolean {
 export const MIN_PASSWORD_LENGTH = 8;
 
 /**
- * bcrypt hashes the first 72 bytes and GoTrue rejects anything longer outright.
+ * bcrypt hashes the first 72 BYTES and GoTrue rejects anything longer outright.
  * Catching it here turns an opaque 422 into a field-level message.
+ *
+ * Bytes, not characters, and the distinction is the whole point: a 25-character
+ * Chinese passphrase is 75 bytes in UTF-8, which a `.length` check waves through
+ * and GoTrue then refuses. Half of this deployment's staff type Chinese.
  */
-export const MAX_PASSWORD_LENGTH = 72;
+export const MAX_PASSWORD_BYTES = 72;
+
+/** What GoTrue will count when it applies its own 72-byte ceiling. */
+export function passwordByteLength(password: string): number {
+  return new TextEncoder().encode(password).length;
+}
 
 /** Long enough for a restaurant's full name, short enough not to break a table row. */
 export const MAX_NAME_LENGTH = 80;
@@ -125,6 +134,19 @@ const MAX_CODCLI = 2_147_483_647;
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Whether a form field holds something `id`/`company_id` could match.
+ *
+ * `@/lib/orders` has a `isUuid(value: string)` of its own for order ids; this
+ * one is the user-admin surface's, and it takes `unknown` because every value it
+ * sees came out of a `FormData` (so it may be a File) and has not been trimmed.
+ * Both branches of every target check go through THIS one, so a crafted id can
+ * never take a different route depending on which table it names.
+ */
+export function isUuid(value: unknown): boolean {
+  return UUID.test(text(value));
+}
 
 /**
  * A form field as text, or "" for anything that is not a string.
@@ -174,7 +196,12 @@ function validateAccountFields(raw: RawAccountInput): Validated<AccountFields> {
   }
 
   const password = typeof raw.password === "string" ? raw.password : "";
-  if (password.length < MIN_PASSWORD_LENGTH || password.length > MAX_PASSWORD_LENGTH) {
+  // The floor counts characters (it is our own "long enough" rule) and the
+  // ceiling counts bytes (it is bcrypt's, and GoTrue enforces it in bytes).
+  if (
+    password.length < MIN_PASSWORD_LENGTH ||
+    passwordByteLength(password) > MAX_PASSWORD_BYTES
+  ) {
     return fail("BAD_PASSWORD");
   }
 
@@ -258,7 +285,7 @@ function validateCompanyChoice(raw: RawCustomerInput): Validated<CompanyChoice> 
 
   if (!newCompany) {
     // A non-uuid would reach Postgres as a cast error on `company_id`.
-    return UUID.test(companyId)
+    return isUuid(companyId)
       ? { ok: true, value: { kind: "existing", companyId } }
       : fail("BAD_COMPANY");
   }
@@ -340,14 +367,30 @@ export function validateNewStaff(raw: RawStaffInput): Validated<NewStaffInput> {
  */
 export function assertNotSelf(actorId: unknown, targetId: unknown): Validated<string> {
   const target = text(targetId);
-  if (!UUID.test(target)) return fail("BAD_TARGET");
+  if (!isUuid(target)) return fail("BAD_TARGET");
 
   const actor = text(actorId);
-  if (!UUID.test(actor)) return fail("SELF_FORBIDDEN");
+  if (!isUuid(actor)) return fail("SELF_FORBIDDEN");
 
   return actor.toLowerCase() === target.toLowerCase()
     ? fail("SELF_FORBIDDEN")
     : { ok: true, value: target };
+}
+
+/**
+ * The 停用 / 启用 switch, as the two values its buttons send.
+ *
+ * Read as a strict pair rather than `value === "1"`, because that comparison
+ * turns EVERY unexpected value — a missing field, a "true", a renamed button —
+ * into "deactivate". Being logged out of the back office is not a sensible
+ * default for a request nobody can parse, so an unrecognised flag is refused the
+ * same way an unrecognised target is.
+ */
+export function parseActiveFlag(value: unknown): Validated<boolean> {
+  const flag = text(value);
+  if (flag === "1") return { ok: true, value: true };
+  if (flag === "0") return { ok: true, value: false };
+  return fail("BAD_TARGET");
 }
 
 function record(value: unknown): Record<string, unknown> {
@@ -406,6 +449,13 @@ export function classifyDbError(error: unknown): UserAdminError {
  * unaided, and it is also the one GoTrue has spelled several ways across
  * versions — hence both the codes and the message. Anything else is one
  * AUTH_ERROR rather than a guess about which field to blame.
+ *
+ * The 72-byte ceiling deserves its own branch: GoTrue answers an over-long
+ * password with `validation_failed` and the prose "Password cannot be longer
+ * than 72 characters" — NOT with `weak_password` — so without this it would
+ * reach the staff member as the generic AUTH_ERROR, pointing at no field at all.
+ * `validateAccountFields` should stop these first; this is the second line, for
+ * a version of GoTrue whose counting disagrees with ours.
  */
 export function classifyCreateUserError(error: unknown): UserAdminError {
   const source = record(error);
@@ -420,6 +470,13 @@ export function classifyCreateUserError(error: unknown): UserAdminError {
     return "EMAIL_TAKEN";
   }
   if (code === "weak_password") return "BAD_PASSWORD";
+  // `validation_failed` covers several complaints ("only an email address or
+  // phone number should be provided" among them), so the message has to name
+  // the password before this claims the field.
+  if (/password/i.test(message) && /72 character|longer than|too long/i.test(message)) {
+    return "BAD_PASSWORD";
+  }
+  if (code === "validation_failed" && /password/i.test(message)) return "BAD_PASSWORD";
   if (code === "email_address_invalid") return "BAD_EMAIL";
   return "AUTH_ERROR";
 }
