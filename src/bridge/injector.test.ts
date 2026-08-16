@@ -3,6 +3,9 @@ import type { BridgeConfig } from "./config";
 import { AllLinesExcludedError, InjectError } from "./injector";
 import {
   DEFAULT_TAX_SLOT,
+  LOT_AVAILABLE_SQL,
+  LOT_COVERING_SQL,
+  LOT_FALLBACK_SQL,
   MADRID_TODAY_SQL,
   NO_EXPIRY_DATE,
   PEDCLICA_COLUMNS,
@@ -20,6 +23,7 @@ import {
   dedupCheck,
   isoDateFromSql,
   numlinFor,
+  pickLot,
   prepareOrder,
   reserveCounters,
   roundEuros,
@@ -74,6 +78,36 @@ const V32_PEDCLILI_VALUES = [
   "@DES", "@SUB", "@SUB", "@ALM", "@T", "@UNI", "@UNILOT", "@CAJ", "@LOT", "@FCAD",
   "CAST(GETDATE() AS date)", "@CODCLI", "@IDL", "''",
 ];
+
+/**
+ * v3.2's two lot queries — and the ONE place this port deliberately no longer
+ * matches the reference.
+ *
+ * DEVIATION, owner's decision of **2026-08-16**, taken after the sandbox E2E
+ * rather than from Plan 04, so a future reader does not read the difference
+ * below as drift: v3.2 filtered and ordered on the raw `stolot.CANT`, but
+ * Wingest's pedido→albarán conversion checks `CANT` minus what every still-OPEN
+ * pedido has outstanding on that lot (`CANPED-CANSER`). The E2E proved it — lot
+ * 4851351437 in almacén 00001 held `CANT=+24` while open pedido `NUMPED` 11 held
+ * `CANPED=48`/`CANSER=0` on it, so Wingest answered "Disponible: -24" (24−48)
+ * and refused the conversion; it passed only once CANT reached 124 (124−48=76).
+ * A pedido picked on raw CANT is therefore one a human has to clear a dialog
+ * for, and the injector picks on REAL availability instead.
+ *
+ * These two literals stay here as what a reviewer diffs against; the tests below
+ * state exactly what replaced them and pin the new shape.
+ */
+const V32_LOT_COVERING_SQL =
+  "SELECT TOP 1 RTRIM(CODLOT) AS LOT, FECCAD FROM stolot" +
+  " WHERE CODALM=@alm AND RTRIM(CODART)=@codart" +
+  " AND (FECCAD>GETDATE() OR FECCAD<'19010101') AND VENDIBLE=1 AND CANT>=@qty" +
+  " ORDER BY FECCAD ASC";
+
+const V32_LOT_FALLBACK_SQL =
+  "SELECT TOP 1 RTRIM(CODLOT) AS LOT, FECCAD FROM stolot" +
+  " WHERE CODALM=@alm AND RTRIM(CODART)=@codart" +
+  " AND (FECCAD>GETDATE() OR FECCAD<'19010101') AND VENDIBLE=1 AND CANT>0" +
+  " ORDER BY CANT DESC";
 
 /** Plan 04 delta 1: the only header expressions allowed to differ from v3.2. */
 const DELTA_1_HEADER: Record<string, string> = {
@@ -297,6 +331,129 @@ describe("pedclili INSERT vs the v3.2 reference", () => {
 
   it("carries only the empty COMUNICA literal", () => {
     expect(PEDCLILI_INSERT_SQL.match(/'[^']*'/g)).toEqual(["''"]);
+  });
+});
+
+describe("pickLot vs the v3.2 reference — the 2026-08-16 availability deviation", () => {
+  /** Both queries run when the covering one finds nothing; both are recorded. */
+  async function bothQueries(): Promise<RecordedCall[]> {
+    const { parent, calls } = fakeParent([[], []]);
+    await pickLot(parent, cfg, "4-007", 5);
+    expect(calls).toHaveLength(2);
+    return calls;
+  }
+
+  it("no longer filters or orders on raw CANT, as v3.2 did", async () => {
+    const calls = await bothQueries();
+    expect(calls[0].text).not.toBe(V32_LOT_COVERING_SQL);
+    expect(calls[1].text).not.toBe(V32_LOT_FALLBACK_SQL);
+    // The raw-quantity predicates themselves, in every spelling v3.2 used.
+    for (const call of calls) {
+      expect(call.text).not.toMatch(/CANT>=@qty|CANT>0|ORDER BY CANT/);
+    }
+  });
+
+  it("subtracts what open pedidos still hold, in BOTH queries", async () => {
+    const calls = await bothQueries();
+    for (const call of calls) {
+      expect(call.text).toContain(LOT_AVAILABLE_SQL);
+      // The reservation itself: outstanding = CANPED-CANSER on OPEN pedidos.
+      expect(call.text).toContain("SELECT SUM(l.CANPED - l.CANSER) FROM pedclili l");
+      expect(call.text).toContain("RTRIM(c.ESTPED)='Abierto'");
+    }
+    expect(calls[0].text).toBe(LOT_COVERING_SQL);
+    expect(calls[1].text).toBe(LOT_FALLBACK_SQL);
+  });
+
+  it("wraps the reservation in ISNULL, so a lot nobody booked is not NULL", () => {
+    // Without it SUM() over no rows is NULL, `CANT - NULL` is NULL, and NULL
+    // fails every comparison — every unbooked lot would drop out of the pick.
+    expect(LOT_AVAILABLE_SQL).toContain("ISNULL((SELECT SUM(");
+    expect(LOT_AVAILABLE_SQL).toContain("), 0)");
+    expect(LOT_AVAILABLE_SQL.startsWith("(s.CANT - ISNULL(")).toBe(true);
+  });
+
+  it("does not scope the reservation to an ejercicio", async () => {
+    // An open pedido from an earlier EJE still holds its stock and Wingest still
+    // counts it. The one EJE comparison allowed is the line↔header correlation
+    // (`pedclili`'s key is CAN/EJE/NUMPED/NUMLIN) — never `cfg.eje`.
+    const calls = await bothQueries();
+    for (const call of calls) {
+      expect(call.text).not.toContain("@eje");
+      // De-duplicated: the fallback names the availability expression twice,
+      // once to filter on and once to sort by.
+      const comparisons = call.text.match(/[\w.]*EJE\s*=\s*[\w.@']+/gi) ?? [];
+      expect([...new Set(comparisons)]).toEqual(["c.EJE=l.EJE"]);
+      expect(Object.keys(call.params).sort()).toEqual(["alm", "codart", "qty"]);
+    }
+  });
+
+  it("counts only reservations on the same almacén, article and lot", async () => {
+    const calls = await bothQueries();
+    for (const call of calls) {
+      expect(call.text).toContain("l.CODALM=s.CODALM");
+      expect(call.text).toContain("RTRIM(l.CODART)=RTRIM(s.CODART)");
+      expect(call.text).toContain("RTRIM(l.CODLOT)=RTRIM(s.CODLOT)");
+      // The lot row itself stays scoped to the configured almacén, as before.
+      expect(call.text).toContain("s.CODALM=@alm AND RTRIM(s.CODART)=@codart");
+    }
+  });
+
+  it("keeps v3.2's sellable and not-expired predicates untouched", async () => {
+    const calls = await bothQueries();
+    for (const call of calls) {
+      expect(call.text).toContain("(s.FECCAD>GETDATE() OR s.FECCAD<'19010101')");
+      expect(call.text).toContain("s.VENDIBLE=1");
+    }
+  });
+
+  it("orders the covering pick FIFO and the fallback by real availability", async () => {
+    const calls = await bothQueries();
+    expect(calls[0].text.endsWith("ORDER BY s.FECCAD ASC")).toBe(true);
+    expect(calls[0].text).toContain(`${LOT_AVAILABLE_SQL}>=@qty`);
+    // The fallback's sort key is availability, not the quantity on the shelf: a
+    // lot whose stock is entirely promised must not win the tie-break.
+    expect(calls[1].text.endsWith(`ORDER BY ${LOT_AVAILABLE_SQL} DESC`)).toBe(true);
+    expect(calls[1].text).toContain(`${LOT_AVAILABLE_SQL}>0`);
+  });
+
+  it("asks the fallback only when nothing covers the line alone", async () => {
+    const { parent, calls } = fakeParent([
+      [{ LOT: "VCY111B", FECCAD: new Date(Date.UTC(2027, 4, 1)) }],
+    ]);
+    const lot = await pickLot(parent, cfg, "4-007", 5);
+    expect(calls).toHaveLength(1);
+    expect(lot).toEqual({ codlot: "VCY111B", feccad: new Date(Date.UTC(2027, 4, 1)) });
+  });
+
+  it("falls back to the lot with the most left when none covers the line", async () => {
+    const { parent, calls } = fakeParent([
+      [],
+      [{ LOT: "L2", FECCAD: new Date(Date.UTC(2026, 11, 31)) }],
+    ]);
+    const lot = await pickLot(parent, cfg, "4-007", 5);
+    expect(calls).toHaveLength(2);
+    expect(lot.codlot).toBe("L2");
+  });
+
+  it("keeps v3.2's answer when no lot is available at all", async () => {
+    const { parent } = fakeParent([[], []]);
+    expect(await pickLot(parent, cfg, "4-007", 5)).toEqual({
+      codlot: "",
+      feccad: NO_EXPIRY_DATE,
+    });
+  });
+
+  it("never puts a value into the SQL text", async () => {
+    const calls = await bothQueries();
+    for (const call of calls) {
+      for (const value of ["00001", "4-007", "5"]) {
+        expect(call.text).not.toContain(value);
+      }
+      expect(call.params.alm.value).toBe("00001");
+      expect(call.params.codart.value).toBe("4-007");
+      expect(call.params.qty.value).toBe(5);
+    }
   });
 });
 

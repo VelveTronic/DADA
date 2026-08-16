@@ -30,7 +30,7 @@
  *    for a MOMENT rather than a business day, and none of which should be
  *    "fixed" during a timezone incident:
  *      - `pedclica.TS` and `pedclica.TSENVSRV` — audit instants;
- *      - `pickLot`'s expiry predicate (`FECCAD>GETDATE()`) — "has this lot
+ *      - `pickLot`'s expiry predicate (`s.FECCAD>GETDATE()`) — "has this lot
  *        expired *now*", where the hours between the server's zone and Madrid
  *        can only matter for a lot expiring within those same hours.
  */
@@ -823,14 +823,77 @@ export async function loadArticle(
 }
 
 /**
- * FIFO lot pick: the soonest-expiring sellable lot that can cover the line on
- * its own, else the fullest sellable lot, else no lot at all.
+ * What Wingest will actually let a pedido take out of a lot.
+ *
+ * `stolot.CANT` is the lot's PHYSICAL quantity, and picking on it is what v3.2
+ * did. The sandbox E2E of **2026-08-16** proved that is NOT what Wingest's
+ * pedido→albarán conversion checks: it subtracts what every still-OPEN pedido
+ * has outstanding on the same lot (`CANPED-CANSER`) and refuses the conversion
+ * when the remainder is short, behind a modal dialog only a human can clear.
+ *
+ * The evidence, from that run: lot 4851351437 in almacén 00001 held `CANT=+24`;
+ * an old open pedido (`NUMPED` 11, `ESTPED='Abierto'`) held `CANPED=48`,
+ * `CANSER=0` on it; Wingest reported "Disponible: -24" (24−48) and would not
+ * convert. After `CANT` was topped up to 124 the same conversion passed
+ * (124−48=76). So the injector picks on THIS number, not on `CANT`, and the
+ * pedidos it writes convert without anyone standing at the screen.
+ *
+ * Two properties of the expression are deliberate:
+ *
+ *   - **The reservation is not scoped to an ejercicio.** An open pedido from an
+ *     earlier EJE still holds its stock and Wingest still counts it, so nothing
+ *     here compares EJE to `cfg.eje`. The `c.EJE=l.EJE` inside the join is the
+ *     line↔header correlation (`pedclili`'s key is CAN/EJE/NUMPED/NUMLIN), not
+ *     a filter.
+ *   - **A pedido this bridge wrote never counts against itself.** It writes
+ *     `CANSER=CANPED` (see `PEDCLILI_COLUMNS`), so its outstanding quantity is
+ *     zero — which is the same arithmetic Wingest does, not a special case.
+ *
+ * `s` is the `stolot` row this is correlated to; the expression is parenthesised
+ * so it can be compared and ordered by as one value.
+ */
+export const LOT_AVAILABLE_SQL =
+  "(s.CANT - ISNULL((SELECT SUM(l.CANPED - l.CANSER) FROM pedclili l" +
+  " JOIN pedclica c ON c.CAN=l.CAN AND c.EJE=l.EJE AND c.NUMPED=l.NUMPED" +
+  " WHERE RTRIM(c.ESTPED)='Abierto' AND l.CODALM=s.CODALM" +
+  " AND RTRIM(l.CODART)=RTRIM(s.CODART) AND RTRIM(l.CODLOT)=RTRIM(s.CODLOT)), 0))";
+
+/**
+ * The half both lot queries share: this almacén, this article, sellable, not
+ * expired.
  *
  * `FECCAD>GETDATE()` stays on the server clock deliberately: it asks "has this
  * lot expired *now*", which is a moment and not a business day, and the hours of
  * difference between the server's zone and Madrid can only matter for a lot
  * expiring within those same hours. `FECCAD<'19010101'` is the ERP's way of
  * spelling "no expiry".
+ */
+const LOT_SELECT_SQL =
+  "SELECT TOP 1 RTRIM(s.CODLOT) AS LOT, s.FECCAD FROM stolot s" +
+  " WHERE s.CODALM=@alm AND RTRIM(s.CODART)=@codart" +
+  " AND (s.FECCAD>GETDATE() OR s.FECCAD<'19010101') AND s.VENDIBLE=1 AND ";
+
+/** FIFO: the soonest-expiring lot with enough left to cover the line by itself. */
+export const LOT_COVERING_SQL = `${LOT_SELECT_SQL}${LOT_AVAILABLE_SQL}>=@qty ORDER BY s.FECCAD ASC`;
+
+/**
+ * Nothing covers the line alone: the lot with the most REAL availability left.
+ *
+ * Ordering by `CANT` here would hand back the lot with the most stock on the
+ * shelf even when all of it is already promised — precisely the pick that stops
+ * a conversion.
+ */
+export const LOT_FALLBACK_SQL =
+  `${LOT_SELECT_SQL}${LOT_AVAILABLE_SQL}>0 ORDER BY ${LOT_AVAILABLE_SQL} DESC`;
+
+/**
+ * Lot pick: the soonest-expiring sellable lot whose REAL availability covers the
+ * line on its own, else the sellable lot with the most availability left, else
+ * no lot at all (empty CODLOT, 1900-01-01, exactly as v3.2 did).
+ *
+ * "Availability" is `LOT_AVAILABLE_SQL` — `CANT` minus what open pedidos still
+ * hold — and not `CANT`; see that constant for the 2026-08-16 evidence and for
+ * why this is a deliberate departure from the v3.2 reference.
  */
 export async function pickLot(
   parent: SqlParent,
@@ -845,20 +908,14 @@ export async function pickLot(
   };
   const covering = await runQuery<{ LOT: unknown; FECCAD: unknown }>(
     parent,
-    "SELECT TOP 1 RTRIM(CODLOT) AS LOT, FECCAD FROM stolot" +
-      " WHERE CODALM=@alm AND RTRIM(CODART)=@codart" +
-      " AND (FECCAD>GETDATE() OR FECCAD<'19010101') AND VENDIBLE=1 AND CANT>=@qty" +
-      " ORDER BY FECCAD ASC",
+    LOT_COVERING_SQL,
     params,
   );
   let row = covering.recordset?.[0];
   if (!row) {
     const fallback = await runQuery<{ LOT: unknown; FECCAD: unknown }>(
       parent,
-      "SELECT TOP 1 RTRIM(CODLOT) AS LOT, FECCAD FROM stolot" +
-        " WHERE CODALM=@alm AND RTRIM(CODART)=@codart" +
-        " AND (FECCAD>GETDATE() OR FECCAD<'19010101') AND VENDIBLE=1 AND CANT>0" +
-        " ORDER BY CANT DESC",
+      LOT_FALLBACK_SQL,
       params,
     );
     row = fallback.recordset?.[0];
