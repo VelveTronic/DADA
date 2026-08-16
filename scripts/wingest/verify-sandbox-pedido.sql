@@ -72,8 +72,18 @@ GO
 -- 2) 上面那 5 张单的明细行
 --    pedclili  = 活动表的行；pedclilih = 转 Albarán 时一起归档的历史行。
 --    看什么：CODART 与门户一致、**CANSER = CANPED 且 > 0**（这是能转成
---            Albarán 的前提）、PREVEN/SUBTOT 等于门户确认时的价格、
---            CODLOT 是 FIFO 挑出来的批次（无批次商品为空是正常的）。
+--            Albarán 的前提）、CODLOT 是 FIFO 挑出来的批次（无批次商品为空是
+--            正常的）。
+--    ⚠️ 按箱下单（2026-08-16 起）：数量和箱数分两列——
+--            CAJ                = 箱数（客户在门户上填的那个数）
+--            CANPED = CANSER    = 箱数 × UNILOT（瓶/袋等基本单位）
+--            PREVEN             = 每个基本单位的价（门户存的就是它）
+--            SUBTOT             = CANSER × PREVEN
+--       例：1-001 是 CAJA×24、门户每箱 23,04 €，2 箱 →
+--            CAJ=2、CANSER=48、PREVEN=0,96、SUBTOT=46,08。
+--       **门户的每箱价 × 箱数必须和 SUBTOT 完全相等（23,04 × 2 = 46,08）**；
+--       对不上说明两边对「一箱几瓶」的理解不一致，那种单桥接根本不会提交
+--       （日志里是 CONTRATO: SUBTOT …，整单回滚）。
 --    ⚠️ 万一某张历史表的列名对不上，SQL Server 会报 "Invalid column name"：
 --       把对应的那半段 UNION ALL 注释掉即可——步骤 5 是在转单**之前**跑的，
 --       活动表那一半就够看。

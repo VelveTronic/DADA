@@ -232,6 +232,11 @@ node C:\dada\bridge\dada-bridge.js price-sync
 2026-08-16T04:31:05.188Z INFO orders summary claimed=1 injected=1 recovered=0 markFailed=0 failed=0 ok=true
 ```
 
+> `lineCount=7` 数的是**行数**（这张 pedido 写了 7 行 `pedclili`），**不是箱数、
+> 也不是瓶数**。一行订了几箱看 `CAJ`、折成几个基本单位看 `CANSER`，两个都只在
+> ERP 里看得到（第 ⑨ 节步骤 5 的查询）。找回（recovered）那条日志的
+> `lineCount=0` 是约定：那一轮一行都没写，单子本来就在。
+
 ### 一轮健康的 orders（没订单——99% 的分钟长这样）
 
 ```
@@ -362,6 +367,11 @@ ORDER BY o.name, p.permission_name;
       `bridge.log` 的 `injected` 行 → 在 Wingest 里打开这张 Pedido，确认
       `NUMPEDCLI` 是 `PORTAL-<订单号>`、价格与门户一致、行数和批次正常 → 人工
       转成 Albarán → 下一个整点后确认门户订单变成「已出单」并带 numalb。
+      > ⚠️ **「价格与门户一致」不等于两边的数字长得一样**：门户按**箱**卖、显示
+      > 的是**每箱价**；Wingest 按基本单位记账，`PREVEN` 是**每瓶/每袋**的价，
+      > `CANSER` 是瓶数、`CAJ` 才是箱数。要对的是**行金额**：
+      > `SUBTOT = CANSER × PREVEN` 必须和门户那一行的金额一分不差（对照表和例子
+      > 见第 ⑨ 节步骤 5）。
 - [ ] **回滚方案确认可用**：出任何问题，先停任务，再查原因。
 
 ### 回滚（随时可用）
@@ -566,14 +576,38 @@ ORDER BY c.NUMPED DESC, l.NUMLIN;
 GO
 ```
 
-要看的四件事：
+要看的五件事：
 
 1. `NUMPEDCLI` = `PORTAL-<门户订单号>`，`NUMPED` 和第 4 步日志里那个数字一致；
 2. `ESTPED='Abierto'`、`ALBARAN=0`（还没转单）；
 3. `FECPED` / `FECENT` 是**马德里当天且时分秒 00:00:00**（带时分秒的单 Wingest
    的转换工具选不出来，这是当初踩过的坑）；
-4. 每一行 **`CANSER = CANPED` 且 > 0**，`PREVEN`/`SUBTOT` 与门户上客户确认的价格
-   一致，`CODLOT` 是 FIFO 挑的批次（无批次商品为空是正常的）。
+4. 每一行 **`CANSER = CANPED` 且 > 0**，`CODLOT` 是 FIFO 挑的批次（无批次商品为空
+   是正常的）；
+5. **数量和箱数是两列，别混着看**（2026-08-16「按箱下单」之后的规则）：
+
+   | 列 | 应该是什么 |
+   | --- | --- |
+   | `CAJ` | **箱数**——客户在门户上填的那个数，原样落进来 |
+   | `CANPED` / `CANSER` | **箱数 × `UNILOT`**，即瓶/袋这种基本单位的数量 |
+   | `PREVEN` | **每个基本单位**的价（门户存的就是它，桥接一分钱不动） |
+   | `SUBTOT` | `CANSER × PREVEN`，**必须等于门户那一行的金额，一分不差** |
+   | `UNILOT` | `articulo.UNILOT`，ERP 自己的包装数（门户的箱容量是它的夜间副本） |
+
+   真实的例子：门户上 `1-001` 是 `CAJA×24`、每箱 23,04 €，客户要 **2 箱**——
+
+   ```
+   CAJ = 2        CANPED = CANSER = 48   (2 × 24)
+   PREVEN = 0,96  (每瓶，不是每箱)       SUBTOT = 46,08  (48 × 0,96)
+   ```
+
+   **门户的每箱价 × 箱数（23,04 × 2 = 46,08）必须和 `SUBTOT` 完全相等。** 对不上
+   就是门户和 ERP 对「一箱几瓶」的理解不一致；这种单子桥接在提交前自检就会拦下来
+   （日志里是 `CONTRATO: SUBTOT …`），**整单回滚，ERP 里一行都不会留**。
+
+   > 2026-08-16 之前注入的单（例如 albarán 5992）写的是 `CAJ=1、CANSER=2`——那是
+   > 这次要修掉的老行为，**不要拿它当参照**。参照是员工手写的行：
+   > `CAJ=5、CANSER=120、PREVEN=0,99`（5 箱 × 24 瓶）。
 
 > 完整版查询（多带计数器、单位、批次有效期，以及转单后归档到 `pedclicah` /
 > `pedclilih` 的那一半）在代码库里：`scripts/wingest/verify-sandbox-pedido.sql`，
@@ -646,7 +680,7 @@ node C:\dada\bridge\dada-bridge.js albaran-sync
 | `mark_injected returned false` / `markFailed=1` | **可报警**：pedido 已经进 ERP，门户没记上 | 把整段日志贴回来。下一轮会靠 `PORTAL-<订单号>` 去重找回同一个 NUMPED 重试，**不会写出第二张单** |
 | `clientes has no CODCLI …` | `wg_test` 里没有这个客户 | 见「开始之前」：换一个沙盒里真实存在的客户重新播种，或在沙盒里建这个客户 |
 | `articulo has no CODART "…"` | 门户里的某个商品在 `wg_test` 里没有 | 贴回来，控制器换一笔只含 Wingest 有的商品的订单重新播种 |
-| 任何 `CONTRATO:` 开头的行 | 提交前自检没过，**整单已回滚**，ERP 里什么都没留下 | 整行贴回来（`usuario … no existe` 是 `BRIDGE_ERP_USER` 的问题） |
+| 任何 `CONTRATO:` 开头的行 | 提交前自检没过，**整单已回滚**，ERP 里什么都没留下 | 整行贴回来（`usuario … no existe` 是 `BRIDGE_ERP_USER` 的问题；`SUBTOT …` 是门户和 ERP 对「一箱几瓶」不一致，见步骤 5） |
 
 其它症状先查第 ⑧ 节「常见故障速查」。拿不准就把 `bridge.log` 里对应时间的那几行
 整段贴回来——密钥已打码。
