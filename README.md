@@ -49,9 +49,12 @@ row, open the cart, place an order — and read the lines the server prints:
 [perf] #12 /zh/catalogo session=0.5 profile=13.9 categories=13.4 settings=13.1 favorites=12.6 products=25.2 total=39.4
 ```
 
-- **`proxy`** is the session refresh, per request. `claims` is the JWT check; on
-  this project's ES256 signing keys it is a local verify and should read under a
-  millisecond. A `claims` that looks like a round trip means the tokens are being
+- **`proxy`** is the session refresh, per request. `claims` is an upper bound on
+  the JWT check (it also counts cookie parsing and client construction); on
+  this project's ES256 signing keys the verify is local and the whole figure
+  should read under a couple of milliseconds. Note `branch=anon|session` is a
+  word, not a number — don't feed proxy lines to a parser expecting only
+  numeric values. A `claims` that looks like a round trip means the tokens are being
   signed with the legacy symmetric secret and every request is calling the Auth
   server.
 - **The numbered line** is one page render or one server action. Every step is

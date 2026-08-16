@@ -47,8 +47,10 @@ export default async function StaffSettingsPage({
     finishStaff(pendingStaff, locale),
     perf.step("settings", getSetting(supabase, "show_prices")),
   ]);
-  perf.end();
+  // The owner gate comes BEFORE perf.end(): a redirected request must print no
+  // page line, and "a manager on an owner-only page" is the README's own example.
   if (!canManageStaff(staffUser.role)) redirect(`/${locale}/staff`);
+  perf.end();
 
   const t = await getTranslations("staff.settings");
   // Only for the shell's breadcrumb, which speaks the sidebar's vocabulary.
