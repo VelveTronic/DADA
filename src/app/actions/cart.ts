@@ -12,6 +12,7 @@ import {
   serializeCart,
   setQty,
 } from "@/lib/cart";
+import { perfRun } from "@/lib/perf";
 
 /** 30 days: long enough that a cart survives a weekend, short enough to expire. */
 const CART_MAX_AGE = 60 * 60 * 24 * 30;
@@ -81,6 +82,13 @@ export async function setCartLineQty(
   productId: string,
   qty: number,
 ): Promise<CartWriteResult> {
+  // Instrumented because the number this action is blamed for is not its own:
+  // the write is a cookie, with no database in it at all, and everything the
+  // customer waits for after a `+` is the `refresh()` at the bottom re-rendering
+  // whichever page they pressed it on. `PERF_LOG=1` shows the two side by side —
+  // this line will read a millisecond or two, and the catalogue's line right
+  // after it is the real cost of the press.
+  const perf = perfRun("action:cart.setQty");
   if (!isProductId(productId)) return { ok: false, code: "qty" };
   if (typeof qty !== "number" || !Number.isFinite(qty) || qty < 0) {
     return { ok: false, code: "qty" };
@@ -96,6 +104,7 @@ export async function setCartLineQty(
   }
 
   await writeCart(next);
+  perf.end();
   // `refresh` re-runs THIS route's dynamic render inside the same POST. That
   // second render is what the optimistic UI settles onto: the provider's base
   // cart is a prop off the freshly-read cookie, so the quantity left on screen

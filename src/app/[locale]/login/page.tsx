@@ -2,6 +2,7 @@ import type { Locale } from "next-intl";
 import { getTranslations, setRequestLocale } from "next-intl/server";
 import Image from "next/image";
 import { GLASS_CARD } from "@/components/ui";
+import { perfRun } from "@/lib/perf";
 import { LoginForm } from "./login-form";
 
 export default async function LoginPage({
@@ -14,7 +15,14 @@ export default async function LoginPage({
   const { locale } = await params;
   const { error } = await searchParams;
   setRequestLocale(locale);
+  // The only page in the portal that reads NOTHING, which is exactly why it is
+  // instrumented: its line is the floor — routing, i18n and the render, with no
+  // database in it — so every other page's line can be read as "the floor plus
+  // these round trips" rather than as a number with nothing to compare it to.
+  // It is also the one line reachable without signing in.
+  const perf = perfRun(`/${locale}/login`);
   const t = await getTranslations("login");
+  perf.end();
 
   return (
     // The one page with no AppShell: there is nobody signed in yet, so a header

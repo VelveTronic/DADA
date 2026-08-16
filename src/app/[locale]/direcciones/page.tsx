@@ -3,9 +3,9 @@ import { getTranslations, setRequestLocale } from "next-intl/server";
 import { Fragment } from "react";
 import { AppShell } from "@/components/app-shell";
 import { GLASS_CARD } from "@/components/ui";
-import { requireCompanyUser } from "@/lib/auth/guards";
+import { beginCompanyUser, finishCompanyUser } from "@/lib/auth/guards";
+import { perfRun } from "@/lib/perf";
 import { getSetting } from "@/lib/settings";
-import { createServerSupabase } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
 
@@ -34,14 +34,26 @@ export default async function AddressesPage({
 }) {
   const { locale } = await params;
   setRequestLocale(locale);
-  const { portalUser } = await requireCompanyUser(locale);
+  const perf = perfRun(`/${locale}/direcciones`);
+  const { supabase, pendingUser } = await beginCompanyUser(locale);
   const t = await getTranslations("addresses");
 
-  const supabase = await createServerSupabase();
-  // The address and the owner's price switch race; neither waits on the other.
-  // The switch matters here only for the phone's cart bar, which rides under
-  // every customer page including this one.
-  const [{ data: company, error }, showPrices] = await Promise.all([
+  // The profile row and the owner's price switch race; neither waits on the
+  // other. The switch matters here only for the phone's cart bar, which rides
+  // under every customer page including this one.
+  const [portalUser, showPrices] = await Promise.all([
+    finishCompanyUser(pendingUser, locale),
+    perf.step("settings", getSetting(supabase, "show_prices")),
+  ]);
+
+  // The address is the one read on this page that cannot join them: it is keyed
+  // by `company_id`, which is what the profile row above went to fetch. RLS
+  // (`companies_select`) would narrow an authenticated customer to this exact
+  // row without the filter — but a query that says whose row it wants out loud
+  // is worth one round trip on a page nobody opens twice a day, so the `.eq`
+  // stays and the read waits.
+  const { data: company, error } = await perf.step(
+    "company",
     supabase
       .from("companies")
       // Enumerated, never `select('*')`: `notes` is internal and column-revoked
@@ -49,8 +61,8 @@ export default async function AddressesPage({
       .select("name, address, address_city, postal_code, phone")
       .eq("id", portalUser.company_id)
       .maybeSingle(),
-    getSetting(supabase, "show_prices"),
-  ]);
+  );
+  perf.end();
   if (error) console.error("addresses company query:", error);
 
   /** The four address fields, in the order an envelope is read. */

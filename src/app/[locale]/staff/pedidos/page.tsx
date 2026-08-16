@@ -5,15 +5,15 @@ import { cancelOrder, confirmOrder } from "@/app/actions/staff-orders";
 import { OrderStatusBadge } from "@/components/order-status-badge";
 import { StaffShell } from "@/components/staff-shell";
 import { FIELD_SM, GLASS_CARD } from "@/components/ui";
-import { requireStaff } from "@/lib/auth/guards";
+import { beginStaff, finishStaff } from "@/lib/auth/guards";
 import { localizedName, unitLabel } from "@/lib/catalog/display";
 import { formatEuros } from "@/lib/money";
 import type { QueueTab } from "@/lib/orders";
 import { formatOrderDate, QUEUE_TABS, safeQueueTab } from "@/lib/orders";
+import { perfRun } from "@/lib/perf";
 import type { Database } from "@/lib/supabase/database.types";
 import type { PublicOrder } from "@/lib/supabase/public.types";
 import { PUBLIC_ORDER_COLUMNS } from "@/lib/supabase/public.types";
-import { createServerSupabase } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
 
@@ -55,7 +55,8 @@ export default async function StaffOrdersPage({
   const { locale } = await params;
   const { estado: rawEstado, rpcResult: rawResult } = await searchParams;
   setRequestLocale(locale);
-  const { staffUser } = await requireStaff(locale);
+  const perf = perfRun(`/${locale}/staff/pedidos`);
+  const { supabase, pendingStaff } = await beginStaff(locale);
   const t = await getTranslations("staff");
   // The order vocabulary is the customer's, the money labels are the cart's:
   // reused rather than duplicated into the staff namespace.
@@ -70,7 +71,6 @@ export default async function StaffOrdersPage({
       ? rawResult
       : null;
 
-  const supabase = await createServerSupabase();
   let query = supabase
     .from("orders")
     .select(`${PUBLIC_ORDER_COLUMNS}, companies:company_id(name, codcli)`)
@@ -78,27 +78,41 @@ export default async function StaffOrdersPage({
     .limit(PAGE_SIZE);
   // `all` is the absence of a filter, which is why it is not a status.
   if (tab !== "all") query = query.eq("status", tab);
-  const { data, error } = await query;
+
+  // The queue is built from `?estado=` alone, so it needs nothing the guard is
+  // fetching and goes out beside it. This is the SESSION client: `orders_read`
+  // opens the whole table to staff and to nobody else, so a caller who turns out
+  // not to be staff reads their own restaurant's orders at worst — and is
+  // redirected before a single row is rendered.
+  const [staffUser, { data, error }] = await Promise.all([
+    finishStaff(pendingStaff, locale),
+    perf.step("orders", query),
+  ]);
   if (error) console.error("staff orders query:", error);
   const orders: QueueOrder[] = data ?? [];
 
   // Second query rather than a nested embed: the lines are grouped here, once,
-  // and the orders query stays a plain column list.
+  // and the orders query stays a plain column list. It is the one read on this
+  // page that genuinely queues, because the order ids ARE its filter.
   const orderIds = orders.map((order) => order.id);
   let items: QueueItem[] = [];
   if (orderIds.length > 0) {
-    const { data: itemData, error: itemError } = await supabase
-      .from("order_items")
-      // One string literal, never a concatenation: supabase-js types the row from
-      // the literal, and `"a, " + "b"` widens to `string` and loses it.
-      .select(
-        "id, order_id, codart, name, qty, unit, units_per_case, unit_price_cents, line_total_cents",
-      )
-      .in("order_id", orderIds)
-      .order("sort_order", { ascending: true });
+    const { data: itemData, error: itemError } = await perf.step(
+      "orderItems",
+      supabase
+        .from("order_items")
+        // One string literal, never a concatenation: supabase-js types the row
+        // from the literal, and `"a, " + "b"` widens to `string` and loses it.
+        .select(
+          "id, order_id, codart, name, qty, unit, units_per_case, unit_price_cents, line_total_cents",
+        )
+        .in("order_id", orderIds)
+        .order("sort_order", { ascending: true }),
+    );
     if (itemError) console.error("staff order items query:", itemError);
     items = itemData ?? [];
   }
+  perf.end();
 
   const linesByOrder = new Map<string, QueueItem[]>();
   for (const item of items) {

@@ -5,6 +5,7 @@ import { setStaffRole, setUserActive } from "@/app/actions/staff-users";
 import { StaffShell } from "@/components/staff-shell";
 import { BTN_QUIET, FIELD_SM, GLASS_CARD } from "@/components/ui";
 import { requireStaff } from "@/lib/auth/guards";
+import { perfRun } from "@/lib/perf";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { Database } from "@/lib/supabase/database.types";
 import {
@@ -80,6 +81,11 @@ export default async function StaffUsersPage({
   const { locale } = await params;
   const { result: rawResult } = await searchParams;
   setRequestLocale(locale);
+  const perf = perfRun(`/${locale}/staff/usuarios`);
+  // Sequential on purpose, as on `/staff/productos`: every read below is on the
+  // SERVICE-ROLE client, which answers without RLS. Racing those against the
+  // guard the way the session-client pages do would run them for a caller the
+  // guard is about to refuse, so they wait for both gates to have returned.
   const { user, staffUser } = await requireStaff(locale);
   if (!canManageUsers(staffUser.role)) redirect(`/${locale}/staff`);
   const owner = canManageStaff(staffUser.role);
@@ -101,20 +107,23 @@ export default async function StaffUsersPage({
 
   const admin = createAdminClient();
 
+  // Four reads, one round trip. The addresses used to be fetched on a line of
+  // their own ABOVE the other three, which cost the page a whole trip to GoTrue
+  // before the first row query could start — and it never needed to: the account
+  // lists and the address book have nothing to say to each other until both are
+  // in hand.
+  //
   // One call for every address, then a map: the two lists below hold `auth.uid`s
   // and nothing else, and a lookup per row would be a request per row. 1000 is
   // GoTrue's own ceiling for a page and some hundreds of times this deployment's
   // account count; a bigger tenant would need the pager, not a bigger number.
-  const { data: authList, error: authError } = await admin.auth.admin.listUsers({
-    perPage: 1000,
-  });
-  if (authError) console.error("staff users listUsers:", authError);
-  const emails = new Map<string, string>();
-  for (const authUser of authList?.users ?? []) {
-    if (authUser.email) emails.set(authUser.id, authUser.email);
-  }
-
-  const [customerResult, staffResult, companyResult] = await Promise.all([
+  const [
+    { data: authList, error: authError },
+    customerResult,
+    staffResult,
+    companyResult,
+  ] = await Promise.all([
+    perf.step("authUsers", admin.auth.admin.listUsers({ perPage: 1000 })),
     admin
       .from("portal_users")
       .select(
@@ -140,6 +149,12 @@ export default async function StaffUsersPage({
       .eq("is_active", true)
       .order("name"),
   ]);
+  perf.end();
+  if (authError) console.error("staff users listUsers:", authError);
+  const emails = new Map<string, string>();
+  for (const authUser of authList?.users ?? []) {
+    if (authUser.email) emails.set(authUser.id, authUser.email);
+  }
   for (const [what, error] of [
     ["portal_users", customerResult.error],
     ["staff_users", staffResult?.error],

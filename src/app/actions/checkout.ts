@@ -8,6 +8,7 @@ import { routing } from "@/i18n/routing";
 import { CART_COOKIE, parseCart } from "@/lib/cart";
 import type { OrderErrorKey } from "@/lib/orders";
 import { isUuid, mapOrderError } from "@/lib/orders";
+import { perfRun } from "@/lib/perf";
 import type { Json } from "@/lib/supabase/database.types";
 import { createServerSupabase } from "@/lib/supabase/server";
 
@@ -62,6 +63,7 @@ type Outcome =
  * were, ready to fix and resend.
  */
 export async function submitOrder(formData: FormData) {
+  const perf = perfRun("action:checkout.submitOrder");
   const locale = safeLocale(formData.get("locale"));
 
   const cart = parseCart((await cookies()).get(CART_COOKIE)?.value);
@@ -90,17 +92,23 @@ export async function submitOrder(formData: FormData) {
   // NEXT_REDIRECT, so a redirect inside a try that catches everything would be
   // swallowed and reported to the customer as an unknown order failure.
   try {
-    const { data, error } = await supabase.rpc("create_order", {
-      p_lines: lines,
-      p_delivery_date: rawDate === "" ? undefined : rawDate,
-      p_note: note === "" ? undefined : note,
-      // Minted once per RENDER of the cart, so a double-submit of the same page
-      // is idempotent by construction: create_order hands back the order it
-      // already made instead of a second one. A token that is not a uuid can
-      // only come from a crafted POST; dropping it costs that caller the
-      // idempotency it declined to ask for properly.
-      p_client_token: isUuid(token) ? token : undefined,
-    });
+    // The one round trip a checkout makes. It is also the slowest single call
+    // in the portal — `create_order` re-resolves every price, writes the order,
+    // its lines and its events — so it is worth being able to see on its own.
+    const { data, error } = await perf.step(
+      "create_order",
+      supabase.rpc("create_order", {
+        p_lines: lines,
+        p_delivery_date: rawDate === "" ? undefined : rawDate,
+        p_note: note === "" ? undefined : note,
+        // Minted once per RENDER of the cart, so a double-submit of the same
+        // page is idempotent by construction: create_order hands back the order
+        // it already made instead of a second one. A token that is not a uuid
+        // can only come from a crafted POST; dropping it costs that caller the
+        // idempotency it declined to ask for properly.
+        p_client_token: isUuid(token) ? token : undefined,
+      }),
+    );
     outcome = error
       ? { ok: false, ...mapOrderError(error.message) }
       : { ok: true, orderNumber: orderNumberOf(data) };
@@ -110,6 +118,9 @@ export async function submitOrder(formData: FormData) {
     console.error("submitOrder create_order:", cause);
     outcome = { ok: false, key: "UNKNOWN", detail: null };
   }
+  // Before the redirects: every exit from here throws, so a line logged after
+  // one of them would only ever be logged on the paths that did not take it.
+  perf.end();
 
   if (!outcome.ok) {
     redirect(cartErrorHref(locale, outcome.key, outcome.detail));

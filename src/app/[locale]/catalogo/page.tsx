@@ -4,11 +4,11 @@ import Link from "next/link";
 import { AppShell } from "@/components/app-shell";
 import { SearchIcon } from "@/components/icons";
 import { BTN_PRIMARY, FIELD, GLASS_CARD } from "@/components/ui";
-import { requireCompanyUser } from "@/lib/auth/guards";
+import { beginCompanyUser, finishCompanyUser } from "@/lib/auth/guards";
 import { localizedName, sanitizeSearch } from "@/lib/catalog/display";
+import { perfRun } from "@/lib/perf";
 import { getSetting } from "@/lib/settings";
 import type { CustomerCatalogProduct } from "@/lib/supabase/public.types";
-import { createServerSupabase } from "@/lib/supabase/server";
 import { ProductRow } from "./product-row";
 
 export const dynamic = "force-dynamic";
@@ -17,6 +17,17 @@ const PAGE_SIZE = 50;
 
 /** A page of favorites with nothing in it must still be an empty IN list. */
 const NO_MATCH_ID = "00000000-0000-0000-0000-000000000000";
+
+/**
+ * The product ids out of a favourites read, whether it answered or failed.
+ *
+ * Read twice from the same result — once as the favourites tab's filter, once
+ * as the set the stars are drawn from — so it says once what a failed query
+ * means here: no stars, never a broken page.
+ */
+function productIdsOf(result: { data: { product_id: string }[] | null }) {
+  return (result.data ?? []).map((row) => row.product_id);
+}
 
 export default async function CatalogPage({
   params,
@@ -40,7 +51,8 @@ export default async function CatalogPage({
     focus: rawFocus,
   } = await searchParams;
   setRequestLocale(locale);
-  const { portalUser } = await requireCompanyUser(locale);
+  const perf = perfRun(`/${locale}/catalogo`);
+  const { supabase, pendingUser } = await beginCompanyUser(locale);
   const t = await getTranslations("catalog");
 
   const q = sanitizeSearch(rawQ ?? "");
@@ -55,30 +67,24 @@ export default async function CatalogPage({
   // `href()`: it belongs to the one navigation that asked for it.
   const focusSearch = rawFocus === "search";
 
-  const supabase = await createServerSupabase();
-
-  // Three independent reads, and the products query below needs all of them
-  // before it can be built (favourites for the tab, categories for `?cat=`), so
-  // they race rather than queue. `show_prices` rides along here for exactly that
-  // reason: the setting costs this page no round trip of its own, and a page
-  // that reads it sequentially would have paid ~50ms for a boolean.
-  const [
-    { data: favRows, error: favError },
-    { data: categoryRows, error: categoryError },
-    showPrices,
-  ] = await Promise.all([
-    supabase
-      .from("favorites")
-      .select("product_id")
-      .eq("company_id", portalUser.company_id),
-    supabase
-      .from("categories")
-      .select("id, erp_code, name, sort_order")
-      .eq("is_active", true),
-    getSetting(supabase, "show_prices"),
-  ]);
-  if (favError) console.error("catalog favorites query:", favError);
-  const favoriteIds = new Set((favRows ?? []).map((row) => row.product_id));
+  // ROUND ONE. The restaurant's profile row is already in flight (see
+  // `guards.ts`); the two reads that need nothing from it go out beside it
+  // rather than behind it. `show_prices` has ridden along with page data since
+  // it existed — the setting must never cost a page a round trip of its own —
+  // and the categories are the same kind of read: the whole active list, the
+  // same for every caller.
+  const [portalUser, { data: categoryRows, error: categoryError }, showPrices] =
+    await Promise.all([
+      finishCompanyUser(pendingUser, locale),
+      perf.step(
+        "categories",
+        supabase
+          .from("categories")
+          .select("id, erp_code, name, sort_order")
+          .eq("is_active", true),
+      ),
+      perf.step("settings", getSetting(supabase, "show_prices")),
+    ]);
 
   if (categoryError) console.error("catalog categories query:", categoryError);
   // Ordered here rather than in SQL: `name` is jsonb, so only the app knows
@@ -96,27 +102,57 @@ export default async function CatalogPage({
 
   // Customers read the priced VIEW only: it carries exactly one price column,
   // resolved server-side from this company's tarifa.
-  let query = supabase
-    .from("products_priced")
-    .select("*", { count: "exact" })
-    .eq("is_current_variant", true);
-  if (q) {
-    query = query.or(
-      `codart.ilike.%${q}%,name->>zh.ilike.%${q}%,name->>es.ilike.%${q}%`,
-    );
-  }
-  if (tab === "favoritos") {
-    const ids = [...favoriteIds];
-    query = query.in("id", ids.length ? ids : [NO_MATCH_ID]);
-  }
-  if (activeCategory) query = query.eq("category_id", activeCategory.id);
-  const from = (page - 1) * PAGE_SIZE;
-  const { data, count, error } = await query
-    .order("codart", { ascending: true })
-    .range(from, from + PAGE_SIZE - 1);
+  const productsQuery = (favoriteFilter: string[] | null) => {
+    let query = supabase
+      .from("products_priced")
+      .select("*", { count: "exact" })
+      .eq("is_current_variant", true);
+    if (q) {
+      query = query.or(
+        `codart.ilike.%${q}%,name->>zh.ilike.%${q}%,name->>es.ilike.%${q}%`,
+      );
+    }
+    if (favoriteFilter) {
+      query = query.in("id", favoriteFilter.length ? favoriteFilter : [NO_MATCH_ID]);
+    }
+    if (activeCategory) query = query.eq("category_id", activeCategory.id);
+    const from = (page - 1) * PAGE_SIZE;
+    return query
+      .order("codart", { ascending: true })
+      .range(from, from + PAGE_SIZE - 1);
+  };
+
+  // ROUND TWO. The favourites are the one read that needed the profile — they
+  // are keyed by the restaurant's company — and the page of products is the one
+  // read that needed the categories, for `?cat=`. Both are answered now, and on
+  // an ordinary catalogue load they are answered TOGETHER: the star on a row and
+  // the row itself have nothing to say to each other either.
+  //
+  // The favourites TAB is the single shape where they cannot go out side by
+  // side, because there the id list IS the filter. Only that tab pays a third
+  // round trip, and it is the tab with the shortest list.
+  const pendingFavorites = perf.step(
+    "favorites",
+    supabase
+      .from("favorites")
+      .select("product_id")
+      .eq("company_id", portalUser.company_id),
+  );
+  const favoriteFilter =
+    tab === "favoritos" ? productIdsOf(await pendingFavorites) : null;
+
+  const [favResult, { data, count, error }] = await Promise.all([
+    pendingFavorites,
+    perf.step("products", productsQuery(favoriteFilter)),
+  ]);
+
+  if (favResult.error) console.error("catalog favorites query:", favResult.error);
+  const favoriteIds = new Set(productIdsOf(favResult));
+
   if (error) console.error("catalog query:", error);
   const products: CustomerCatalogProduct[] = data ?? [];
   const totalPages = Math.max(1, Math.ceil((count ?? 0) / PAGE_SIZE));
+  perf.end();
 
   const href = (p: {
     q?: string;

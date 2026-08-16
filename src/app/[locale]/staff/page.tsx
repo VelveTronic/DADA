@@ -2,7 +2,7 @@ import type { Locale } from "next-intl";
 import { getTranslations, setRequestLocale } from "next-intl/server";
 import { StaffShell } from "@/components/staff-shell";
 import { GLASS_CARD } from "@/components/ui";
-import { requireStaff } from "@/lib/auth/guards";
+import { beginStaff, finishStaff } from "@/lib/auth/guards";
 import {
   bridgeCountLabelKey,
   bridgeStateKey,
@@ -12,7 +12,7 @@ import {
   type BridgeJob,
   type BridgeTone,
 } from "@/lib/bridge-status";
-import { createServerSupabase } from "@/lib/supabase/server";
+import { perfRun } from "@/lib/perf";
 
 export const dynamic = "force-dynamic";
 
@@ -36,7 +36,8 @@ export default async function StaffHome({
 }) {
   const { locale } = await params;
   setRequestLocale(locale);
-  const { staffUser } = await requireStaff(locale);
+  const perf = perfRun(`/${locale}/staff`);
+  const { supabase, pendingStaff } = await beginStaff(locale);
   const t = await getTranslations("staff");
 
   // The grid of link cards that used to open this page is gone: the sidebar now
@@ -52,10 +53,19 @@ export default async function StaffHome({
   // than it buys — it throws when `SUPABASE_SERVICE_ROLE_KEY` is absent, and a
   // status card must never be the reason the whole staff home 500s and takes
   // the links to the order queue with it.
-  const supabase = await createServerSupabase();
-  const { data: heartbeats, error } = await supabase
-    .from("bridge_status")
-    .select("job, last_run_at, ok, detail");
+  //
+  // …and being the session client is also why it may go out BESIDE the staff
+  // profile row instead of behind it: `bridge_status_staff_read` is the same
+  // gate the guard is about, so a caller who turns out not to be staff gets an
+  // empty result and a redirect, never a row.
+  const [staffUser, { data: heartbeats, error }] = await Promise.all([
+    finishStaff(pendingStaff, locale),
+    perf.step(
+      "bridge",
+      supabase.from("bridge_status").select("job, last_run_at, ok, detail"),
+    ),
+  ]);
+  perf.end();
   // A failed query renders the same "nothing has ever reported" state as an
   // empty table. It is the honest thing to show — we know nothing either way —
   // and the reason lands in the server log rather than on a staff screen.

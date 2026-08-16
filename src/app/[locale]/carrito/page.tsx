@@ -11,7 +11,7 @@ import {
 } from "@/components/cart/cart-line";
 import { ProductThumb } from "@/components/product-thumb";
 import { BTN_PRIMARY, FIELD, GLASS_CARD } from "@/components/ui";
-import { requireCompanyUser } from "@/lib/auth/guards";
+import { beginCompanyUser, finishCompanyUser } from "@/lib/auth/guards";
 import { CART_COOKIE, parseCart } from "@/lib/cart";
 import { localizedName, unitLabel } from "@/lib/catalog/display";
 import { formatEuros, lineTotalCents } from "@/lib/money";
@@ -21,9 +21,9 @@ import {
   isOrderErrorKey,
   madridDay,
 } from "@/lib/orders";
+import { perfRun } from "@/lib/perf";
 import { getSetting } from "@/lib/settings";
 import type { CustomerCatalogProduct } from "@/lib/supabase/public.types";
-import { createServerSupabase } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
 
@@ -62,7 +62,8 @@ export default async function CartPage({
   const { locale } = await params;
   const { error: rawError, detail: rawDetail } = await searchParams;
   setRequestLocale(locale);
-  const { portalUser } = await requireCompanyUser(locale);
+  const perf = perfRun(`/${locale}/carrito`);
+  const { supabase, pendingUser } = await beginCompanyUser(locale);
   const t = await getTranslations("cart");
   // The badges and the price-pending wording are catalog vocabulary; reused
   // rather than duplicated into a second namespace.
@@ -80,30 +81,36 @@ export default async function CartPage({
   const cart = parseCart((await cookies()).get(CART_COOKIE)?.value);
   const ids = Object.keys(cart);
 
-  const supabase = await createServerSupabase();
-  // The lines and the owner's price switch, together: the setting must not add a
-  // round trip of its own to a page a restaurant reaches with a full cart. An
-  // empty cart has no products query to make, so that half resolves to null.
-  const [productResult, showPrices] = await Promise.all([
+  // ONE round: the restaurant's profile row (already in flight from the guard),
+  // the cart's lines and the owner's price switch. None of the three needs
+  // anything from the other two — the line ids come from the cookie above — so
+  // a cart page costs one trip to the database however full it is. An empty cart
+  // has no products query to make, so that half resolves to null.
+  const [portalUser, productResult, showPrices] = await Promise.all([
+    finishCompanyUser(pendingUser, locale),
     // No is_current_variant filter, unlike the catalog: a line already in the
     // cart has to resolve so it can be shown and removed, even once the product
     // has stopped being orderable.
     ids.length > 0
-      ? supabase
-          .from("products_priced")
-          // `price_per_case_cents` and not `price_cents`: quantities in this cart
-          // are CAJAS, so the only unit price that may multiply them is the one
-          // the view already computed per caja.
-          //
-          // One string literal, never a concatenation: supabase-js types the row
-          // from the literal, and `"a, " + "b"` widens to `string` and loses it.
-          .select(
-            "id, codart, name, unit, units_per_case, is_weighed, is_orderable, price_per_case_cents, image_url",
-          )
-          .in("id", ids)
+      ? perf.step(
+          "products",
+          supabase
+            .from("products_priced")
+            // `price_per_case_cents` and not `price_cents`: quantities in this
+            // cart are CAJAS, so the only unit price that may multiply them is
+            // the one the view already computed per caja.
+            //
+            // One string literal, never a concatenation: supabase-js types the
+            // row from the literal, and `"a, " + "b"` widens to `string`.
+            .select(
+              "id, codart, name, unit, units_per_case, is_weighed, is_orderable, price_per_case_cents, image_url",
+            )
+            .in("id", ids),
+        )
       : Promise.resolve(null),
-    getSetting(supabase, "show_prices"),
+    perf.step("settings", getSetting(supabase, "show_prices")),
   ]);
+  perf.end();
   if (productResult?.error)
     console.error("cart products query:", productResult.error);
   const products: CartProduct[] = productResult?.data ?? [];

@@ -3,13 +3,13 @@ import { getTranslations, setRequestLocale } from "next-intl/server";
 import { AppShell } from "@/components/app-shell";
 import { OrderStatusBadge } from "@/components/order-status-badge";
 import { GLASS_CARD } from "@/components/ui";
-import { requireCompanyUser } from "@/lib/auth/guards";
+import { beginCompanyUser, finishCompanyUser } from "@/lib/auth/guards";
 import { formatEuros } from "@/lib/money";
 import { formatOrderDate, parseOrderNumber } from "@/lib/orders";
+import { perfRun } from "@/lib/perf";
 import { getSetting } from "@/lib/settings";
 import type { PublicOrder } from "@/lib/supabase/public.types";
 import { PUBLIC_ORDER_COLUMNS } from "@/lib/supabase/public.types";
-import { createServerSupabase } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
 
@@ -26,7 +26,8 @@ export default async function OrdersPage({
   const { locale } = await params;
   const { created: rawCreated } = await searchParams;
   setRequestLocale(locale);
-  const { portalUser } = await requireCompanyUser(locale);
+  const perf = perfRun(`/${locale}/pedidos`);
+  const { supabase, pendingUser } = await beginCompanyUser(locale);
   const t = await getTranslations("orders");
   // The money and date vocabulary is the cart's, reused rather than duplicated
   // into a second namespace.
@@ -36,9 +37,19 @@ export default async function OrdersPage({
   // plain order number or no banner at all.
   const created = parseOrderNumber(rawCreated);
 
-  const supabase = await createServerSupabase();
-  // The history and the owner's price switch race; neither waits on the other.
-  const [{ data, error }, showPrices] = await Promise.all([
+  // The profile row and the owner's price switch race; neither waits on the
+  // other.
+  const [portalUser, showPrices] = await Promise.all([
+    finishCompanyUser(pendingUser, locale),
+    perf.step("settings", getSetting(supabase, "show_prices")),
+  ]);
+
+  // The history itself is keyed by `company_id`, so it is the one read here that
+  // has to wait for the profile row — same trade as `/direcciones`, and the same
+  // answer: `orders_read` would narrow it anyway, and the explicit filter is
+  // worth the round trip on a page that is opened once after an order.
+  const { data, error } = await perf.step(
+    "orders",
     supabase
       .from("orders")
       // The enumerated customer-readable list (CLAUDE.md: never `select('*')`
@@ -49,8 +60,8 @@ export default async function OrdersPage({
       .eq("company_id", portalUser.company_id)
       .order("created_at", { ascending: false })
       .limit(PAGE_SIZE),
-    getSetting(supabase, "show_prices"),
-  ]);
+  );
+  perf.end();
   if (error) console.error("orders query:", error);
   const orders: PublicOrder[] = data ?? [];
 

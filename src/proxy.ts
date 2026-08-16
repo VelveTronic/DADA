@@ -57,12 +57,20 @@ type PendingCookie = Parameters<SetAllCookies>[0][number];
  * hard-assert both vars).
  */
 export default async function proxy(request: NextRequest): Promise<NextResponse> {
+  // `PERF_LOG=1`, read the same way `src/lib/perf.ts` reads it and deliberately
+  // NOT by importing it: this file is the one module that may run on the edge
+  // runtime, and a timing helper is not a reason to drag React's `cache` into
+  // the proxy bundle. Zero when the switch is off, and `logProxy` returns.
+  const startedAt = process.env.PERF_LOG === "1" ? performance.now() : 0;
+
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const supabaseKey =
     process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ??
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
   if (!supabaseUrl || !supabaseKey || !hasAuthCookie(request)) {
-    return intl(request);
+    const response = intl(request);
+    logProxy(startedAt, request, "anon", 0);
+    return response;
   }
 
   // What the refresh produced, held until intl has made a response to put it on.
@@ -95,6 +103,12 @@ export default async function proxy(request: NextRequest): Promise<NextResponse>
   // validates the JWT signature and still performs the required cookie refresh.
   // Authorization remains in the data-access guards, close to each data read.
   await supabase.auth.getClaims();
+  // The number that decides whether the proxy is worth arguing about. With the
+  // project's ES256 signing keys this is a local WebCrypto verify against a
+  // process-wide JWKS cache and reads well under a millisecond; if it ever reads
+  // like a round trip, the tokens are being signed with the legacy symmetric
+  // secret and `getClaims` is falling back to a call to `/auth/v1/user`.
+  const claimsMs = startedAt ? performance.now() - startedAt : 0;
 
   const response = intl(request);
 
@@ -108,7 +122,29 @@ export default async function proxy(request: NextRequest): Promise<NextResponse>
       response.headers.set(name, value);
     }
   }
+  logProxy(startedAt, request, "session", claimsMs);
   return response;
+}
+
+/**
+ * One line per proxied request when `PERF_LOG=1`, in the same shape
+ * `src/lib/perf.ts` prints for the render that follows it.
+ *
+ * `branch` is which of the two paths above the request took — `anon` skips the
+ * Supabase client, the token round trip and the cookie bookkeeping entirely, so
+ * its `claims` is 0 because there was no session to validate.
+ */
+function logProxy(
+  startedAt: number,
+  request: NextRequest,
+  branch: "anon" | "session",
+  claimsMs: number,
+): void {
+  if (!startedAt) return;
+  const total = (performance.now() - startedAt).toFixed(1);
+  console.log(
+    `[perf] proxy ${request.nextUrl.pathname} branch=${branch} claims=${claimsMs.toFixed(1)} total=${total}`,
+  );
 }
 
 /**

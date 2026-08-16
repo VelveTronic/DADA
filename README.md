@@ -29,6 +29,44 @@ The CI workflow runs the same application gate. It also starts an isolated local
 Supabase Postgres instance, replays every migration, and runs the database
 contract suite.
 
+## Measuring a slow page (`PERF_LOG`)
+
+The request path is instrumented. It is silent — no timer read, no line written —
+unless `PERF_LOG=1` is set, and it must be measured on a PRODUCTION build:
+`next dev` recompiles on demand and its numbers are not the portal's.
+
+```text
+pnpm build
+$env:PERF_LOG=1; pnpm start        # PowerShell
+PERF_LOG=1 pnpm start              # bash
+```
+
+Then sign in and use the portal normally — open the catalogue, press `+` on a
+row, open the cart, place an order — and read the lines the server prints:
+
+```text
+[perf] proxy /zh/catalogo branch=session claims=0.4 total=1.1
+[perf] #12 /zh/catalogo session=0.5 profile=13.9 categories=13.4 settings=13.1 favorites=12.6 products=25.2 total=39.4
+```
+
+- **`proxy`** is the session refresh, per request. `claims` is the JWT check; on
+  this project's ES256 signing keys it is a local verify and should read under a
+  millisecond. A `claims` that looks like a round trip means the tokens are being
+  signed with the legacy symmetric secret and every request is calling the Auth
+  server.
+- **The numbered line** is one page render or one server action. Every step is
+  wall time on the wire, so steps that ran TOGETHER overlap: `session + profile +
+  categories + …` adding up to far more than `total` is what parallelism looks
+  like here, and a `total` that equals the sum is a page that queued its queries
+  one behind the other. Steps print in the order they were issued.
+- Requests that end in a redirect (signed out, deactivated, a manager on an
+  owner-only page) print the proxy line but no page line: they never reach the
+  end of the page.
+
+`total` covers the page's own data work, not the response. The wall-clock number
+a browser sees is a few milliseconds more (routing, i18n and the React render):
+the `/…/login` line is that floor on its own, since it reads nothing.
+
 ## Authentication and users
 
 The portal has two mutually exclusive user mappings: restaurant users in

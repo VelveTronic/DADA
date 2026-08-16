@@ -3,9 +3,9 @@ import { getTranslations, setRequestLocale } from "next-intl/server";
 import { redirect } from "next/navigation";
 import { StaffShell } from "@/components/staff-shell";
 import { GLASS_CARD } from "@/components/ui";
-import { requireStaff } from "@/lib/auth/guards";
+import { beginStaff, finishStaff } from "@/lib/auth/guards";
+import { perfRun } from "@/lib/perf";
 import { getSetting, isSettingsResult } from "@/lib/settings";
-import { createServerSupabase } from "@/lib/supabase/server";
 import { canManageStaff } from "@/lib/user-admin";
 import { SettingsForm } from "./settings-form";
 
@@ -35,7 +35,19 @@ export default async function StaffSettingsPage({
   const { locale } = await params;
   const { result: rawResult } = await searchParams;
   setRequestLocale(locale);
-  const { staffUser } = await requireStaff(locale);
+  const perf = perfRun(`/${locale}/staff/ajustes`);
+  const { supabase, pendingStaff } = await beginStaff(locale);
+
+  // The switch's current value goes out beside the staff row rather than behind
+  // it. Nothing is relaxed by that: `portal_settings_read` opens this row to
+  // EVERY authenticated caller — customer pages read the same one — so it is not
+  // a privilege the owner gate below is protecting. What the gate protects is
+  // the form, and it still fires before any of it is rendered.
+  const [staffUser, showPrices] = await Promise.all([
+    finishStaff(pendingStaff, locale),
+    perf.step("settings", getSetting(supabase, "show_prices")),
+  ]);
+  perf.end();
   if (!canManageStaff(staffUser.role)) redirect(`/${locale}/staff`);
 
   const t = await getTranslations("staff.settings");
@@ -47,9 +59,6 @@ export default async function StaffSettingsPage({
   // key — a raw value would render as whatever the URL said.
   const raw = rawResult ?? "";
   const result = isSettingsResult(raw) ? raw : null;
-
-  const supabase = await createServerSupabase();
-  const showPrices = await getSetting(supabase, "show_prices");
 
   return (
     <StaffShell

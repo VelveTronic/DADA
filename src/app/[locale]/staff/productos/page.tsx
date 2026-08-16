@@ -10,6 +10,7 @@ import { StaffShell } from "@/components/staff-shell";
 import { BTN_PRIMARY, BTN_QUIET, FIELD, GLASS_CARD } from "@/components/ui";
 import { requireStaff } from "@/lib/auth/guards";
 import { localizedName, sanitizeSearch, unitLabel } from "@/lib/catalog/display";
+import { perfRun } from "@/lib/perf";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { Database } from "@/lib/supabase/database.types";
 
@@ -66,6 +67,10 @@ export default async function StaffProductsPage({
   const { locale } = await params;
   const { q: rawQ, page: rawPage } = await searchParams;
   setRequestLocale(locale);
+  const perf = perfRun(`/${locale}/staff/productos`);
+  // Sequential on purpose: the query below is on the SERVICE-ROLE client — the
+  // six price tiers are reachable no other way — so it runs only once the guard
+  // has said this caller is staff.
   const { staffUser } = await requireStaff(locale);
   const t = await getTranslations("staff");
   // Shared catalog vocabulary — control labels, the weighed badge, the pager —
@@ -88,10 +93,14 @@ export default async function StaffProductsPage({
     );
   }
   const from = (page - 1) * PAGE_SIZE;
-  const { data, count, error } = await query
-    .order("base_sku")
-    .order("variant_suffix")
-    .range(from, from + PAGE_SIZE - 1);
+  const { data, count, error } = await perf.step(
+    "products",
+    query
+      .order("base_sku")
+      .order("variant_suffix")
+      .range(from, from + PAGE_SIZE - 1),
+  );
+  perf.end();
   if (error) console.error("staff products query:", error);
   const products: StaffProductRow[] = data ?? [];
   const totalPages = Math.max(1, Math.ceil((count ?? 0) / PAGE_SIZE));

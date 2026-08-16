@@ -2,10 +2,10 @@ import type { Locale } from "next-intl";
 import { getTranslations, setRequestLocale } from "next-intl/server";
 import { AppShell } from "@/components/app-shell";
 import { GLASS_CARD } from "@/components/ui";
-import { requireCompanyUser } from "@/lib/auth/guards";
+import { beginCompanyUser, finishCompanyUser } from "@/lib/auth/guards";
+import { perfRun } from "@/lib/perf";
 import { isProfileResult, type ProfileResult } from "@/lib/profile";
 import { getSetting } from "@/lib/settings";
-import { createServerSupabase } from "@/lib/supabase/server";
 import { DisplayNameForm, PasswordForm } from "./profile-forms";
 
 export const dynamic = "force-dynamic";
@@ -37,7 +37,8 @@ export default async function ProfilePage({
   const { locale } = await params;
   const { name: rawName, pwd: rawPwd } = await searchParams;
   setRequestLocale(locale);
-  const { user, portalUser } = await requireCompanyUser(locale);
+  const perf = perfRun(`/${locale}/perfil`);
+  const { user, supabase, pendingUser } = await beginCompanyUser(locale);
   const t = await getTranslations("profile");
   // The eye toggle's two labels are the login page's; reused rather than
   // duplicated into a second namespace.
@@ -54,8 +55,16 @@ export default async function ProfilePage({
   // This page prices nothing, but the phone's cart bar rides under every
   // customer page — and with the owner's switch off it must not show the
   // subtotal slot at all, here as anywhere else.
-  const supabase = await createServerSupabase();
-  const showPrices = await getSetting(supabase, "show_prices");
+  //
+  // It used to be read on a line of its own, AFTER the guard had finished: a
+  // page whose whole content is already in hand paying a second full round trip
+  // for one boolean. It now goes out beside the profile row, which is the rule
+  // everywhere else in the portal.
+  const [portalUser, showPrices] = await Promise.all([
+    finishCompanyUser(pendingUser, locale),
+    perf.step("settings", getSetting(supabase, "show_prices")),
+  ]);
+  perf.end();
 
   const banner = (result: ProfileResult | null) =>
     result && (
