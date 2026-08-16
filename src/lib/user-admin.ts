@@ -98,8 +98,11 @@ export function isUserAdminError(value: string): value is UserAdminError {
 export interface CreateFormValues {
   email: string;
   displayName: string;
-  /** Which half of the customer form was open; the staff form always sends "existing". */
-  companyChoice: "existing" | "new";
+  /**
+   * The company half. Which branch was open is NOT carried: the form keeps that
+   * in its own state across a rejected submit, and a value here that nothing
+   * reads is a value somebody would later have to prove is unused.
+   */
   companyId: string;
   companyName: string;
   codcli: string;

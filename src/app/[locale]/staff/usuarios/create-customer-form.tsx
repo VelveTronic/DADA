@@ -39,9 +39,15 @@ export type CompanyOption = { id: string; name: string; codcli: number | null };
  * starts clean.
  *
  * The password is the deliberate exception: it is not in the returned values and
- * it is always retyped. The chosen branch is likewise not reset, because a staff
- * member adding three logins to the same new company would otherwise re-open the
- * disclosure three times.
+ * it is always retyped.
+ *
+ * The chosen branch survives a REJECTED submit and only that: `choice` is this
+ * component's own state, and nothing about a failure unmounts the component — so
+ * a staff member adding three logins to the same new company does not re-open
+ * the disclosure three times. A SUCCESS is the other case entirely: the redirect
+ * is thrown past this form to Next's redirect boundary, which unmounts the
+ * subtree while it navigates, so the next render starts from a fresh `useState`
+ * and a fresh `EMPTY_CREATE_STATE` — no stale error, no stale branch.
  */
 export function CreateCustomerForm({
   locale,

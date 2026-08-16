@@ -849,14 +849,27 @@ export async function loadArticle(
  *     `CANSER=CANPED` (see `PEDCLILI_COLUMNS`), so its outstanding quantity is
  *     zero — which is the same arithmetic Wingest does, not a special case.
  *
+ * The correlation predicates are NOT wrapped in `RTRIM`: trailing blanks are
+ * insignificant in char equality (SQL Server blank-pads the shorter side), so
+ * un-RTRIM'd columns mean the same thing and leave the `pedclili`/`pedclica`
+ * lookups seekable — an index scan per line is not something to spend on a
+ * shared ERP box. It is the same reliance `l.CODALM=s.CODALM` already had. The
+ * outer query's `RTRIM(s.CODART)=@codart` compares against a PARAMETER, not a
+ * column, and stays as v3.2 wrote it.
+ *
+ * `ISNULL` appears twice over: once per quantity, so a Wingest-written row with
+ * a NULL `CANPED` or `CANSER` contributes what it holds instead of turning the
+ * whole `SUM` NULL, and once around the subquery, so a lot nobody has booked
+ * counts as zero reserved rather than as no availability at all.
+ *
  * `s` is the `stolot` row this is correlated to; the expression is parenthesised
  * so it can be compared and ordered by as one value.
  */
 export const LOT_AVAILABLE_SQL =
-  "(s.CANT - ISNULL((SELECT SUM(l.CANPED - l.CANSER) FROM pedclili l" +
+  "(s.CANT - ISNULL((SELECT SUM(ISNULL(l.CANPED,0) - ISNULL(l.CANSER,0)) FROM pedclili l" +
   " JOIN pedclica c ON c.CAN=l.CAN AND c.EJE=l.EJE AND c.NUMPED=l.NUMPED" +
-  " WHERE RTRIM(c.ESTPED)='Abierto' AND l.CODALM=s.CODALM" +
-  " AND RTRIM(l.CODART)=RTRIM(s.CODART) AND RTRIM(l.CODLOT)=RTRIM(s.CODLOT)), 0))";
+  " WHERE c.ESTPED='Abierto' AND l.CODALM=s.CODALM" +
+  " AND l.CODART=s.CODART AND l.CODLOT=s.CODLOT), 0))";
 
 /**
  * The half both lot queries share: this almacén, this article, sellable, not
@@ -1192,9 +1205,13 @@ export function orderContext(order: ClaimedOrder, ref: string): {
  * READ phase: everything the pedido needs from the ERP, plus the arithmetic.
  *
  * Runs OUTSIDE the transaction, exactly where v3.2 ran it. Keeping `clientes`,
- * `articulo`, `stolot`, `tipivaar` and `iva` out of a SERIALIZABLE transaction
- * keeps their range locks out of it too; the only tables this bridge really
- * races itself on are the counters and the two pedido tables.
+ * `articulo`, `stolot`, `tipivaar`, `iva` — and, since the lot pick started
+ * subtracting open reservations, `pedclica` and `pedclili` — out of a
+ * SERIALIZABLE transaction keeps their range locks out of it too. The two
+ * pedido tables are therefore READ here and WRITTEN later under the
+ * transaction; what this bridge races itself on is those writes and the
+ * counters, and a lot pick made a moment before them is a snapshot either way:
+ * Wingest re-checks availability at conversion, which is the check that counts.
  */
 export async function prepareOrder(
   parent: SqlParent,

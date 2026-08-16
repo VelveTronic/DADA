@@ -109,6 +109,33 @@ const V32_LOT_FALLBACK_SQL =
   " AND (FECCAD>GETDATE() OR FECCAD<'19010101') AND VENDIBLE=1 AND CANT>0" +
   " ORDER BY CANT DESC";
 
+/**
+ * And what this port emits INSTEAD, spelled out byte for byte rather than
+ * imported — the same pinning the two INSERTs get above, for the same reason: a
+ * change to the statement has to be made here too, in front of a reviewer, and
+ * cannot pass as a refactor.
+ *
+ * Read against the v3.2 pair above, the differences are the whole deviation:
+ * raw `CANT` became `CANT` minus the open pedidos' outstanding quantity, and the
+ * fallback sorts by that instead of by what is on the shelf.
+ */
+const LOT_RESERVATION_SQL =
+  "(s.CANT - ISNULL((SELECT SUM(ISNULL(l.CANPED,0) - ISNULL(l.CANSER,0)) FROM pedclili l" +
+  " JOIN pedclica c ON c.CAN=l.CAN AND c.EJE=l.EJE AND c.NUMPED=l.NUMPED" +
+  " WHERE c.ESTPED='Abierto' AND l.CODALM=s.CODALM" +
+  " AND l.CODART=s.CODART AND l.CODLOT=s.CODLOT), 0))";
+
+const LOT_HEAD_SQL =
+  "SELECT TOP 1 RTRIM(s.CODLOT) AS LOT, s.FECCAD FROM stolot s" +
+  " WHERE s.CODALM=@alm AND RTRIM(s.CODART)=@codart" +
+  " AND (s.FECCAD>GETDATE() OR s.FECCAD<'19010101') AND s.VENDIBLE=1 AND ";
+
+const EXPECTED_LOT_COVERING_SQL =
+  `${LOT_HEAD_SQL}${LOT_RESERVATION_SQL}>=@qty ORDER BY s.FECCAD ASC`;
+
+const EXPECTED_LOT_FALLBACK_SQL =
+  `${LOT_HEAD_SQL}${LOT_RESERVATION_SQL}>0 ORDER BY ${LOT_RESERVATION_SQL} DESC`;
+
 /** Plan 04 delta 1: the only header expressions allowed to differ from v3.2. */
 const DELTA_1_HEADER: Record<string, string> = {
   FECPED: MADRID_TODAY_SQL,
@@ -357,12 +384,20 @@ describe("pickLot vs the v3.2 reference — the 2026-08-16 availability deviatio
     const calls = await bothQueries();
     for (const call of calls) {
       expect(call.text).toContain(LOT_AVAILABLE_SQL);
-      // The reservation itself: outstanding = CANPED-CANSER on OPEN pedidos.
-      expect(call.text).toContain("SELECT SUM(l.CANPED - l.CANSER) FROM pedclili l");
-      expect(call.text).toContain("RTRIM(c.ESTPED)='Abierto'");
+      // The reservation itself: outstanding = CANPED-CANSER on OPEN pedidos,
+      // each quantity NULL-safe so one NULL column cannot void the whole sum.
+      expect(call.text).toContain(
+        "SELECT SUM(ISNULL(l.CANPED,0) - ISNULL(l.CANSER,0)) FROM pedclili l",
+      );
+      expect(call.text).toContain("c.ESTPED='Abierto'");
     }
-    expect(calls[0].text).toBe(LOT_COVERING_SQL);
-    expect(calls[1].text).toBe(LOT_FALLBACK_SQL);
+    // Byte for byte, against the text pinned at the top of this file — not
+    // merely against the constants the module happens to export today.
+    expect(LOT_AVAILABLE_SQL).toBe(LOT_RESERVATION_SQL);
+    expect(LOT_COVERING_SQL).toBe(EXPECTED_LOT_COVERING_SQL);
+    expect(LOT_FALLBACK_SQL).toBe(EXPECTED_LOT_FALLBACK_SQL);
+    expect(calls[0].text).toBe(EXPECTED_LOT_COVERING_SQL);
+    expect(calls[1].text).toBe(EXPECTED_LOT_FALLBACK_SQL);
   });
 
   it("wraps the reservation in ISNULL, so a lot nobody booked is not NULL", () => {
@@ -371,6 +406,24 @@ describe("pickLot vs the v3.2 reference — the 2026-08-16 availability deviatio
     expect(LOT_AVAILABLE_SQL).toContain("ISNULL((SELECT SUM(");
     expect(LOT_AVAILABLE_SQL).toContain("), 0)");
     expect(LOT_AVAILABLE_SQL.startsWith("(s.CANT - ISNULL(")).toBe(true);
+  });
+
+  it("keeps the reservation sum NULL-safe on both quantity columns", () => {
+    // `SUM(a - b)` skips a row whose `a` or `b` is NULL, so one NULL column in a
+    // Wingest-written line would quietly stop that line reserving anything.
+    expect(LOT_AVAILABLE_SQL).toContain("ISNULL(l.CANPED,0) - ISNULL(l.CANSER,0)");
+  });
+
+  it("leaves the correlation predicates seekable — no RTRIM on a column pair", () => {
+    // Trailing blanks are insignificant in char equality (SQL Server blank-pads
+    // the shorter side), so `RTRIM` here would buy nothing and cost the index on
+    // a shared ERP box. The RTRIMs that remain compare against a PARAMETER or
+    // shape a returned value; neither is a correlation.
+    const reservation = LOT_AVAILABLE_SQL;
+    for (const pair of ["l.CODALM=s.CODALM", "l.CODART=s.CODART", "l.CODLOT=s.CODLOT"]) {
+      expect(reservation).toContain(pair);
+    }
+    expect(reservation).not.toContain("RTRIM");
   });
 
   it("does not scope the reservation to an ejercicio", async () => {
@@ -392,8 +445,8 @@ describe("pickLot vs the v3.2 reference — the 2026-08-16 availability deviatio
     const calls = await bothQueries();
     for (const call of calls) {
       expect(call.text).toContain("l.CODALM=s.CODALM");
-      expect(call.text).toContain("RTRIM(l.CODART)=RTRIM(s.CODART)");
-      expect(call.text).toContain("RTRIM(l.CODLOT)=RTRIM(s.CODLOT)");
+      expect(call.text).toContain("l.CODART=s.CODART");
+      expect(call.text).toContain("l.CODLOT=s.CODLOT");
       // The lot row itself stays scoped to the configured almacén, as before.
       expect(call.text).toContain("s.CODALM=@alm AND RTRIM(s.CODART)=@codart");
     }

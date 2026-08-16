@@ -129,7 +129,6 @@ function keptValues(formData: FormData): CreateFormValues {
   return {
     email: echoed(formData.get("email")),
     displayName: echoed(formData.get("display_name")),
-    companyChoice: wantsNewCompany(formData) ? "new" : "existing",
     companyId: echoed(formData.get("company_id")),
     companyName: echoed(formData.get("company_name")),
     codcli: echoed(formData.get("codcli")),
