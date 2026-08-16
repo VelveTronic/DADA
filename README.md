@@ -70,6 +70,32 @@ row, open the cart, place an order — and read the lines the server prints:
 a browser sees is a few milliseconds more (routing, i18n and the React render):
 the `/…/login` line is that floor on its own, since it reads nothing.
 
+## Deploying to Vercel
+
+The portal deploys as a standard Next.js project; `vercel.json` pins the
+serverless functions to `fra1` (Frankfurt) so they sit next to the Supabase
+project in `eu-central-2` — locally each database round trip costs ~50-70 ms
+of geography; deployed it is ~1-5 ms.
+
+One-time setup, all in the Vercel dashboard (vercel.com → Add New Project):
+
+1. Import the GitHub repository `VelveTronic/DADA`. Framework and build
+   commands are auto-detected (Next.js, pnpm from the `packageManager` field);
+   change nothing.
+2. Environment Variables — add exactly three, values from `.env.local` on the
+   dev machine:
+   - `NEXT_PUBLIC_SUPABASE_URL`
+   - `NEXT_PUBLIC_SUPABASE_ANON_KEY` (or `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
+     if that is the one `.env.local` carries)
+   - `SUPABASE_SERVICE_ROLE_KEY` — server-only; never expose it with a
+     `NEXT_PUBLIC_` prefix. Do NOT set `PERF_LOG` in production.
+3. Deploy. Every later `git push` to `main` redeploys automatically; pull
+   requests get preview URLs.
+
+The bridge is unaffected — it talks straight to Supabase and never to the
+portal's web server. A custom domain can be attached later under Project
+Settings → Domains without redeploying.
+
 ## Authentication and users
 
 The portal has two mutually exclusive user mappings: restaurant users in
