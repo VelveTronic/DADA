@@ -13,15 +13,16 @@ import {
   PEDCLILI_COLUMNS,
   PEDCLILI_INSERT_SQL,
   applyCustomerDefaults,
+  baseUnitsForLine,
   buildHeaderParams,
   buildInsertSql,
   buildLineParams,
   buildTaxTables,
-  casesForLine,
   computeTaxes,
   contractChecks,
   dedupCheck,
   isoDateFromSql,
+  lineSubtotalCents,
   numlinFor,
   pickLot,
   prepareOrder,
@@ -166,23 +167,50 @@ const cfg: BridgeConfig = {
   leaseSeconds: 300,
 };
 
+/**
+ * A factor-1 line: 5 cajas that hold one unit each, which is what 2,172 of the
+ * 2,971 products in the catalogue are. `qtyBase` equals `qty` here, so the tax
+ * and header arithmetic below reads in plain euros.
+ */
 function preparedLine(overrides: Partial<PreparedLine> = {}): PreparedLine {
   return {
     codart: "4-007",
     qty: 5,
+    qtyBase: 5,
+    unitPriceCents: 1999,
     prevenEuros: 19.99,
     lineTotalEuros: 99.95,
     lineTotalCents: 9995,
+    portalLineTotalCents: 9995,
     des: "ARROZ GLUTINOSO 1KG",
     precos: 12.3456,
     tipivaart: "G",
-    unilot: 2,
+    unilot: 1,
     unidad: "UNIDAD",
     codlot: "VCY111B",
     feccad: new Date(Date.UTC(2027, 4, 1)),
-    caj: 2,
     ...overrides,
   };
+}
+
+/**
+ * The worked example the runbook now carries: 2 cajas of 1-001, 24 bottles per
+ * caja at 0.96 € each. The portal shows 23.04 €/caja and charges 46.08 €; the
+ * pedido must read CANPED=CANSER=48, CAJ=2, PREVEN=0.96, SUBTOT=46.08.
+ */
+function cajaLine(overrides: Partial<PreparedLine> = {}): PreparedLine {
+  return preparedLine({
+    codart: "1-001",
+    qty: 2,
+    qtyBase: 48,
+    unitPriceCents: 96,
+    prevenEuros: 0.96,
+    lineTotalEuros: 46.08,
+    lineTotalCents: 4608,
+    portalLineTotalCents: 4608,
+    unilot: 24,
+    ...overrides,
+  });
 }
 
 const customer = applyCustomerDefaults({
@@ -281,6 +309,7 @@ function claimedOrder(overrides: Partial<ClaimedOrder> = {}): ClaimedOrder {
       {
         codart: "4-007",
         qty: 5,
+        units_per_case: 1,
         unit_price_cents: 1999,
         line_total_cents: 9995,
         is_weighed: false,
@@ -358,6 +387,65 @@ describe("pedclili INSERT vs the v3.2 reference", () => {
 
   it("carries only the empty COMUNICA literal", () => {
     expect(PEDCLILI_INSERT_SQL.match(/'[^']*'/g)).toEqual(["''"]);
+  });
+});
+
+/**
+ * The second deliberate departure from v3.2, and the one that leaves the SQL
+ * text alone: the STATEMENT above is byte-identical to the reference, while two
+ * of its parameters now carry different numbers.
+ *
+ * DEVIATION, owner's decision of **2026-08-16**: a portal quantity means CAJAS.
+ * v3.2 was handed base units and DIVIDED to guess the case count
+ * (`CAJ = [int][math]::Round(qty/UNILOT)`); the portal knows the case count
+ * exactly, so `@QTY` (CANPED/CANSER) became `qty x units_per_case` and `@CAJ`
+ * became the quantity itself. The evidence is on both sides of the same table:
+ * our injected albarán 5992 wrote `CAJ=1, CANSER=2` for an order of two cajas,
+ * while the staff-written lines beside it read `CAJ=5, CANSER=120, PREVEN=0.99`
+ * and `CAJ=10, CANSER=240`. `@PRE` did not move: PREVEN has always been the
+ * price of one BASE unit, which is exactly what the portal stores.
+ */
+describe("pedclili quantities vs the v3.2 reference — the 2026-08-16 caja decision", () => {
+  const params = buildLineParams({
+    can: "B",
+    eje: 26,
+    numped: 501,
+    numlin: 5,
+    codcli: 3,
+    alm: "00001",
+    fecent: new Date(Date.UTC(2026, 7, 20)),
+    idlinea: 700100,
+    line: cajaLine(),
+  });
+
+  it("sends base units as CANPED/CANSER and the case count as CAJ", () => {
+    // Both quantity columns read @QTY, so one parameter is both CANPED and
+    // CANSER — the property that makes the line servible.
+    const byColumn = new Map(PEDCLILI_COLUMNS);
+    expect(byColumn.get("CANPED")).toBe("@QTY");
+    expect(byColumn.get("CANSER")).toBe("@QTY");
+    expect(byColumn.get("CAJ")).toBe("@CAJ");
+    expect(params.QTY.value).toBe(48);
+    expect(params.CAJ.value).toBe(2);
+    // What albarán 5992 got wrong, spelled out: the case count is NOT the
+    // quantity, and 1 is not the case count.
+    expect(params.QTY.value).not.toBe(2);
+    expect(params.CAJ.value).not.toBe(1);
+  });
+
+  it("keeps PREVEN per base unit and SUBTOT the portal's own total", () => {
+    expect(params.PRE.value).toBe(0.96);
+    expect(params.SUB.value).toBe(46.08);
+    // The identity that ties the two systems: base units x PREVEN = SUBTOT, and
+    // the portal's per-caja price (23.04) x cajas is the same 46.08.
+    expect(lineSubtotalCents(48, 96)).toBe(4608);
+    expect(2 * 96 * 24).toBe(4608);
+  });
+
+  it("writes the ERP's own UNILOT, not the portal's factor", () => {
+    // They are the same number in a synced catalogue (price-sync copies UNILOT
+    // into units_per_case nightly), but the column belongs to `articulo`.
+    expect(params.UNILOT.value).toBe(24);
   });
 });
 
@@ -605,7 +693,11 @@ describe("buildLineParams", () => {
   it("carries the lot and its expiry", () => {
     expect(params.LOT.value).toBe("VCY111B");
     expect(params.FCAD.value).toEqual(new Date(Date.UTC(2027, 4, 1)));
-    expect(params.CAJ.value).toBe(2);
+  });
+
+  it("sends the quantity as base units and the same number of cajas at factor 1", () => {
+    expect(params.QTY.value).toBe(5);
+    expect(params.CAJ.value).toBe(5);
   });
 });
 
@@ -639,28 +731,57 @@ describe("roundEuros", () => {
   });
 });
 
-describe("casesForLine", () => {
-  it("divides the quantity by the case size", () => {
-    expect(casesForLine(12, 6)).toBe(2);
-    expect(casesForLine(13, 6)).toBe(2);
-    expect(casesForLine(14, 6)).toBe(2);
-    expect(casesForLine(16, 6)).toBe(3);
-    expect(casesForLine(18, 6)).toBe(3);
+describe("baseUnitsForLine", () => {
+  it("multiplies cajas by the factor the order was priced with", () => {
+    expect(baseUnitsForLine(2, 24)).toBe(48);
+    expect(baseUnitsForLine(10, 24)).toBe(240);
+    expect(baseUnitsForLine(5, 2)).toBe(10);
   });
 
-  it("rounds an exact half to even, as [int][math]::Round does", () => {
-    // 5 units at 2 per case is exactly 2.5 cases; v3.2 writes 2, not 3.
-    expect(casesForLine(5, 2)).toBe(2);
-    expect(casesForLine(7, 2)).toBe(4);
-    // 15 at 6 per case is 2.5 as well.
-    expect(casesForLine(15, 6)).toBe(2);
-    expect(casesForLine(21, 6)).toBe(4);
+  it("leaves a factor-1 line exactly as the customer typed it", () => {
+    expect(baseUnitsForLine(5, 1)).toBe(5);
+    expect(baseUnitsForLine(1, 1)).toBe(1);
   });
 
-  it("is 0 when the article is not sold by the case", () => {
-    expect(casesForLine(5, 0)).toBe(0);
-    expect(casesForLine(5, -1)).toBe(0);
-    expect(casesForLine(5, Number.NaN)).toBe(0);
+  it("carries a fractional quantity through untouched (the weighed future)", () => {
+    // A weighed product is factor 1 by rule, and `x * 1` is exact for every
+    // double — 1.235 kg must not become 1.2349999999999999.
+    expect(baseUnitsForLine(1.235, 1)).toBe(1.235);
+    expect(baseUnitsForLine(0.5, 1)).toBe(0.5);
+    expect(baseUnitsForLine(2.4, 1)).toBe(2.4);
+  });
+
+  it("never divides — the answer only ever grows", () => {
+    for (const [qty, factor] of [
+      [3, 12],
+      [7, 6],
+      [1, 576],
+    ] as const) {
+      expect(baseUnitsForLine(qty, factor)).toBeGreaterThanOrEqual(qty);
+    }
+  });
+});
+
+describe("lineSubtotalCents", () => {
+  it("is base units times the per-base-unit price, exactly", () => {
+    expect(lineSubtotalCents(48, 96)).toBe(4608);
+    expect(lineSubtotalCents(5, 1999)).toBe(9995);
+    expect(lineSubtotalCents(240, 99)).toBe(23_760);
+  });
+
+  it("matches create_order's rounding for a fractional quantity", () => {
+    // The portal stores `round(qty x units x price)`; this reproduces it rather
+    // than drifting half a cent from the amount the customer was charged.
+    expect(lineSubtotalCents(1.235, 1999)).toBe(2469);
+    expect(lineSubtotalCents(0.5, 101)).toBe(51);
+  });
+
+  it("stays exact where multiplying euros would not", () => {
+    // 10 cajas of 24 at 0.03 € is 7.199999999999999 in float euros; done in
+    // cents it is 720, and 720/100 is exactly 7.2. This is why the invariant
+    // compares CENTS and not the euro amounts the ERP columns hold.
+    expect(240 * 0.03).not.toBe(7.2);
+    expect(lineSubtotalCents(240, 3) / 100).toBe(7.2);
   });
 });
 
@@ -939,10 +1060,11 @@ describe("reserveCounters", () => {
 
 describe("contractChecks", () => {
   const ok = [[{ "": 1 }], [{ "": 2 }], [{ "": 1 }], [{ "": 1 }]];
+  const twoLines = [preparedLine(), cajaLine()];
 
   it("passes when the header, both lines, the user and the adi row all check out", async () => {
     const { parent, calls } = fakeParent(ok);
-    await expect(contractChecks(parent, cfg, 501, 3, 2)).resolves.toBeUndefined();
+    await expect(contractChecks(parent, cfg, 501, 3, twoLines)).resolves.toBeUndefined();
     expect(calls).toHaveLength(4);
     expect(calls[0].text).toContain("CONVERT(time,FECPED)='00:00:00'");
     expect(calls[0].text).toContain("RTRIM(ESTPED)='Abierto'");
@@ -954,24 +1076,47 @@ describe("contractChecks", () => {
 
   it("fails when the header is not exactly one midnight-dated open row", async () => {
     const { parent } = fakeParent([[{ "": 0 }]]);
-    await expect(contractChecks(parent, cfg, 501, 3, 2)).rejects.toThrow(/CONTRATO: cabecera/);
+    await expect(contractChecks(parent, cfg, 501, 3, twoLines)).rejects.toThrow(
+      /CONTRATO: cabecera/,
+    );
   });
 
   it("fails when a line is not servible", async () => {
     const { parent } = fakeParent([[{ "": 1 }], [{ "": 1 }]]);
-    await expect(contractChecks(parent, cfg, 501, 3, 2)).rejects.toThrow(
+    await expect(contractChecks(parent, cfg, 501, 3, twoLines)).rejects.toThrow(
       /CONTRATO: lineas servibles 1 de 2/,
     );
   });
 
   it("fails when the ERP user does not exist", async () => {
     const { parent } = fakeParent([[{ "": 1 }], [{ "": 2 }], [{ "": 0 }]]);
-    await expect(contractChecks(parent, cfg, 501, 3, 2)).rejects.toThrow(/usuario SFY no existe/);
+    await expect(contractChecks(parent, cfg, 501, 3, twoLines)).rejects.toThrow(
+      /usuario SFY no existe/,
+    );
   });
 
   it("fails when pedclica_adi is not exactly one row", async () => {
     const { parent } = fakeParent([[{ "": 1 }], [{ "": 2 }], [{ "": 1 }], [{ "": 0 }]]);
-    await expect(contractChecks(parent, cfg, 501, 3, 2)).rejects.toThrow(/pedclica_adi/);
+    await expect(contractChecks(parent, cfg, 501, 3, twoLines)).rejects.toThrow(/pedclica_adi/);
+  });
+
+  it("refuses a SUBTOT that is not base units x PREVEN, before any query runs", async () => {
+    // The realistic way to get here: the line was claimed before the RPC carried
+    // `units_per_case`, so the factor defaulted to 1 and the pedido would have
+    // ordered 2 bottles of a product the customer bought 2 CAJAS of.
+    const { parent, calls } = fakeParent(ok);
+    const stale = cajaLine({ qtyBase: 2, lineTotalCents: 192, lineTotalEuros: 1.92 });
+    await expect(contractChecks(parent, cfg, 501, 3, [stale])).rejects.toThrow(
+      /CONTRATO: SUBTOT de 1-001 — 2 x 96 = 192 céntimos, el portal cobró 4608/,
+    );
+    // Pure arithmetic: it costs nothing and it runs first, so a mismatch never
+    // spends four round trips before rolling the transaction back.
+    expect(calls).toHaveLength(0);
+  });
+
+  it("passes the caja line whose SUBTOT does match", async () => {
+    const { parent } = fakeParent([[{ "": 1 }], [{ "": 1 }], [{ "": 1 }], [{ "": 1 }]]);
+    await expect(contractChecks(parent, cfg, 501, 3, [cajaLine()])).resolves.toBeUndefined();
   });
 });
 
@@ -1127,7 +1272,7 @@ describe("prepareOrder", () => {
       ],
       [{ T: "G", POSMAT: 1 }], // tipivaar
       [{ C: "N", A: "G", TPCIVA: 10 }], // iva
-      [{ DES: "ARROZ", PRECOS: 12.3456, T: "G", UNILOT: 2, UNI: "UNIDAD" }], // articulo
+      [{ DES: "ARROZ", PRECOS: 12.3456, T: "G", UNILOT: 1, UNI: "UNIDAD" }], // articulo
       [{ LOT: "VCY111B", FECCAD: new Date(Date.UTC(2027, 4, 1)) }], // stolot
     ]);
 
@@ -1142,10 +1287,13 @@ describe("prepareOrder", () => {
     expect(prepared.lines).toHaveLength(1);
     expect(prepared.lines[0]).toMatchObject({
       codart: "4-007",
+      qty: 5,
+      qtyBase: 5,
       prevenEuros: 19.99,
       lineTotalEuros: 99.95,
+      lineTotalCents: 9995,
+      portalLineTotalCents: 9995,
       codlot: "VCY111B",
-      caj: 2,
     });
     // The Madrid date is read from SQL Server, never from this process's clock.
     expect(calls[0].text).toBe(`SELECT ${MADRID_TODAY_SQL}`);
@@ -1169,7 +1317,93 @@ describe("prepareOrder", () => {
     // No lot found: v3.2's empty CODLOT and 1900-01-01 FECCAD.
     expect(prepared.lines[0].codlot).toBe("");
     expect(prepared.lines[0].feccad).toEqual(NO_EXPIRY_DATE);
-    expect(prepared.lines[0].caj).toBe(0);
+    // An article whose UNILOT the ERP left at 0 no longer zeroes the case count:
+    // CAJ comes from the order, not from a division by that column.
+    expect(prepared.lines[0].qty).toBe(5);
+    expect(prepared.lines[0].unilot).toBe(0);
+  });
+
+  it("multiplies cajas into base units, and asks stolot for those", async () => {
+    const { parent, calls } = fakeParent([
+      [{ "": new Date(Date.UTC(2026, 7, 16)) }],
+      [{ TARCLI: 1, TIPIVACLI: "N", regiva: "", FORPAG: "", PRIPAG: 1, NUMPAG: 1, CALENV: "", CAL2: "", CODPOSENV: "", TIPPOR: "" }],
+      [{ T: "G", POSMAT: 1 }],
+      [{ C: "N", A: "G", TPCIVA: 10 }],
+      [{ DES: "CERVEZA 33CL", PRECOS: 0.5, T: "G", UNILOT: 24, UNI: "CAJA" }],
+      [{ LOT: "L48", FECCAD: new Date(Date.UTC(2027, 4, 1)) }],
+    ]);
+
+    // 2 cajas of 1-001: 24 bottles at 0.96 €, portal total 46.08 €.
+    const order = claimedOrder({
+      subtotal_cents: 4608,
+      items: [
+        {
+          codart: "1-001",
+          qty: 2,
+          units_per_case: 24,
+          unit_price_cents: 96,
+          line_total_cents: 4608,
+          is_weighed: false,
+          is_erp_excluded: false,
+        },
+      ],
+    });
+    const prepared = await prepareOrder(parent, cfg, order);
+
+    expect(prepared.lines[0]).toMatchObject({
+      qty: 2,
+      qtyBase: 48,
+      unitPriceCents: 96,
+      prevenEuros: 0.96,
+      lineTotalCents: 4608,
+      portalLineTotalCents: 4608,
+      lineTotalEuros: 46.08,
+    });
+    // The availability check counts BOTTLES: 48, not 2. Picking a lot on the
+    // case count would happily choose one with three bottles left on it.
+    const lotCall = calls.find((call) => call.text.includes("FROM stolot"));
+    expect(lotCall?.params.qty.value).toBe(48);
+    // Cost and taxes count base units too: 48 x 0.50 €, and 10% of 46.08.
+    expect(prepared.totcosEuros).toBe(24);
+    expect(prepared.taxes.netoCents).toBe(4608);
+    expect(prepared.taxes.ivaCents[1]).toBe(461);
+  });
+
+  it("defaults a claim that predates the factor to 1, and the contract catches it", async () => {
+    const { parent } = fakeParent([
+      [{ "": new Date(Date.UTC(2026, 7, 16)) }],
+      [{ TARCLI: 1, TIPIVACLI: "N", regiva: "", FORPAG: "", PRIPAG: 1, NUMPAG: 1, CALENV: "", CAL2: "", CODPOSENV: "", TIPPOR: "" }],
+      [{ T: "G", POSMAT: 1 }],
+      [{ C: "N", A: "G", TPCIVA: 10 }],
+      [{ DES: "CERVEZA 33CL", PRECOS: 0.5, T: "G", UNILOT: 24, UNI: "CAJA" }],
+      [{ LOT: "L48", FECCAD: new Date(Date.UTC(2027, 4, 1)) }],
+    ]);
+
+    // An in-flight payload from before the claim RPC learned to send the factor.
+    const order = claimedOrder({
+      subtotal_cents: 4608,
+      items: [
+        {
+          codart: "1-001",
+          qty: 2,
+          unit_price_cents: 96,
+          line_total_cents: 4608,
+          is_weighed: false,
+          is_erp_excluded: false,
+        },
+      ],
+    });
+    const prepared = await prepareOrder(parent, cfg, order);
+
+    // Nothing is guessed: the factor is 1 and the arithmetic is honest about it,
+    // which is exactly what makes the mismatch visible one step later.
+    expect(prepared.lines[0].qtyBase).toBe(2);
+    expect(prepared.lines[0].lineTotalCents).toBe(192);
+    expect(prepared.lines[0].portalLineTotalCents).toBe(4608);
+    const { parent: checkParent } = fakeParent([]);
+    await expect(
+      contractChecks(checkParent, cfg, 501, 3, prepared.lines),
+    ).rejects.toThrow(/CONTRATO: SUBTOT/);
   });
 
   it("refuses to ship a pedido short a line the ERP does not know", async () => {

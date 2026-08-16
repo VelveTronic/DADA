@@ -13,6 +13,7 @@ function item(overrides: Partial<ClaimedOrderItem> = {}): ClaimedOrderItem {
   return {
     codart: "4-007",
     qty: 5,
+    units_per_case: 1,
     unit_price_cents: 1999,
     line_total_cents: 9995,
     is_weighed: false,
@@ -165,11 +166,42 @@ describe("lineParams", () => {
     expect(lineParams(item())).toEqual({
       codart: "4-007",
       qty: 5,
+      unitsPerCase: 1,
       unitPriceCents: 1999,
       lineTotalCents: 9995,
       unitPriceEuros: 19.99,
       lineTotalEuros: 99.95,
     });
+  });
+
+  it("keeps the quantity in CAJAS, next to the factor that converts it", () => {
+    // 2 cajas of 24 stay 2 here: multiplying is the injector's job, because it
+    // is the only side that knows Wingest counts bottles.
+    const line = lineParams(item({ qty: 2, units_per_case: 24, line_total_cents: 4608 }));
+    expect(line.qty).toBe(2);
+    expect(line.unitsPerCase).toBe(24);
+  });
+
+  it("defaults an absent factor to 1, for a claim made before the RPC sent it", () => {
+    const withoutFactor = item();
+    delete withoutFactor.units_per_case;
+    expect(lineParams(withoutFactor).unitsPerCase).toBe(1);
+  });
+
+  it("refuses a factor that is not a whole number of units per caja", () => {
+    expect(() => lineParams(item({ units_per_case: 0 }))).toThrow(PayloadError);
+    expect(() => lineParams(item({ units_per_case: -24 }))).toThrow(PayloadError);
+    expect(() => lineParams(item({ units_per_case: 2.5 }))).toThrow(PayloadError);
+    expect(() => lineParams(item({ units_per_case: Number.NaN }))).toThrow(PayloadError);
+    // The code is what the bridge log will carry, so it is pinned.
+    const error = (() => {
+      try {
+        lineParams(item({ units_per_case: 0 }));
+      } catch (thrown) {
+        return thrown as PayloadError;
+      }
+    })();
+    expect(error?.code).toBe("BAD_UNITS_PER_CASE");
   });
 
   it("keeps fractional quantities for weighed products", () => {

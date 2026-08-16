@@ -9,7 +9,7 @@ import { AppShell } from "@/components/app-shell";
 import { ProductThumb } from "@/components/product-thumb";
 import { BTN_PRIMARY, BTN_QUIET, FIELD, GLASS_CARD } from "@/components/ui";
 import { requireStaff } from "@/lib/auth/guards";
-import { localizedName, sanitizeSearch } from "@/lib/catalog/display";
+import { localizedName, sanitizeSearch, unitLabel } from "@/lib/catalog/display";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { Database } from "@/lib/supabase/database.types";
 
@@ -32,6 +32,7 @@ type StaffProductRow = Pick<
   | "is_current_variant"
   | "name"
   | "unit"
+  | "units_per_case"
   | "is_weighed"
   | "is_available"
   | "image_url"
@@ -78,7 +79,7 @@ export default async function StaffProductsPage({
   let query = admin
     .from("products")
     .select(
-      "id, codart, base_sku, variant_suffix, is_current_variant, name, unit, is_weighed, is_available, image_url, price_1_cents, price_2_cents, price_3_cents, price_4_cents, price_5_cents, price_6_cents",
+      "id, codart, base_sku, variant_suffix, is_current_variant, name, unit, units_per_case, is_weighed, is_available, image_url, price_1_cents, price_2_cents, price_3_cents, price_4_cents, price_5_cents, price_6_cents",
       { count: "exact" },
     );
   if (q) {
@@ -182,8 +183,14 @@ export default async function StaffProductsPage({
                             {localizedName(p.name, locale)}
                           </p>
                           <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted">
+                            {/* The factor rides on the unit, exactly as the
+                                catalogue prints it (`CAJA×24`, silent at 1):
+                                it is what multiplies the tarifa price into the
+                                per-caja price a customer sees, so staff
+                                comparing a price against the ERP need it on the
+                                same line as the codart. */}
                             <span>
-                              {p.codart} · {p.unit}
+                              {p.codart} · {unitLabel(p.unit, p.units_per_case)}
                             </span>
                             {p.is_weighed && (
                               <span className="rounded-md bg-amber-100 px-1.5 py-0.5 text-amber-800">

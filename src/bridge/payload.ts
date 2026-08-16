@@ -25,8 +25,19 @@ export class PayloadError extends Error {
 /** One `order_items` row as `bridge_claim_confirmed` emits it. */
 export interface ClaimedOrderItem {
   codart: string;
-  /** numeric(10,3) — fractional for weighed products. */
+  /** CAJAS. numeric(10,3) — fractional for weighed products. */
   qty: number;
+  /**
+   * Base units per caja, snapshotted on the line when the order was priced.
+   *
+   * Optional in the TYPE and only in the type: the column is `not null default
+   * 1` and the claim RPC always emits it. What can be missing is an order
+   * claimed by a bridge that is running while the RPC is being replaced — the
+   * lease is minutes long, so a payload from the old shape can still be in
+   * flight. `lineParams` defaults that to 1, the factor that changes nothing.
+   */
+  units_per_case?: number;
+  /** Per BASE unit, never per caja — this is the ERP's PREVEN. */
   unit_price_cents: number;
   line_total_cents: number;
   is_weighed: boolean;
@@ -50,7 +61,10 @@ export interface ClaimedOrder {
 /** A validated line, carried in BOTH units: cents to add up, euros to store. */
 export interface PayloadLine {
   codart: string;
+  /** CAJAS, the way the customer ordered — `pedclili.CAJ`. */
   qty: number;
+  /** Base units per caja; the injector multiplies to get CANPED/CANSER. */
+  unitsPerCase: number;
   unitPriceCents: number;
   lineTotalCents: number;
   /** `pedclili.PREVEN` */
@@ -173,6 +187,10 @@ export function splitLines(items: readonly ClaimedOrderItem[]): {
  * fresh `articulo.PREVEN{tier}` read here could be a nightly price-sync away
  * from that. Taxes are the opposite case and are recomputed live in the
  * injector, because tax configuration is ERP truth.
+ *
+ * Quantities stay in CAJAS here, next to the factor they are multiplied by:
+ * this function validates the pair, and `injector.ts` — the only module that
+ * knows what Wingest counts — turns it into base units.
  */
 export function lineParams(item: ClaimedOrderItem): PayloadLine {
   const codart = item.codart?.trim() ?? "";
@@ -194,9 +212,23 @@ export function lineParams(item: ClaimedOrderItem): PayloadLine {
       `codart ${codart} has line_total_cents ${item.line_total_cents}`,
     );
   }
+  // Absent means "claimed before the RPC learned to send it" (see the field's
+  // comment) and becomes 1 — the factor a line placed before Task 1 really
+  // carried, and the one value that multiplies nothing. It is never GUESSED:
+  // if the portal priced a caja of 24 and this defaulted to 1, the base units
+  // would come out 24x short of what the customer paid for, which is precisely
+  // what the injector's SUBTOT contract check refuses to commit.
+  const unitsPerCase = item.units_per_case ?? 1;
+  if (!Number.isInteger(unitsPerCase) || unitsPerCase < 1) {
+    throw new PayloadError(
+      "BAD_UNITS_PER_CASE",
+      `codart ${codart} has units_per_case ${item.units_per_case}`,
+    );
+  }
   return {
     codart,
     qty: item.qty,
+    unitsPerCase,
     unitPriceCents: item.unit_price_cents,
     lineTotalCents: item.line_total_cents,
     unitPriceEuros: centsToEuros(item.unit_price_cents),

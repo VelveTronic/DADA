@@ -184,6 +184,15 @@ export const PEDCLICA_COLUMNS: readonly ColumnValue[] = [
  * `pedclili`, one row per included line. v3.2 verbatim except FECENT, which
  * follows the header's (delta 1). `CANSER=CANPED` is the load-bearing one: it is
  * what makes every line servible, which is what the conversion to albarán needs.
+ *
+ * The STATEMENT is unchanged by the caja decision — what changed is what two of
+ * its parameters carry. DEVIATION, owner's decision of **2026-08-16**: a portal
+ * quantity means CAJAS, so `@QTY` (CANPED/CANSER) is now `qty x units_per_case`
+ * in BASE units and `@CAJ` is the case count itself. Before it, injected albarán
+ * 5992 read `CAJ=1, CANSER=2` for two cajas — the case count in the quantity
+ * column and a 1 in the case column — while the same line hand-written by staff
+ * reads `CAJ=5, CANSER=120, PREVEN=0.99`. `@PRE` is untouched: PREVEN was always
+ * the per-BASE-unit price, which is exactly what the portal stores.
  */
 export const PEDCLILI_COLUMNS: readonly ColumnValue[] = [
   ["CAN", "@CAN"],
@@ -337,13 +346,40 @@ export function roundEuros(value: number): number {
 }
 
 /**
- * CAJ: how many cases the quantity makes up. v3.2's
- * `[int][math]::Round(qty/unilot)` — half-to-even matters here, because
- * 5 units at 2 per case is an exact 2.5 and the reference writes 2.
+ * CANPED/CANSER: the line in BASE units — cajas times the factor the order was
+ * priced with.
+ *
+ * This REPLACES v3.2's `casesForLine` (`[int][math]::Round(qty/unilot)`), which
+ * divided in the other direction because the reference was handed base units and
+ * had to guess the case count. The portal knows the case count exactly — it is
+ * what the customer typed — so the arithmetic runs forwards, and the division
+ * (and its half-to-even rounding, and the 0 it produced for an article with no
+ * UNILOT) is gone from the money path entirely.
+ *
+ * Multiplication only, and both operands are integers today. The weighed future
+ * is the one case that is not: a fractional qty always comes with factor 1, and
+ * `x * 1` is exact for every double, so this needs no special case for it.
  */
-export function casesForLine(qty: number, unilot: number): number {
-  if (!Number.isFinite(unilot) || unilot <= 0) return 0;
-  return roundHalfToEven(qty / unilot);
+export function baseUnitsForLine(qty: number, unitsPerCase: number): number {
+  return qty * unitsPerCase;
+}
+
+/**
+ * SUBTOT/NETO in integer cents: base units times the per-base-unit price.
+ *
+ * The portal computed the same product when it stored the line
+ * (`round(qty x units_per_case x unit_price_cents)` in `create_order`), and
+ * `contractChecks` refuses to commit a pedido where the two disagree. This is
+ * the whole reason the caja factor can be trusted end to end: cents times an
+ * integer is exact, so "equal" means equal, not equal-to-the-cent.
+ *
+ * `Math.round` is a NO-OP for every quantity a restaurant can order — integer
+ * cajas times an integer factor times integer cents is an integer. It is here so
+ * the future weighed line (fractional qty, factor 1) reproduces `create_order`'s
+ * own rounding rather than drifting half a cent away from it.
+ */
+export function lineSubtotalCents(qtyBase: number, unitPriceCents: number): number {
+  return Math.round(qtyBase * unitPriceCents);
 }
 
 /** NUMLIN counts in fives, the way Wingest's own UI numbers lines. */
@@ -631,11 +667,22 @@ export function buildHeaderParams(input: HeaderInput): ParamMap {
 /** One line, already resolved against `articulo` and `stolot`. */
 export interface PreparedLine {
   codart: string;
+  /** CAJAS, as the customer ordered them — this is `pedclili.CAJ`. */
   qty: number;
+  /** BASE units: `qty x units_per_case` — CANPED, CANSER, and the lot pick. */
+  qtyBase: number;
+  /** PREVEN in integer cents, per BASE unit. Kept for the SUBTOT invariant. */
+  unitPriceCents: number;
   /** From the PORTAL payload (delta 3), not from `articulo`. */
   prevenEuros: number;
   lineTotalEuros: number;
+  /** SUBTOT in cents: `qtyBase x unitPriceCents`, computed here. */
   lineTotalCents: number;
+  /**
+   * What the portal charged for this line. Equal to `lineTotalCents` on every
+   * pedido that commits — `contractChecks` is where the two meet.
+   */
+  portalLineTotalCents: number;
   des: string;
   /** `articulo.PREMEDCOS` — cost is ERP truth. */
   precos: number;
@@ -644,7 +691,6 @@ export interface PreparedLine {
   unidad: string;
   codlot: string;
   feccad: Date;
-  caj: number;
 }
 
 export interface LineInput {
@@ -667,7 +713,8 @@ export function buildLineParams(input: LineInput): ParamMap {
     NUMPED: P.int(input.numped),
     NUMLIN: P.int(input.numlin),
     COD: P.text(line.codart),
-    QTY: P.float(line.qty),
+    // CANPED and CANSER both read @QTY: base units, what Wingest counts.
+    QTY: P.float(line.qtyBase),
     PRE: P.float(line.prevenEuros),
     PRECOS: P.float(line.precos),
     DES: P.text(line.des),
@@ -675,8 +722,12 @@ export function buildLineParams(input: LineInput): ParamMap {
     ALM: P.text(input.alm),
     T: P.text(line.tipivaart),
     UNI: P.text(line.unidad),
+    // UNILOT is the ERP's own packaging number, read from `articulo` (the
+    // portal's `units_per_case` is a nightly copy of it); CAJ is the case count
+    // the customer ordered, taken straight from the quantity and never divided
+    // back out of it.
     UNILOT: P.float(line.unilot),
-    CAJ: P.int(line.caj),
+    CAJ: P.int(line.qty),
     LOT: P.text(line.codlot),
     FCAD: P.datetime(line.feccad),
     FECENT: P.date(input.fecent),
@@ -1081,11 +1132,13 @@ export async function insertLines(
 }
 
 /**
- * The four pre-commit self-checks, kept verbatim from v3.2 (delta 6). They are
- * the reason the reference is trustworthy: each one asserts a property Wingest's
- * pedido→albarán conversion silently depends on, and any failure rolls the whole
- * order back rather than leaving a document the ERP will choke on later.
+ * The pre-commit self-checks. Four are v3.2's, kept verbatim (delta 6): each one
+ * asserts a property Wingest's pedido→albarán conversion silently depends on,
+ * and any failure rolls the whole order back rather than leaving a document the
+ * ERP will choke on later.
  *
+ * - subtotales: `SUBTOT = qtyBase x PREVEN` really is what the portal charged
+ *   (2026-08-16, the caja decision — the one check v3.2 has no counterpart for)
  * - cabecera: exactly one header, open, un-albaranado, with FECPED and FECENT at
  *   midnight (a time component makes Wingest treat the dates as invalid)
  * - lineas: every line servible, `CANSER=CANPED>0`, FECENT at midnight
@@ -1097,13 +1150,33 @@ export async function contractChecks(
   cfg: BridgeConfig,
   numped: number,
   codcli: number,
-  lineCount: number,
+  lines: readonly PreparedLine[],
 ): Promise<void> {
   const scope = {
     can: P.text(cfg.can),
     eje: P.int(cfg.eje),
     numped: P.int(numped),
   };
+  const lineCount = lines.length;
+
+  // The one check that costs no round trip, and the only one that is about MONEY
+  // rather than about what the conversion engine will accept. Two integers in
+  // cents: base units times the per-base-unit price on one side, the amount the
+  // customer confirmed on the portal on the other. They are the same arithmetic
+  // — `create_order` stores `qty x units_per_case x unit_price_cents` — so any
+  // difference means the two systems disagree about what a caja holds, and the
+  // pedido that would ship is the one for the wrong number of bottles. The most
+  // likely way to get here is a claim from before the RPC carried
+  // `units_per_case`, whose factor `lineParams` defaulted to 1.
+  for (const line of lines) {
+    if (line.lineTotalCents !== line.portalLineTotalCents) {
+      throw new Error(
+        `CONTRATO: SUBTOT de ${line.codart} — ${line.qtyBase} x ` +
+          `${line.unitPriceCents} = ${line.lineTotalCents} céntimos, ` +
+          `el portal cobró ${line.portalLineTotalCents}`,
+      );
+    }
+  }
 
   const header = toNumber(
     firstScalar(
@@ -1234,13 +1307,21 @@ export async function prepareOrder(
   const lines: PreparedLine[] = [];
   for (const line of payloadLines) {
     const article = await loadArticle(parent, line.codart);
-    const lot = await pickLot(parent, cfg, line.codart, line.qty);
+    // Base units, and everything downstream counts them: the lot pick asks
+    // `stolot` for BOTTLES, not for cases — two cajas of 24 need 48 available,
+    // and asking for 2 would happily pick a lot with 3 bottles left on it.
+    const qtyBase = baseUnitsForLine(line.qty, line.unitsPerCase);
+    const lot = await pickLot(parent, cfg, line.codart, qtyBase);
+    const lineTotalCents = lineSubtotalCents(qtyBase, line.unitPriceCents);
     lines.push({
       codart: line.codart,
       qty: line.qty,
+      qtyBase,
+      unitPriceCents: line.unitPriceCents,
       prevenEuros: line.unitPriceEuros,
-      lineTotalEuros: line.lineTotalEuros,
-      lineTotalCents: line.lineTotalCents,
+      lineTotalEuros: centsToEuros(lineTotalCents),
+      lineTotalCents,
+      portalLineTotalCents: line.lineTotalCents,
       des: article.des,
       precos: article.precos,
       tipivaart: article.tipivaart,
@@ -1248,7 +1329,6 @@ export async function prepareOrder(
       unidad: article.unidad,
       codlot: lot.codlot,
       feccad: lot.feccad,
-      caj: casesForLine(line.qty, article.unilot),
     });
   }
 
@@ -1259,8 +1339,10 @@ export async function prepareOrder(
     customer,
     taxes: computeTaxes(lines, customer.tipivacli, taxTables),
     // TOTCOS stays in float euros because its input does: PREMEDCOS is a
-    // moving-average cost the ERP keeps to more than two decimals.
-    totcosEuros: roundEuros(lines.reduce((sum, line) => sum + line.qty * line.precos, 0)),
+    // moving-average cost the ERP keeps to more than two decimals. It counts
+    // `qtyBase` because PREMEDCOS is a cost per BASE unit, like every other
+    // quantity-times-price on this pedido.
+    totcosEuros: roundEuros(lines.reduce((sum, line) => sum + line.qtyBase * line.precos, 0)),
     lines,
     excludedCodarts,
   };
@@ -1307,13 +1389,7 @@ export async function runInjectSteps(
     },
     prepared.lines,
   );
-  await contractChecks(
-    parent,
-    cfg,
-    counters.numped,
-    prepared.codcli,
-    prepared.lines.length,
-  );
+  await contractChecks(parent, cfg, counters.numped, prepared.codcli, prepared.lines);
   return { numped: counters.numped, recovered: false };
 }
 
