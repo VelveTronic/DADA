@@ -24,8 +24,15 @@
  * 3. **Business dates come from SQL Server in Madrid time.** The ERP server's OS
  *    clock is set to China time, so `GETDATE()`'s DATE is routinely a day ahead
  *    of the business day. `MADRID_TODAY_SQL` is used everywhere the reference
- *    used `CAST(GETDATE() AS date)`. Plain `GETDATE()` survives only in the two
- *    audit timestamps (TS, TSENVSRV), which are moments, not business days.
+ *    used `CAST(GETDATE() AS date)`.
+ *
+ *    `GETDATE()` deliberately survives in exactly three places, all of which ask
+ *    for a MOMENT rather than a business day, and none of which should be
+ *    "fixed" during a timezone incident:
+ *      - `pedclica.TS` and `pedclica.TSENVSRV` — audit instants;
+ *      - `pickLot`'s expiry predicate (`FECCAD>GETDATE()`) — "has this lot
+ *        expired *now*", where the hours between the server's zone and Madrid
+ *        can only matter for a lot expiring within those same hours.
  */
 import * as sql from "mssql";
 import { wingestPoolConfig, type BridgeConfig } from "./config";
@@ -615,7 +622,7 @@ export function buildHeaderParams(input: HeaderInput): ParamMap {
     params[`B${slot}`] = P.float(centsToEuros(taxes.baseCents[slot]));
     params[`T${slot}`] = P.float(taxes.ratePct[slot]);
     params[`I${slot}`] = P.float(centsToEuros(taxes.ivaCents[slot]));
-    // ESIMPBAS1..4 only — there is no ESIMPBAS5 column in pedclica.
+    // ESIMPBAS1..4 only: v3.2 stamps four of these against five IMPBAS slots.
     if (slot <= 4) params[`E${slot}`] = P.int(taxes.baseCents[slot] !== 0 ? 1 : 0);
   }
   return params;
@@ -760,6 +767,12 @@ export async function loadTaxTables(
     parent,
     "SELECT RTRIM(TIPIVAART) AS T, POSMAT FROM tipivaar ORDER BY RTRIM(TIPIVAART)",
   );
+  // A generalisation the plan does not list: v3.2 hard-codes `WHERE CAN='B'`,
+  // and this reads `@can` from bridge.env. CAN is a deployment choice — which
+  // sales company the portal feeds — so it belongs in configuration, the same
+  // way EJE and ALM do. The `ELEMENTO='IDVENTA'`-style literals elsewhere are
+  // the opposite: they name rows of Wingest's own schema, are as fixed as the
+  // column names beside them, and would be meaningless as settings.
   const rates = await runQuery<{ C: unknown; A: unknown; TPCIVA: unknown }>(
     parent,
     "SELECT RTRIM(TIPIVACLI) AS C, RTRIM(TIPIVAART) AS A, TPCIVA FROM iva WHERE CAN=@can",
@@ -1087,6 +1100,12 @@ export interface InjectResult {
   numped: number;
   /** True when the pedido already existed and we recovered its NUMPED. */
   recovered: boolean;
+  /**
+   * Lines THIS run wrote — so it is 0 on the recovery path, where the pedido
+   * was already there and nothing was inserted. A summary that adds this up
+   * counts lines injected, not lines on the pedido; the two differ by exactly
+   * the recovered orders.
+   */
   lineCount: number;
   /** codarts left off the pedido because `is_erp_excluded` (delta 4). */
   excludedCodarts: string[];
