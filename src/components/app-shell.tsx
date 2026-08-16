@@ -9,7 +9,7 @@ import { CartNavLink } from "@/components/cart/cart-nav-link";
 import { CartErrorBanner, CartProvider } from "@/components/cart/cart-provider";
 import { NAV_LINK } from "@/components/ui";
 import { CART_COOKIE, parseCart } from "@/lib/cart";
-import { canManageUsers } from "@/lib/user-admin";
+import { canManageStaff, canManageUsers } from "@/lib/user-admin";
 
 type NavLink = { href: string; label: string };
 
@@ -51,6 +51,7 @@ export async function AppShell({
   nav,
   user,
   cartPrices,
+  showPrices = true,
   children,
 }: {
   locale: Locale;
@@ -62,6 +63,17 @@ export async function AppShell({
    * nothing (order history), which is why the bar can fall back to a count.
    */
   cartPrices?: Record<string, number>;
+  /**
+   * The owner's `show_prices` setting, as the page read it. Only the mobile cart
+   * bar needs it here — every other amount is rendered by the page itself, which
+   * simply omits the markup.
+   *
+   * Defaults to TRUE, and that default is the fail-open rule again rather than
+   * convenience: staff pages pass nothing (they have no cart bar and always show
+   * prices), and a customer page that somehow forgot to pass it shows prices, as
+   * it did before this setting existed.
+   */
+  showPrices?: boolean;
   children: React.ReactNode;
 }) {
   const tc = await getTranslations("common");
@@ -88,6 +100,12 @@ export async function AppShell({
         // every action behind it, because a nav array cannot stop a POST.
         ...(canManageUsers(user.role)
           ? [{ href: `/${locale}/staff/usuarios`, label: tStaff("usersAdmin") }]
+          : []),
+        // Owner only — 项目设置 changes what EVERY restaurant sees, so it is the
+        // narrower of the two gates. Same courtesy/gate split as above: the page
+        // redirects a manager back to /staff and `updateSetting` throws.
+        ...(canManageStaff(user.role)
+          ? [{ href: `/${locale}/staff/ajustes`, label: tStaff("settingsAdmin") }]
           : []),
       ];
 
@@ -144,7 +162,7 @@ export async function AppShell({
             copy, same red, no round trip to get here. */}
         {customer && <CartErrorBanner />}
         {children}
-        {customer && <CartBar locale={locale} />}
+        {customer && <CartBar locale={locale} showPrices={showPrices} />}
       </main>
     </>
   );

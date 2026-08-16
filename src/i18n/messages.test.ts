@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ORDER_ERROR_KEYS, ORDER_STATUSES } from "@/lib/orders";
+import { SETTINGS_ERRORS } from "@/lib/settings";
 import { STAFF_ROLES, USER_ADMIN_ERRORS } from "@/lib/user-admin";
 import es from "../../messages/es.json";
 import zh from "../../messages/zh.json";
@@ -44,6 +45,21 @@ describe("translations", () => {
     for (const key of [...USER_ADMIN_ERRORS, "ok"]) {
       expect(zhResults[key], `zh staff.users.results.${key}`).toBeTypeOf("string");
       expect(esResults[key], `es staff.users.results.${key}`).toBeTypeOf("string");
+    }
+  });
+
+  /**
+   * `updateSetting` redirects with `?result=<CODE>` and `/staff/ajustes` renders
+   * `staff.settings.results.<CODE>` off it, exactly as the user-admin page does.
+   * A code with no message here reaches the owner as the raw token in the middle
+   * of changing what every restaurant sees.
+   */
+  it("carries a staff.settings.results message for every settings outcome", () => {
+    const zhResults: Record<string, string> = zh.staff.settings.results;
+    const esResults: Record<string, string> = es.staff.settings.results;
+    for (const key of [...SETTINGS_ERRORS, "ok"]) {
+      expect(zhResults[key], `zh staff.settings.results.${key}`).toBeTypeOf("string");
+      expect(esResults[key], `es staff.settings.results.${key}`).toBeTypeOf("string");
     }
   });
 

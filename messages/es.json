@@ -123,6 +123,7 @@
     "makeCurrent": "Hacer actual",
     "variantGroup": "Grupo {base} ({n})",
     "usersAdmin": "Usuarios",
+    "settingsAdmin": "Ajustes",
     "users": {
       "title": "Gestión de usuarios",
       "customersTitle": "Cuentas de cliente",
@@ -179,6 +180,19 @@
         "NOT_FOUND": "No se ha encontrado la cuenta. Actualice la página.",
         "AUTH_ERROR": "No se ha podido crear el acceso. Inténtelo de nuevo.",
         "DB_ERROR": "No se ha podido completar la operación. Inténtelo de nuevo."
+      }
+    },
+    "settings": {
+      "title": "Ajustes del portal",
+      "pricesTitle": "Visibilidad de los precios",
+      "showPrices": "Mostrar los precios de los productos",
+      "showPricesHint": "Si se desactiva, los clientes no verán ningún precio. El panel interno no cambia.",
+      "save": "Guardar ajustes",
+      "results": {
+        "ok": "Ajustes guardados",
+        "BAD_KEY": "El ajuste no es válido. Actualice la página.",
+        "BAD_VALUE": "El valor no es válido. Actualice la página.",
+        "DB_ERROR": "No se han podido guardar los ajustes. Inténtelo de nuevo."
       }
     },
     "bridge": {

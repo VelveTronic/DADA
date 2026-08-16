@@ -21,6 +21,7 @@ import {
   isOrderErrorKey,
   madridDay,
 } from "@/lib/orders";
+import { getSetting } from "@/lib/settings";
 import type { CustomerCatalogProduct } from "@/lib/supabase/public.types";
 import { createServerSupabase } from "@/lib/supabase/server";
 
@@ -79,20 +80,26 @@ export default async function CartPage({
   const ids = Object.keys(cart);
 
   const supabase = await createServerSupabase();
-  let products: CartProduct[] = [];
-  if (ids.length > 0) {
+  // The lines and the owner's price switch, together: the setting must not add a
+  // round trip of its own to a page a restaurant reaches with a full cart. An
+  // empty cart has no products query to make, so that half resolves to null.
+  const [productResult, showPrices] = await Promise.all([
     // No is_current_variant filter, unlike the catalog: a line already in the
     // cart has to resolve so it can be shown and removed, even once the product
     // has stopped being orderable.
-    const { data, error: queryError } = await supabase
-      .from("products_priced")
-      .select(
-        "id, codart, name, unit, is_weighed, is_orderable, price_cents, image_url",
-      )
-      .in("id", ids);
-    if (queryError) console.error("cart products query:", queryError);
-    products = data ?? [];
-  }
+    ids.length > 0
+      ? supabase
+          .from("products_priced")
+          .select(
+            "id, codart, name, unit, is_weighed, is_orderable, price_cents, image_url",
+          )
+          .in("id", ids)
+      : Promise.resolve(null),
+    getSetting(supabase, "show_prices"),
+  ]);
+  if (productResult?.error)
+    console.error("cart products query:", productResult.error);
+  const products: CartProduct[] = productResult?.data ?? [];
 
   // The view projects the products PK, but generated view types widen every
   // column to `| null`; keying off the narrowed value avoids a cast.
@@ -165,6 +172,7 @@ export default async function CartPage({
       nav="customer"
       user={{ name: portalUser.display_name ?? portalUser.companies.name }}
       cartPrices={cartPrices}
+      showPrices={showPrices}
     >
       <h1 className="mt-8 text-2xl font-bold tracking-tight">{t("title")}</h1>
 
@@ -251,19 +259,24 @@ export default async function CartPage({
                     />
                   )}
 
-                  <p className="w-28 text-right text-sm font-semibold">
-                    {/* Named for screen readers, silent on screen: a bare amount
-                        in a row does not say whether it is the unit price or
-                        the line. */}
-                    <span className="sr-only">{t("lineTotal")}: </span>
-                    {row.totalCents != null ? (
-                      formatEuros(row.totalCents, locale)
-                    ) : (
-                      <span className="font-normal text-muted">
-                        {tCatalog("noPrice")}
-                      </span>
-                    )}
-                  </p>
+                  {/* Label and amount are ONE cell, so hiding prices takes the
+                      screen-reader "金额:" with the figure — a lone label read
+                      out with nothing after it is worse than no cell at all. */}
+                  {showPrices && (
+                    <p className="w-28 text-right text-sm font-semibold">
+                      {/* Named for screen readers, silent on screen: a bare
+                          amount in a row does not say whether it is the unit
+                          price or the line. */}
+                      <span className="sr-only">{t("lineTotal")}: </span>
+                      {row.totalCents != null ? (
+                        formatEuros(row.totalCents, locale)
+                      ) : (
+                        <span className="font-normal text-muted">
+                          {tCatalog("noPrice")}
+                        </span>
+                      )}
+                    </p>
+                  )}
 
                   <CartRemoveButton productId={row.productId} name={name} />
                 </CartLine>
@@ -271,10 +284,16 @@ export default async function CartPage({
             })}
           </ul>
 
-          <div className="mt-4 flex items-center justify-between px-4 sm:px-5">
-            <span className="text-sm text-muted">{t("subtotal")}</span>
-            <CartSubtotal locale={locale} />
-          </div>
+          {/* The whole row, label included. `CartSubtotal` is a client leaf that
+              would otherwise render a dash under 小计 — an amount the customer
+              is not meant to be shown at all, dressed as one we failed to
+              compute. */}
+          {showPrices && (
+            <div className="mt-4 flex items-center justify-between px-4 sm:px-5">
+              <span className="text-sm text-muted">{t("subtotal")}</span>
+              <CartSubtotal locale={locale} />
+            </div>
+          )}
 
           {blockedMessage && (
             <p

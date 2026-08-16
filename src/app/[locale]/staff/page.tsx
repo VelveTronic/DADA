@@ -14,7 +14,7 @@ import {
   type BridgeTone,
 } from "@/lib/bridge-status";
 import { createServerSupabase } from "@/lib/supabase/server";
-import { canManageUsers } from "@/lib/user-admin";
+import { canManageStaff, canManageUsers } from "@/lib/user-admin";
 
 export const dynamic = "force-dynamic";
 
@@ -48,6 +48,10 @@ export default async function StaffHome({
     // to a page that would only redirect back here is worse than no card.
     ...(canManageUsers(staffUser.role)
       ? [{ href: `/${locale}/staff/usuarios`, label: t("usersAdmin") }]
+      : []),
+    // Owner only, matching the shell's nav entry and the page's own gate.
+    ...(canManageStaff(staffUser.role)
+      ? [{ href: `/${locale}/staff/ajustes`, label: t("settingsAdmin") }]
       : []),
   ];
 

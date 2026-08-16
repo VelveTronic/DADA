@@ -26,8 +26,18 @@ import { useCart } from "./cart-provider";
  *
  * It hides itself on `/carrito`, where it would be a link to the page it is on
  * and a second copy of the subtotal already in the layout.
+ *
+ * With the owner's price switch OFF the bar keeps its count and its way to
+ * checkout and drops the amount entirely — not a dash where the figure was,
+ * which would read as "we could not work it out" rather than "prices are off".
  */
-export function CartBar({ locale }: { locale: string }) {
+export function CartBar({
+  locale,
+  showPrices,
+}: {
+  locale: string;
+  showPrices: boolean;
+}) {
   const { count, subtotalCents } = useCart();
   const t = useTranslations("cart");
   // next-intl strips the locale prefix, so this is `/carrito`, not `/zh/carrito`.
@@ -43,15 +53,22 @@ export function CartBar({ locale }: { locale: string }) {
       <div className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-background/85 px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur-[14px] lg:hidden">
         <Link
           href={`/${locale}/carrito`}
-          className="mx-auto flex h-11 max-w-5xl items-center justify-between gap-3 rounded-full bg-brand px-2 pr-5 text-sm font-semibold text-white transition-colors hover:bg-brand/90"
+          // Without the amount there is no third element to push apart, so the
+          // count and the label sit together in the middle rather than at
+          // opposite ends of an empty pill.
+          className={`mx-auto flex h-11 max-w-5xl items-center gap-3 rounded-full bg-brand px-2 pr-5 text-sm font-semibold text-white transition-colors hover:bg-brand/90 ${
+            showPrices ? "justify-between" : "justify-center"
+          }`}
         >
           <span className="inline-flex size-8 items-center justify-center rounded-full bg-white text-sm font-bold text-brand-ink tabular-nums">
             {count}
           </span>
           <span>{t("title")}</span>
-          <span className="tabular-nums">
-            {subtotalCents == null ? "—" : formatEuros(subtotalCents, locale)}
-          </span>
+          {showPrices && (
+            <span className="tabular-nums">
+              {subtotalCents == null ? "—" : formatEuros(subtotalCents, locale)}
+            </span>
+          )}
         </Link>
       </div>
     </>

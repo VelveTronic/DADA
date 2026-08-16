@@ -123,6 +123,7 @@
     "makeCurrent": "设为当前",
     "variantGroup": "变体组 {base}（{n} 个）",
     "usersAdmin": "用户管理",
+    "settingsAdmin": "设置",
     "users": {
       "title": "用户管理",
       "customersTitle": "客户账号",
@@ -179,6 +180,19 @@
         "NOT_FOUND": "没有找到该账号，请刷新后重试",
         "AUTH_ERROR": "创建登录账号失败，请稍后重试",
         "DB_ERROR": "操作未完成，请稍后重试"
+      }
+    },
+    "settings": {
+      "title": "项目设置",
+      "pricesTitle": "价格显示",
+      "showPrices": "显示商品价格",
+      "showPricesHint": "关闭后客户端不再显示任何价格，员工后台不受影响。",
+      "save": "保存设置",
+      "results": {
+        "ok": "设置已保存",
+        "BAD_KEY": "设置项无效，请刷新后重试",
+        "BAD_VALUE": "设置值无效，请刷新后重试",
+        "DB_ERROR": "保存失败，请稍后重试"
       }
     },
     "bridge": {

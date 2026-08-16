@@ -6,6 +6,7 @@ import { GLASS_CARD } from "@/components/ui";
 import { requireCompanyUser } from "@/lib/auth/guards";
 import { formatEuros } from "@/lib/money";
 import { formatOrderDate, parseOrderNumber } from "@/lib/orders";
+import { getSetting } from "@/lib/settings";
 import type { PublicOrder } from "@/lib/supabase/public.types";
 import { PUBLIC_ORDER_COLUMNS } from "@/lib/supabase/public.types";
 import { createServerSupabase } from "@/lib/supabase/server";
@@ -36,16 +37,20 @@ export default async function OrdersPage({
   const created = parseOrderNumber(rawCreated);
 
   const supabase = await createServerSupabase();
-  const { data, error } = await supabase
-    .from("orders")
-    // The enumerated customer-readable list (CLAUDE.md: never `select('*')`
-    // from orders — `staff_note` is column-revoked and a star select 403s).
-    .select(PUBLIC_ORDER_COLUMNS)
-    // Belt: `orders_read` already narrows this to the caller's company.
-    // Suspenders: the filter says out loud whose orders this page is for.
-    .eq("company_id", portalUser.company_id)
-    .order("created_at", { ascending: false })
-    .limit(PAGE_SIZE);
+  // The history and the owner's price switch race; neither waits on the other.
+  const [{ data, error }, showPrices] = await Promise.all([
+    supabase
+      .from("orders")
+      // The enumerated customer-readable list (CLAUDE.md: never `select('*')`
+      // from orders — `staff_note` is column-revoked and a star select 403s).
+      .select(PUBLIC_ORDER_COLUMNS)
+      // Belt: `orders_read` already narrows this to the caller's company.
+      // Suspenders: the filter says out loud whose orders this page is for.
+      .eq("company_id", portalUser.company_id)
+      .order("created_at", { ascending: false })
+      .limit(PAGE_SIZE),
+    getSetting(supabase, "show_prices"),
+  ]);
   if (error) console.error("orders query:", error);
   const orders: PublicOrder[] = data ?? [];
 
@@ -54,6 +59,7 @@ export default async function OrdersPage({
       locale={locale}
       nav="customer"
       user={{ name: portalUser.display_name ?? portalUser.companies.name }}
+      showPrices={showPrices}
     >
       <h1 className="mt-8 text-2xl font-bold tracking-tight">{t("title")}</h1>
 
@@ -79,12 +85,18 @@ export default async function OrdersPage({
                   {t("orderNumber", { n: order.order_number })}
                 </p>
                 <OrderStatusBadge status={order.status} />
-                <p className="ml-auto text-right font-semibold">
-                  {/* Named for screen readers, silent on screen: a bare amount
-                      in a row does not say what it totals. */}
-                  <span className="sr-only">{tCart("subtotal")}: </span>
-                  {formatEuros(order.subtotal_cents, locale)}
-                </p>
+                {/* The order's own total, and the sr-only 小计 that names it,
+                    stand or fall together. The order still HAS a total — it is
+                    stored in cents and the ERP prints it — the customer's screen
+                    just does not show it while the switch is off. */}
+                {showPrices && (
+                  <p className="ml-auto text-right font-semibold">
+                    {/* Named for screen readers, silent on screen: a bare amount
+                        in a row does not say what it totals. */}
+                    <span className="sr-only">{tCart("subtotal")}: </span>
+                    {formatEuros(order.subtotal_cents, locale)}
+                  </p>
+                )}
               </div>
 
               <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted">

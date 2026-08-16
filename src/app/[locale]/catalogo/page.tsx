@@ -9,6 +9,7 @@ import { BTN_PRIMARY, FIELD, GLASS_CARD } from "@/components/ui";
 import { requireCompanyUser } from "@/lib/auth/guards";
 import { localizedName, sanitizeSearch } from "@/lib/catalog/display";
 import { formatEuros } from "@/lib/money";
+import { getSetting } from "@/lib/settings";
 import type { CustomerCatalogProduct } from "@/lib/supabase/public.types";
 import { createServerSupabase } from "@/lib/supabase/server";
 
@@ -48,17 +49,29 @@ export default async function CatalogPage({
 
   const supabase = await createServerSupabase();
 
-  const { data: favRows, error: favError } = await supabase
-    .from("favorites")
-    .select("product_id")
-    .eq("company_id", portalUser.company_id);
+  // Three independent reads, and the products query below needs all of them
+  // before it can be built (favourites for the tab, categories for `?cat=`), so
+  // they race rather than queue. `show_prices` rides along here for exactly that
+  // reason: the setting costs this page no round trip of its own, and a page
+  // that reads it sequentially would have paid ~50ms for a boolean.
+  const [
+    { data: favRows, error: favError },
+    { data: categoryRows, error: categoryError },
+    showPrices,
+  ] = await Promise.all([
+    supabase
+      .from("favorites")
+      .select("product_id")
+      .eq("company_id", portalUser.company_id),
+    supabase
+      .from("categories")
+      .select("id, erp_code, name, sort_order")
+      .eq("is_active", true),
+    getSetting(supabase, "show_prices"),
+  ]);
   if (favError) console.error("catalog favorites query:", favError);
   const favoriteIds = new Set((favRows ?? []).map((row) => row.product_id));
 
-  const { data: categoryRows, error: categoryError } = await supabase
-    .from("categories")
-    .select("id, erp_code, name, sort_order")
-    .eq("is_active", true);
   if (categoryError) console.error("catalog categories query:", categoryError);
   // Ordered here rather than in SQL: `name` is jsonb, so only the app knows
   // which of {zh, es} this locale actually shows — and that name is the
@@ -147,6 +160,7 @@ export default async function CatalogPage({
       nav="customer"
       user={{ name: portalUser.display_name ?? portalUser.companies.name }}
       cartPrices={cartPrices}
+      showPrices={showPrices}
     >
       <h1 className="mt-8 text-2xl font-bold tracking-tight">{t("title")}</h1>
 
@@ -261,15 +275,23 @@ export default async function CatalogPage({
                     </div>
                   </div>
                 </div>
-                <p className="w-24 text-right text-sm font-semibold">
-                  {p.price_cents != null ? (
-                    formatEuros(p.price_cents, locale)
-                  ) : (
-                    <span className="font-normal text-muted">
-                      {t("noPrice")}
-                    </span>
-                  )}
-                </p>
+                {/* The whole cell goes when the owner has prices off — 价格待定
+                    included. It is the price column's placeholder, so leaving it
+                    behind would put a note ABOUT pricing on a page that is
+                    deliberately not talking about prices. Ordering is unaffected:
+                    the stepper below is gated on `priced`, which the server
+                    resolved either way. */}
+                {showPrices && (
+                  <p className="w-24 text-right text-sm font-semibold">
+                    {p.price_cents != null ? (
+                      formatEuros(p.price_cents, locale)
+                    ) : (
+                      <span className="font-normal text-muted">
+                        {t("noPrice")}
+                      </span>
+                    )}
+                  </p>
+                )}
                 {/* Ordering gates on is_orderable (is_available AND
                     is_current_variant): a row that cannot be ordered gets no
                     control at all, rather than one that would fail. The cell
