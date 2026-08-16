@@ -13,6 +13,7 @@ import {
   isStaffRole,
   isUserAdminError,
   STAFF_ROLES,
+  USER_ADMIN_ERRORS,
   type StaffRole,
   type UserAdminError,
 } from "@/lib/user-admin";
@@ -109,10 +110,17 @@ export default async function StaffUsersPage({
         "id, display_name, is_active, companies:company_id(name, codcli, tarcli, is_active)",
       )
       .order("created_at"),
-    admin
-      .from("staff_users")
-      .select("id, display_name, is_active, role")
-      .order("created_at"),
+    // Owner only, and read only when the section that shows it will be drawn.
+    // RLS on `staff_users` is self-select, so this list only exists at all
+    // because the admin client bypasses it — reading rows a manager may not see
+    // and then hiding them in the markup would make that bypass the only thing
+    // standing between them and the list.
+    owner
+      ? admin
+          .from("staff_users")
+          .select("id, display_name, is_active, role")
+          .order("created_at")
+      : Promise.resolve(null),
     // Only active companies are offered to a NEW account: a login under a
     // deactivated company is refused at `requireCompanyUser` anyway.
     admin
@@ -123,7 +131,7 @@ export default async function StaffUsersPage({
   ]);
   for (const [what, error] of [
     ["portal_users", customerResult.error],
-    ["staff_users", staffResult.error],
+    ["staff_users", staffResult?.error],
     ["companies", companyResult.error],
   ] as const) {
     // A failed read renders the same empty list as no rows; the reason belongs
@@ -131,7 +139,7 @@ export default async function StaffUsersPage({
     if (error) console.error(`staff users ${what} query:`, error);
   }
   const customers: CustomerRow[] = customerResult.data ?? [];
-  const staff: StaffRow[] = staffResult.data ?? [];
+  const staff: StaffRow[] = staffResult?.data ?? [];
   const companies: CompanyOption[] = companyResult.data ?? [];
 
   /** What to call an account in a label: their name, else the address, else the id. */
@@ -157,6 +165,14 @@ export default async function StaffUsersPage({
     showPassword: tLogin("showPassword"),
     hidePassword: tLogin("hidePassword"),
   };
+
+  // A rejected create answers the FORM with a code instead of redirecting, so
+  // the forms need the same sentences this page's banner uses. Built from the
+  // closed list rather than a handful of literals: a new code gets a message
+  // here the moment it exists, exactly as `messages.test.ts` requires.
+  const errorLabels = Object.fromEntries(
+    USER_ADMIN_ERRORS.map((code) => [code, t(`results.${code}`)]),
+  ) as Record<UserAdminError, string>;
 
   return (
     <AppShell
@@ -254,6 +270,7 @@ export default async function StaffUsersPage({
           <CreateCustomerForm
             locale={locale}
             companies={companies}
+            errorLabels={errorLabels}
             labels={{
               ...formLabels,
               company: t("company"),
@@ -300,6 +317,14 @@ export default async function StaffUsersPage({
                     <span className={row.is_active ? BADGE_ON : BADGE_OFF}>
                       {row.is_active ? t("active") : t("inactive")}
                     </span>
+
+                    {/* Said out loud, because the `title`s below cannot say it:
+                        a browser suppresses the tooltip of a DISABLED control,
+                        so on this row the greyed-out select and buttons would
+                        otherwise explain themselves to nobody. */}
+                    {self && (
+                      <span className="text-xs text-muted">{t("selfRow")}</span>
+                    )}
 
                     <form
                       action={setStaffRole}
@@ -367,6 +392,7 @@ export default async function StaffUsersPage({
               locale={locale}
               labels={{ ...formLabels, role: t("role") }}
               roleLabels={roleLabels}
+              errorLabels={errorLabels}
             />
           </div>
         </section>

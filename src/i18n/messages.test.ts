@@ -31,15 +31,12 @@ describe("translations", () => {
   });
 
   /**
-   * Both order pages label a status by indexing this namespace with a value read
-   * straight out of the database. A state with no label here reaches a customer
-   * as the bare English word from the check constraint.
-   */
-  /**
-   * Every user-admin action ends by redirecting with `?result=<CODE>`, and the
-   * page renders `staff.users.results.<CODE>` off it. A code with no message
-   * here reaches a staff member as a next-intl fallback — the raw SCREAMING
-   * SNAKE token — in the middle of creating somebody's account.
+   * Every user-admin outcome reaches the staff member through this namespace:
+   * the row actions redirect with `?result=<CODE>` and the page renders
+   * `staff.users.results.<CODE>`, while a rejected create hands the same code
+   * to its form to draw inline. A code with no message here arrives as a
+   * next-intl fallback — the raw SCREAMING SNAKE token — in the middle of
+   * creating somebody's account.
    */
   it("carries a staff.users.results message for every user-admin outcome", () => {
     const zhResults: Record<string, string> = zh.staff.users.results;
@@ -60,6 +57,11 @@ describe("translations", () => {
     }
   });
 
+  /**
+   * Both order pages label a status by indexing this namespace with a value read
+   * straight out of the database. A state with no label here reaches a customer
+   * as the bare English word from the check constraint.
+   */
   it("carries an orders.status label for every state an order can hold", () => {
     const zhStatus: Record<string, string> = zh.orders.status;
     const esStatus: Record<string, string> = es.orders.status;

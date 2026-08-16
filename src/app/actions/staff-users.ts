@@ -19,6 +19,8 @@ import {
   parseUserKind,
   validateNewCustomer,
   validateNewStaff,
+  type CreateAccountState,
+  type CreateFormValues,
   type NewCustomerInput,
   type NewStaffInput,
   type UserAdminError,
@@ -42,8 +44,21 @@ import {
  *
  * The PASSWORD rule, which every line below respects: it goes from the form to
  * `auth.admin.createUser` and nowhere else. Not into a log line, not into a
- * thrown error's message, not into the redirect, not into anything
- * `revalidatePath` will re-render. The result of an action is a CODE.
+ * thrown error's message, not into a redirect, not into a returned state, not
+ * into anything `revalidatePath` will re-render.
+ *
+ * Two ways of answering, for two different jobs:
+ *
+ *   - The four-field CREATE forms return a `CreateAccountState` when they fail,
+ *     so the form can redraw with what the staff member typed still in it. A
+ *     success still redirects — the POST dies with the 303, taking the password
+ *     with it, and the page that renders next was built from a fresh read.
+ *   - The ROW actions (`setStaffRole`, `setUserActive`) have no form state worth
+ *     keeping — one select and one button, both redrawn from the database — so
+ *     they end the way `staff-orders.ts` does, with `?result=<CODE>`.
+ *
+ * Either way the outcome that travels is a CODE, never a sentence and never a
+ * submitted value.
  */
 
 /** The locale arrives in a form field, so it is never trusted as a path segment. */
@@ -60,19 +75,72 @@ function usuariosHref(locale: string, result: "ok" | UserAdminError): string {
 }
 
 /**
- * How every action ends: revalidate, then redirect with the outcome — the same
- * convention `staff-orders.ts` uses for its `rpcResult` parameter.
+ * How every row action ends, and how a create SUCCEEDS: revalidate, then
+ * redirect with the outcome — the same convention `staff-orders.ts` uses for its
+ * `rpcResult` parameter.
  *
  * The redirect is what keeps a password out of the browser's back-forward
  * cache and out of a resubmission: the POST body dies with the 303, and the
  * page that renders next was built from a fresh read, not from the form.
  *
  * Returns `never` because `redirect()` works by THROWING NEXT_REDIRECT — which
- * is also why no caller may put this inside a try/catch that swallows errors.
+ * is also why no caller may put this inside a try/catch that swallows errors,
+ * and why it can be `return`ed from an action typed to answer with a state.
  */
 function finish(locale: string, result: "ok" | UserAdminError): never {
   revalidatePath(`/${locale}/staff/usuarios`);
   redirect(usuariosHref(locale, result));
+}
+
+/**
+ * The longest value that goes back into a form — an address at the RFC ceiling.
+ *
+ * Every field a create form owns is shorter than this, so the cap only ever bites
+ * a crafted POST, which does not get to have an unbounded string echoed into its
+ * own DOM.
+ */
+const MAX_ECHOED_LENGTH = 254;
+
+/**
+ * A form field on its way BACK to the form: trimmed text, or nothing.
+ *
+ * `FormData.get` is typed `string | File`, and `String(file)` would hand back
+ * "[object File]" as though somebody had typed it.
+ */
+function echoed(value: FormDataEntryValue | null): string {
+  return typeof value === "string" ? value.trim().slice(0, MAX_ECHOED_LENGTH) : "";
+}
+
+/** Which half of the customer form was open. Presence of the flag IS the choice. */
+function wantsNewCompany(formData: FormData): boolean {
+  return String(formData.get("company_choice") ?? "") === "new";
+}
+
+/**
+ * Everything the staff member typed EXCEPT the password, ready to be rendered
+ * back into the form that failed.
+ *
+ * Both forms are read by the same function: the fields one of them does not have
+ * come back as "" and its `defaultValue`s never look at them. There is
+ * deliberately no `password` line here, and adding one would put it in a value
+ * React sends back to the server on the next submit.
+ */
+function keptValues(formData: FormData): CreateFormValues {
+  return {
+    email: echoed(formData.get("email")),
+    displayName: echoed(formData.get("display_name")),
+    companyChoice: wantsNewCompany(formData) ? "new" : "existing",
+    companyId: echoed(formData.get("company_id")),
+    companyName: echoed(formData.get("company_name")),
+    codcli: echoed(formData.get("codcli")),
+    tarcli: echoed(formData.get("tarcli")),
+    role: echoed(formData.get("role")),
+  };
+}
+
+/** A create that failed: the code the form will translate, and its own values back. */
+function rejected(error: UserAdminError, formData: FormData): CreateAccountState {
+  return { error, values: keptValues(formData) };
 }
 
 /**
@@ -237,21 +305,28 @@ async function provisionAccount(
  * `company_choice` decides which half of the form counts: the select and the
  * 新建公司 fields are both in the DOM, and sending both would be
  * `BAD_COMPANY` — the lib refuses to guess which one the user meant.
+ *
+ * Called through `useActionState`, so the first argument is the PREVIOUS state.
+ * It is unread: every answer is built from the request in hand, and trusting a
+ * state the client just posted back would be trusting the client.
  */
-export async function createCustomerAccount(formData: FormData): Promise<void> {
+export async function createCustomerAccount(
+  _prevState: CreateAccountState,
+  formData: FormData,
+): Promise<CreateAccountState> {
   const locale = safeLocale(formData.get("locale"));
   const { staffUser } = await requireStaff(locale);
   // Fails CLOSED with a throw, not a redirect: a caller without the role never
   // rendered this page, so there is no banner to send them back to.
   if (!canManageUsers(staffUser.role)) throw new Error("FORBIDDEN");
 
-  const wantsNewCompany = String(formData.get("company_choice") ?? "") === "new";
+  const newCompany = wantsNewCompany(formData);
   const validated = validateNewCustomer({
     email: formData.get("email"),
     password: formData.get("password"),
     displayName: formData.get("display_name"),
-    companyId: wantsNewCompany ? undefined : formData.get("company_id"),
-    newCompany: wantsNewCompany
+    companyId: newCompany ? undefined : formData.get("company_id"),
+    newCompany: newCompany
       ? {
           name: formData.get("company_name"),
           codcli: formData.get("codcli"),
@@ -259,14 +334,15 @@ export async function createCustomerAccount(formData: FormData): Promise<void> {
         }
       : null,
   });
-  if (!validated.ok) return finish(locale, validated.error);
+  if (!validated.ok) return rejected(validated.error, formData);
 
   const admin = createAdminClient();
   const failure = await provisionAccount(admin, {
     kind: "customer",
     input: validated.value,
   });
-  return finish(locale, failure ?? "ok");
+  if (failure) return rejected(failure, formData);
+  return finish(locale, "ok");
 }
 
 /**
@@ -275,8 +351,14 @@ export async function createCustomerAccount(formData: FormData): Promise<void> {
  * A uid that already belongs to a customer is refused by the role-exclusivity
  * trigger and comes back as `ROLE_CONFLICT`; it cannot happen on a freshly
  * minted uid, but the rollback path treats it like any other failed insert.
+ *
+ * Same `useActionState` signature and the same unread previous state as the
+ * customer action.
  */
-export async function createStaffAccount(formData: FormData): Promise<void> {
+export async function createStaffAccount(
+  _prevState: CreateAccountState,
+  formData: FormData,
+): Promise<CreateAccountState> {
   const locale = safeLocale(formData.get("locale"));
   const { staffUser } = await requireStaff(locale);
   if (!canManageStaff(staffUser.role)) throw new Error("FORBIDDEN");
@@ -287,14 +369,15 @@ export async function createStaffAccount(formData: FormData): Promise<void> {
     displayName: formData.get("display_name"),
     role: formData.get("role"),
   });
-  if (!validated.ok) return finish(locale, validated.error);
+  if (!validated.ok) return rejected(validated.error, formData);
 
   const admin = createAdminClient();
   const failure = await provisionAccount(admin, {
     kind: "staff",
     input: validated.value,
   });
-  return finish(locale, failure ?? "ok");
+  if (failure) return rejected(failure, formData);
+  return finish(locale, "ok");
 }
 
 /**

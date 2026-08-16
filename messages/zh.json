@@ -155,6 +155,7 @@
       "saveRole": "保存",
       "saveRoleFor": "保存权限：{name}",
       "self": "不能修改自己的账号",
+      "selfRow": "不能修改自己",
       "roles": {
         "staff": "普通员工",
         "manager": "经理",

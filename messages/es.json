@@ -155,6 +155,7 @@
       "saveRole": "Guardar",
       "saveRoleFor": "Guardar el permiso: {name}",
       "self": "No puede modificar su propia cuenta",
+      "selfRow": "No puede modificarse",
       "roles": {
         "staff": "Personal",
         "manager": "Gerente",

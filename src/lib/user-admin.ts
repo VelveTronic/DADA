@@ -72,6 +72,53 @@ export function isUserAdminError(value: string): value is UserAdminError {
   return (USER_ADMIN_ERRORS as readonly string[]).includes(value);
 }
 
+/**
+ * What a REJECTED account creation hands back to the form it came from.
+ *
+ * The two create actions used to answer a failure the same way they answer a
+ * success — a redirect — which remounts the page and leaves every field blank:
+ * one wrong codcli and the staff member retypes an address, a name, a company
+ * and a tarifa. So a failed create returns this instead, and the form re-renders
+ * from it through `useActionState`.
+ *
+ * Two rules this shape exists to enforce:
+ *
+ * 1. **No password.** It is not a field here and must never become one. The
+ *    password goes from the form to `auth.admin.createUser` and nowhere else;
+ *    a value in this object is sent back to the SERVER on the next submit and
+ *    sits in the DOM in between.
+ * 2. **No URL.** These are somebody's personal details, so they ride the
+ *    action's POST body — never a query string, which is the house rule and the
+ *    reason the outcome CODE is all that ever travels in `?result=`.
+ *
+ * Every field is a plain string, exactly as the form sent it, because that is
+ * what `defaultValue` needs: a codcli rejected as "12a" has to come back as
+ * "12a" for the staff member to see what they typed.
+ */
+export interface CreateFormValues {
+  email: string;
+  displayName: string;
+  /** Which half of the customer form was open; the staff form always sends "existing". */
+  companyChoice: "existing" | "new";
+  companyId: string;
+  companyName: string;
+  codcli: string;
+  tarcli: string;
+  /** The staff form's 权限 select; empty on the customer form. */
+  role: string;
+}
+
+/**
+ * The state both create forms hold: nothing yet, or the last failure and the
+ * values that produced it. A SUCCESS never becomes a state — it redirects.
+ */
+export type CreateAccountState =
+  | { error: null; values: null }
+  | { error: UserAdminError; values: CreateFormValues };
+
+/** What `useActionState` mounts with: no attempt made, nothing to restore. */
+export const EMPTY_CREATE_STATE: CreateAccountState = { error: null, values: null };
+
 /** What every check in this file returns: a value, or the reason there is none. */
 export type Validated<T> =
   | { ok: true; value: T }
