@@ -3,7 +3,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set search_path = public, extensions;
 
-select plan(36);
+select plan(38);
 
 select ok(
   not has_table_privilege('authenticated', 'public.orders', 'UPDATE'),
@@ -24,6 +24,14 @@ select ok(
 select ok(
   not has_column_privilege('authenticated', 'public.companies', 'notes', 'SELECT'),
   'authenticated cannot read company notes'
+);
+select ok(
+  not has_table_privilege('anon', 'public.bridge_status', 'SELECT'),
+  'anon cannot read the bridge heartbeat'
+);
+select ok(
+  not has_table_privilege('authenticated', 'public.bridge_status', 'INSERT'),
+  'authenticated cannot forge a bridge heartbeat'
 );
 select ok(
   not has_function_privilege(

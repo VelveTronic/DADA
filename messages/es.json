@@ -147,20 +147,28 @@
         "missing": "No ha llegado ninguna señal: la tarea programada no existe o bridge.env está mal configurado (en ese caso no se escribe señal alguna)."
       },
       "counts": {
-        "claimed": "Tomados",
-        "injected": "Inyectados",
-        "recovered": "Recuperados",
-        "markFailed": "Sin confirmar",
-        "failed": "Fallidos",
-        "matched": "Emparejados",
-        "marked": "Anotados",
-        "articles": "Artículos ERP",
-        "notInPortal": "Sin producto",
-        "fullyUnpriced": "Sin tarifa",
-        "orderableWithPrice": "Con precio",
-        "skipped": "Omitidos",
-        "error": "Error",
-        "countError": "Error de recuento"
+        "orders": {
+          "claimed": "Tomados",
+          "injected": "Inyectados",
+          "recovered": "Recuperados",
+          "markFailed": "Sin confirmar",
+          "failed": "Fallidos"
+        },
+        "albaran-sync": {
+          "injected": "Pendientes de albarán",
+          "matched": "Emparejados",
+          "marked": "Anotados"
+        },
+        "price-sync": {
+          "articles": "Artículos ERP",
+          "matched": "Emparejados",
+          "notInPortal": "Sin producto",
+          "fullyUnpriced": "Sin tarifa",
+          "orderableWithPrice": "Con precio",
+          "skipped": "Omitidos",
+          "error": "Error",
+          "countError": "Error de recuento"
+        }
       }
     }
   }

@@ -5,14 +5,15 @@ import { AppShell } from "@/components/app-shell";
 import { GLASS_CARD } from "@/components/ui";
 import { requireStaff } from "@/lib/auth/guards";
 import {
+  bridgeCountLabelKey,
   bridgeStateKey,
   deriveBridgeStatuses,
   formatMadridTime,
-  isBridgeCountKey,
   relativeAge,
+  type BridgeJob,
   type BridgeTone,
 } from "@/lib/bridge-status";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { createServerSupabase } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
 
@@ -44,13 +45,19 @@ export default async function StaffHome({
     { href: `/${locale}/staff/productos`, label: t("products") },
   ];
 
-  // Service-role read, after `requireStaff` — `bridge_status` grants
-  // authenticated a staff-gated SELECT, but every other staff page already goes
-  // through the admin client and this one has no reason to differ.
-  const admin = createAdminClient();
-  const { data: heartbeats, error } = await admin
+  // The ordinary session client, not the service-role one: `bridge_status`
+  // grants `authenticated` a SELECT that RLS gates to staff, which is exactly
+  // what this caller is. The admin client would also work and would cost more
+  // than it buys — it throws when `SUPABASE_SERVICE_ROLE_KEY` is absent, and a
+  // status card must never be the reason the whole staff home 500s and takes
+  // the links to the order queue with it.
+  const supabase = await createServerSupabase();
+  const { data: heartbeats, error } = await supabase
     .from("bridge_status")
     .select("job, last_run_at, ok, detail");
+  // A failed query renders the same "nothing has ever reported" state as an
+  // empty table. It is the honest thing to show — we know nothing either way —
+  // and the reason lands in the server log rather than on a staff screen.
   if (error) console.error("staff bridge_status query:", error);
 
   const statuses = deriveBridgeStatuses(heartbeats ?? [], new Date());
@@ -64,9 +71,15 @@ export default async function StaffHome({
   const relative = new Intl.RelativeTimeFormat(locale === "zh" ? "zh-CN" : "es-ES", {
     numeric: "auto",
   });
-  /** A count key the card has a label for, or the raw key if the bridge grew one. */
-  const countLabel = (key: string): string =>
-    isBridgeCountKey(key) ? t(`bridge.counts.${key}`) : key;
+  /**
+   * The label for one count, looked up under ITS OWN job: `injected` means
+   * "written into Wingest" for `orders` and "waiting for an albarán" for
+   * `albaran-sync`. A key with no label falls back to the raw key.
+   */
+  const countLabel = (job: BridgeJob, key: string): string => {
+    const labelKey = bridgeCountLabelKey(job, key);
+    return labelKey ? t(`bridge.counts.${labelKey}`) : key;
+  };
 
   return (
     <AppShell
@@ -146,7 +159,10 @@ export default async function StaffHome({
                   {status.counts.length > 0 ? (
                     <p className="mt-1 text-xs text-muted">
                       {status.counts
-                        .map((count) => `${countLabel(count.key)} ${count.value ?? "—"}`)
+                        .map(
+                          (count) =>
+                            `${countLabel(status.job, count.key)} ${count.value ?? "—"}`,
+                        )
                         .join(" · ")}
                     </p>
                   ) : null}
@@ -159,7 +175,7 @@ export default async function StaffHome({
 
                   {status.notes.map((note) => (
                     <p key={note.key} className="mt-1 break-words text-xs text-muted">
-                      {countLabel(note.key)}: {note.value}
+                      {countLabel(status.job, note.key)}: {note.value}
                     </p>
                   ))}
 

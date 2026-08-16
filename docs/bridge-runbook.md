@@ -68,9 +68,10 @@ SUPABASE_URL=https://gudiykhngonoqsjoigza.supabase.co
 SUPABASE_SERVICE_ROLE_KEY=<从保险库取>
 
 # ---- Wingest（ERP 侧）----
-# 形式：主机 或 主机,端口 或 主机\实例名。逗号形式是 SQL Server 客户端写法，
-# 桥接会自己拆成 host + port（tedious 不认识 "host,port"）。
-WINGEST_SERVER=SERVER\<实例名>,50352
+# 两种写法，二选一，不能混用（详见下面的「⚠️ 主机名与端口」）：
+#   SERVER,50352      端口直连（推荐）
+#   SERVER\INSTANCIA  按实例名解析（端口会被忽略，需要 SQL Browser）
+WINGEST_SERVER=SERVER,50352
 # 沙箱 wg_test / 生产 wgdemo —— 上线切换时改这一行
 WINGEST_DB=wg_test
 WINGEST_USER=dada_bridge
@@ -92,6 +93,31 @@ LEASE_SECONDS=300
 
 配置错了会**立刻失败并说明是哪一项**（错误码形如 `MISSING_SUPABASE_URL`、
 `BAD_WINGEST_SERVER`），不会带着半个配置去写 ERP。
+
+### ⚠️ `WINGEST_SERVER`：主机名与端口，二选一
+
+两种写法**互斥**，写成一条会踩坑：
+
+| 写法 | 怎么连 | 什么时候用 |
+| --- | --- | --- |
+| `SERVER,50352`（推荐） | TCP 直连到 50352 端口 | 端口固定、SQL Browser 关着——大多数加固过的 ERP 机器 |
+| `SERVER\INSTANCIA` | 拿实例名去问 SQL Browser（UDP 1434）要端口 | 端口是动态的、且 SQL Browser 服务开着 |
+
+🚫 **`SERVER\INSTANCIA,50352` 这种写法不要用。** 只要主机名里带反斜杠，驱动就
+按"命名实例"处理并**把端口丢掉**（node-mssql 里就是一行
+`if (cfg.options.instanceName) delete cfg.options.port`），于是它去走 SQL Browser
+的 UDP 1434——而这个服务在加固过的服务器上通常是关的，表现为连接超时。
+
+更容易被骗的是日志：`start` 那行是把主机和端口**重新拼起来**打印的，所以即使端口
+已经被丢掉，日志里照样写着 `wingestServer=SERVER\INSTANCIA,50352`。**日志里有端口
+≠ 真的用了那个端口。** 拿不准就用第一种写法。
+
+用哪个端口不确定时，在 SERVER 上查（SQL Server 配置管理器 → TCP/IP → IP 地址 →
+IPAll → TCP 端口），或者直接问 SQL：
+
+```sql
+SELECT local_tcp_port FROM sys.dm_exec_connections WHERE session_id = @@SPID;
+```
 
 > ⚠️ **配置失败是唯一不写心跳的失败**：没有 `SUPABASE_URL` 和密钥就没法往
 > `bridge_status` 写任何东西。这种情况下员工后台的卡片显示的是「未运行」，
@@ -163,9 +189,9 @@ schtasks /query /tn "DADA Bridge Prices" /v /fo list
 ```
 
 看三件事：**下次运行时间**（Próxima ejecución）、**运行身份**（Ejecutar como
-usuario）、以及 orders 那条的**重复间隔 1 分钟**。Windows 会把 `/sc minute` 建成
-"每天在起始时刻触发、之后每 1 分钟重复"的形式——在任务计划程序界面里看到
-"重复任务间隔：1 分钟，持续时间：1 天"是正常的，第二天会自动重新开始。
+usuario）、以及 orders 那条的**重复间隔 1 分钟**。上面的命令没有传 `/et` 或
+`/du`，所以重复是**没有结束时间**的——在任务计划程序界面里，"重复任务间隔：1 分钟"
+后面跟的持续时间会显示成"无限期 / Indefinidamente"。看到这个才是对的。
 
 ### 手动跑（测试用）
 
@@ -196,7 +222,7 @@ node C:\dada\bridge\dada-bridge.js price-sync
 ### 一轮健康的 orders（有一张订单）
 
 ```
-2026-08-16T04:31:02.113Z INFO start job=orders dir=C:\dada\bridge supabaseUrl=https://gudiykhngonoqsjoigza.supabase.co wingestServer=SERVER\WINGEST,50352 wingestDb=wg_test wingestUser=dada_bridge erpUser=SFY can=B eje=26 alm=00001 serfac=1 claimLimit=20 leaseSeconds=300
+2026-08-16T04:31:02.113Z INFO start job=orders dir=C:\dada\bridge supabaseUrl=https://gudiykhngonoqsjoigza.supabase.co wingestServer=SERVER,50352 wingestDb=wg_test wingestUser=dada_bridge erpUser=SFY can=B eje=26 alm=00001 serfac=1 claimLimit=20 leaseSeconds=300
 2026-08-16T04:31:02.640Z INFO claimed claimToken=1f7c0f6e-6a2a-4f6b-9d3b-1a5b8e6d0c11 count=1
 2026-08-16T04:31:04.902Z INFO injected orderId=9c1e0a52-3f42-4a6d-9b0f-1d2c3e4f5a6b orderNumber=1042 company="Wok Ciudad Lineal" codcli=1234 numped=8871 lineCount=7
 2026-08-16T04:31:05.188Z INFO orders summary claimed=1 injected=1 recovered=0 markFailed=0 failed=0 ok=true
@@ -225,16 +251,24 @@ node C:\dada\bridge\dada-bridge.js price-sync
 ### price-sync
 
 ```
-2026-08-16T12:30:01.204Z INFO start job=price-sync dir=C:\dada\bridge ...
-2026-08-16T12:30:03.815Z INFO read articulo articles=3021
-2026-08-16T12:31:40.002Z INFO progress applied=500 of=3021
-2026-08-16T12:38:22.117Z INFO merged matched=2854 notInPortal=167 withAnyPrice=2790 syncedAt=2026-08-16T12:30:03.900Z sample=1-0001,1-0002,1-0007,2-0114,...
-2026-08-16T12:38:29.640Z INFO price-sync summary articles=3021 matched=2854 notInPortal=167 fullyUnpriced=42 orderableWithPrice=2712 notInPortalSample=["1-0001","1-0002","1-0007","2-0114"] ok=true
+2026-08-16T04:30:01.204Z INFO start job=price-sync dir=C:\dada\bridge ...
+2026-08-16T04:30:03.815Z INFO read articulo articles=3021
+2026-08-16T04:31:40.002Z INFO progress applied=500 of=3021
+2026-08-16T04:38:22.117Z INFO merged matched=2854 notInPortal=167 withAnyPrice=2790 syncedAt=2026-08-16T04:30:03.900Z sample=1-0001,1-0002,1-0007,2-0114,2-0115,3-0006,3-0007,4-0201,4-0202,4-0203,5-0011,5-0012,6-0044,6-0045,7-0100,7-0101,8-0033,8-0034,9-0007,9-0008
+2026-08-16T04:38:29.640Z INFO price-sync summary articles=3021 matched=2854 notInPortal=167 fullyUnpriced=42 orderableWithPrice=2712 notInPortalSample="[\"1-0001\",\"1-0002\",\"1-0007\",\"2-0114\",\"2-0115\",\"3-0006\",\"3-0007\",\"4-0201\",\"4-0202\",\"4-0203\",\"5-0011\",\"5-0012\",\"6-0044\",\"6-0045\",\"7-0100\",\"7-0101\",\"8-0033\",\"8-0034\",\"9-0007\",\"9-0008\"]" ok=true
 ```
 
-`notInPortal` 是 ERP 里有、门户里没有的编号数量；`sample=` / `notInPortalSample`
-列出前 20 个，用来判断那批到底是"ERP 自用的包材/服务条目"还是"门户导入漏了一个
-品类"。price-sync 跑几分钟是正常的（三千多个商品，一个一个 PATCH）。
+> ⏰ **日志时间戳一律是 UTC（结尾的 `Z`）**，不是服务器的中国时间，也不是马德里
+> 时间。上面这轮就是第 ③ 节说的"服务器本地 12:30"那一次：12:30（UTC+8）＝
+> **04:30Z**。对时间时先减 8 小时再看。
+
+`notInPortal` 是 ERP 里有、门户里没有的编号数量；`sample=` 和
+`notInPortalSample` 都列出**前 20 个**，用来判断那批到底是"ERP 自用的包材/服务
+条目"还是"门户导入漏了一个品类"。两者内容一样、形式不同：`sample=` 是给人看的
+逗号列表，`notInPortalSample=` 是发给门户状态卡片的那个 JSON 数组（数组里有引号，
+所以整个值又被引起来、里面的引号带反斜杠——看着别扭，是正常的）。
+
+price-sync 跑几分钟是正常的（三千多个商品，一个一个 PATCH）。
 
 ### 日志会一直变长
 
@@ -281,8 +315,11 @@ GRANT SELECT, INSERT ON dbo.pedclica_adi TO dada_bridge;  -- 备料附表（estp
 -- 5) 读 + 改：单号计数器（NUMPEDCLI / IDVENTA / IDPEDCLILI）
 GRANT SELECT, UPDATE ON dbo.newcontador  TO dada_bridge;
 
--- 6) 收回沙箱阶段图省事给的大权限
-ALTER ROLE db_owner DROP MEMBER dada_bridge;
+-- 6) 收回沙箱阶段图省事给的大权限。
+--    先判断再退出：本来就不在 db_owner 里的话，直接 DROP MEMBER 会报一个红色
+--    错误，让人以为整段脚本白跑了。
+IF IS_ROLEMEMBER('db_owner', 'dada_bridge') = 1
+    ALTER ROLE db_owner DROP MEMBER dada_bridge;
 ```
 
 > 桥接**没有** DELETE、没有 UPDATE 现有单据、没有建表权限：它只会新增 Pedido、
@@ -364,8 +401,12 @@ schtasks /change /tn "DADA Bridge Orders" /enable
   `回写失败`（markFailed）是最值得盯的一个：**pedido 已经写进 ERP 了，但门户没
   记上**。下一轮会重新认领、靠 `PORTAL-<订单号>` 去重找回同一个 NUMPED 再回写
   一次；连续几轮不归零就要人工看。
-- `albaran-sync`：`已匹配 / 已回写`。正常情况下两个数相等；`已回写` 少于
-  `已匹配` 说明有订单状态被人改过（比如已取消）。
+- `albaran-sync`：`待出单 / 已匹配 / 已回写`。
+  **`待出单`（injected）不是"这小时注入了几张"**，而是"此刻还有几张已进 ERP 的
+  订单在等人开 Albarán"——它是这一轮去 `albfacca` 里查的那批单号的数量，人没开单
+  它就一直是那个数。`已匹配` 是这轮查到已开单的，`已回写` 是成功写回门户的；
+  正常情况下后两个相等，`已回写` 少于 `已匹配` 说明有订单状态被人改过（比如已
+  取消），下一轮会自动重试。
 - `price-sync`：`ERP 商品 / 已匹配 / 门户缺少 / 无价格 / 可售有价`，外加前 20 个
   门户缺少的编号。
 

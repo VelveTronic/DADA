@@ -2,11 +2,11 @@ import { describe, expect, it } from "vitest";
 import {
   BRIDGE_JOBS,
   BRIDGE_STALE_MS,
+  bridgeCountLabelKey,
   bridgeStateKey,
   deriveBridgeStatus,
   deriveBridgeStatuses,
   formatMadridTime,
-  isBridgeCountKey,
   isBridgeJob,
   readBridgeDetail,
   relativeAge,
@@ -244,6 +244,20 @@ describe("readBridgeDetail", () => {
     expect(read.notes).toEqual([{ key: "error", value: "socket hang up" }]);
   });
 
+  it("puts a boolean in notes too — `true` in a row of numbers reads as one", () => {
+    const read = readBridgeDetail({ matched: 1, degraded: true, retried: false });
+    expect(read.counts).toEqual([{ key: "matched", value: 1 }]);
+    expect(read.notes).toEqual([
+      { key: "degraded", value: "true" },
+      // `false` is kept, unlike an empty string: it is an answer, not a blank.
+      { key: "retried", value: "false" },
+    ]);
+  });
+
+  it("drops an empty string — a note with nothing in it is not a note", () => {
+    expect(readBridgeDetail({ error: "" }).notes).toEqual([]);
+  });
+
   it("survives a detail that is not an object", () => {
     for (const detail of [null, undefined, 7, "oops", ["a"], true]) {
       expect(readBridgeDetail(detail)).toEqual({
@@ -348,10 +362,46 @@ describe("guards", () => {
     expect(isBridgeJob("orders ")).toBe(false);
     expect(isBridgeJob("stock-sync")).toBe(false);
   });
+});
 
-  it("recognises the count keys the card has labels for", () => {
-    expect(isBridgeCountKey("claimed")).toBe(true);
-    expect(isBridgeCountKey("orderableWithPrice")).toBe(true);
-    expect(isBridgeCountKey("somethingNew")).toBe(false);
+describe("bridgeCountLabelKey", () => {
+  it("scopes the SAME key to the job that emitted it", () => {
+    // `injected` means two different things: orders written into Wingest this
+    // run, versus orders still waiting for an albarán. One flat label for both
+    // told staff four orders had been injected in an hour when none had.
+    expect(bridgeCountLabelKey("orders", "injected")).toBe("orders.injected");
+    expect(bridgeCountLabelKey("albaran-sync", "injected")).toBe("albaran-sync.injected");
+  });
+
+  it("labels every count each job actually emits", () => {
+    const emitted: Record<BridgeJob, string[]> = {
+      // ordersCounts / albaranCounts / priceSyncCounts, key for key.
+      orders: ["claimed", "injected", "recovered", "markFailed", "failed"],
+      "albaran-sync": ["injected", "matched", "marked"],
+      "price-sync": [
+        "articles",
+        "matched",
+        "notInPortal",
+        "fullyUnpriced",
+        "orderableWithPrice",
+        "skipped",
+        "error",
+        "countError",
+      ],
+    };
+    for (const job of BRIDGE_JOBS) {
+      for (const key of emitted[job]) {
+        expect(bridgeCountLabelKey(job, key)).toBe(`${job}.${key}`);
+      }
+    }
+  });
+
+  it("returns null for a key that belongs to another job, or to none", () => {
+    // A wrong label is worse than a bare key: the card falls back to the raw
+    // one rather than borrowing a neighbour's word for it.
+    expect(bridgeCountLabelKey("orders", "articles")).toBeNull();
+    expect(bridgeCountLabelKey("albaran-sync", "claimed")).toBeNull();
+    expect(bridgeCountLabelKey("price-sync", "markFailed")).toBeNull();
+    expect(bridgeCountLabelKey("orders", "somethingNew")).toBeNull();
   });
 });

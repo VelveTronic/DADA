@@ -147,20 +147,28 @@
         "missing": "没有收到过心跳：计划任务没建，或 bridge.env 配置失败（配置失败时不会写心跳）。"
       },
       "counts": {
-        "claimed": "认领",
-        "injected": "已注入",
-        "recovered": "已找回",
-        "markFailed": "回写失败",
-        "failed": "失败",
-        "matched": "已匹配",
-        "marked": "已回写",
-        "articles": "ERP 商品",
-        "notInPortal": "门户缺少",
-        "fullyUnpriced": "无价格",
-        "orderableWithPrice": "可售有价",
-        "skipped": "已跳过",
-        "error": "错误",
-        "countError": "统计错误"
+        "orders": {
+          "claimed": "认领",
+          "injected": "已注入",
+          "recovered": "已找回",
+          "markFailed": "回写失败",
+          "failed": "失败"
+        },
+        "albaran-sync": {
+          "injected": "待出单",
+          "matched": "已匹配",
+          "marked": "已回写"
+        },
+        "price-sync": {
+          "articles": "ERP 商品",
+          "matched": "已匹配",
+          "notInPortal": "门户缺少",
+          "fullyUnpriced": "无价格",
+          "orderableWithPrice": "可售有价",
+          "skipped": "已跳过",
+          "error": "错误",
+          "countError": "统计错误"
+        }
       }
     }
   }

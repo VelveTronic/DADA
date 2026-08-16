@@ -104,31 +104,52 @@ export interface BridgeStatusView {
 }
 
 /**
- * Keys the card has a bilingual label for. Anything else — a count added to a
- * job after this build shipped — is rendered under its raw key rather than
- * silently dropped: an unlabelled number is still a number worth seeing.
+ * Which count keys each job emits, and therefore which label belongs to it.
+ *
+ * Scoped PER JOB rather than one flat key→label map, because the same key means
+ * different things in different jobs: `injected` in an `orders` run counts
+ * orders this run just wrote into Wingest, while `injected` in an
+ * `albaran-sync` run counts orders still WAITING for an albarán. A flat map
+ * labelled the second one 已注入 and told staff four orders had just been
+ * injected in an hour when none had.
+ *
+ * A key not listed here — one added to a job after this build shipped — is
+ * rendered under its raw key rather than dropped: an unlabelled number is still
+ * a number worth seeing, and a wrong label is worse than a bare one.
  */
-export const BRIDGE_COUNT_KEYS = [
-  "claimed",
-  "injected",
-  "recovered",
-  "markFailed",
-  "failed",
-  "matched",
-  "marked",
-  "articles",
-  "notInPortal",
-  "fullyUnpriced",
-  "orderableWithPrice",
-  "skipped",
-  "error",
-  "countError",
-] as const;
+const COUNT_LABEL_KEYS = {
+  orders: ["claimed", "injected", "recovered", "markFailed", "failed"],
+  "albaran-sync": ["injected", "matched", "marked"],
+  "price-sync": [
+    "articles",
+    "matched",
+    "notInPortal",
+    "fullyUnpriced",
+    "orderableWithPrice",
+    "skipped",
+    "error",
+    "countError",
+  ],
+} as const satisfies Record<BridgeJob, readonly string[]>;
 
-export type BridgeCountKey = (typeof BRIDGE_COUNT_KEYS)[number];
+/** `<job>.<key>` — the message key under `staff.bridge.counts`. */
+export type BridgeCountLabelKey = {
+  [J in BridgeJob]: `${J}.${(typeof COUNT_LABEL_KEYS)[J][number]}`;
+}[BridgeJob];
 
-export function isBridgeCountKey(value: string): value is BridgeCountKey {
-  return (BRIDGE_COUNT_KEYS as readonly string[]).includes(value);
+/**
+ * The label key for one count of one job, or null if this build has no label.
+ *
+ * The assertion is the narrowing TypeScript cannot do for itself: `key` arrives
+ * as a string out of jsonb, and the line above it has just proved the pair is
+ * one of the literal combinations the type enumerates.
+ */
+export function bridgeCountLabelKey(
+  job: BridgeJob,
+  key: string,
+): BridgeCountLabelKey | null {
+  const known: readonly string[] = COUNT_LABEL_KEYS[job];
+  return known.includes(key) ? (`${job}.${key}` as BridgeCountLabelKey) : null;
 }
 
 /** The lock told this run to stand down — the one `ok:false` that is not a fault. */

@@ -7,7 +7,7 @@
  * Scheduler:
  *
  *     node dada-bridge.js orders          every minute
- *     node dada-bridge.js albaran-sync    every few minutes
+ *     node dada-bridge.js albaran-sync    hourly
  *     node dada-bridge.js price-sync      nightly
  *
  * Everything the program needs from the outside sits BESIDE that file:
