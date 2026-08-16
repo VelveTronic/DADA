@@ -209,8 +209,10 @@ function readCategoryAssignments(
     const codart = String(row[codartIndex] ?? "").trim();
     if (!codart) throw new Error(`row ${index + 1} has no ${CODART_COLUMN}`);
     const raw = row[categoryIndex];
-    const erpCode =
-      raw === null || raw === undefined ? "" : String(raw).trim();
+    let erpCode = raw === null || raw === undefined ? "" : String(raw).trim();
+    // freepos has TWO 新品推荐 buckets (ids 1 and 51 — owner-confirmed). Rendering
+    // both would show duplicate chips, so exports pointing at 1 fold into 51.
+    if (erpCode === "1") erpCode = "51";
     return { codart, erpCode: erpCode || null };
   });
 }
