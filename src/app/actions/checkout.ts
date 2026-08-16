@@ -9,6 +9,7 @@ import { CART_COOKIE, parseCart } from "@/lib/cart";
 import type { OrderErrorKey } from "@/lib/orders";
 import { isUuid, mapOrderError } from "@/lib/orders";
 import { perfRun } from "@/lib/perf";
+import { getSetting } from "@/lib/settings";
 import type { Json } from "@/lib/supabase/database.types";
 import { createServerSupabase } from "@/lib/supabase/server";
 
@@ -87,6 +88,31 @@ export async function submitOrder(formData: FormData) {
   const token = String(formData.get("client_token") ?? "");
 
   const supabase = await createServerSupabase();
+
+  // The owner's `show_delivery_date` switch, re-read on the POST rather than
+  // trusted from the render that drew the form. With the switch off the cart
+  // page ships no date field at all, so the ordinary checkout posts nothing here
+  // and this read never happens; what it catches is the tab that was OPEN when
+  // the owner flipped the switch, and the crafted body — a server action is an
+  // open POST endpoint, so the page hiding the field proves nothing about what
+  // arrives (`staff-settings.ts` states the same rule for the owner gate).
+  //
+  // Only reached when a date was actually posted, so an order with no date pays
+  // nothing for this, and the switched-off portal pays nothing at all. It fails
+  // OPEN like every settings read: an unreachable `portal_settings` leaves the
+  // customer's chosen date exactly where it was.
+  //
+  // REPLAY: the date is part of create_order's request hash, so a form rendered
+  // with a date and re-submitted after the switch changed hashes differently
+  // from the submit that created the order — the same `client_token` then comes
+  // back IDEMPOTENCY_MISMATCH rather than a duplicate. That is the safe half of
+  // the trade: the customer sees "the order changed, check it" over an order
+  // that exists, never a second order.
+  const deliveryDate =
+    rawDate !== "" &&
+    (await perf.step("settings", getSetting(supabase, "show_delivery_date")))
+      ? rawDate
+      : "";
   let outcome: Outcome;
   // Only the RPC round trip lives in this block. `redirect()` works by THROWING
   // NEXT_REDIRECT, so a redirect inside a try that catches everything would be
@@ -99,7 +125,11 @@ export async function submitOrder(formData: FormData) {
       "create_order",
       supabase.rpc("create_order", {
         p_lines: lines,
-        p_delivery_date: rawDate === "" ? undefined : rawDate,
+        // Absent, not null: supabase-js omits an `undefined` argument from the
+        // body and PostgREST then takes the function's own `default null`, which
+        // is the same stored value and the same request hash as a date the
+        // customer simply did not pick.
+        p_delivery_date: deliveryDate === "" ? undefined : deliveryDate,
         p_note: note === "" ? undefined : note,
         // Minted once per RENDER of the cart, so a double-submit of the same
         // page is idempotent by construction: create_order hands back the order

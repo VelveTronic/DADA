@@ -1483,6 +1483,30 @@ describe("prepareOrder", () => {
     expect(prepared.lines[0].unilot).toBe(0);
   });
 
+  /**
+   * The `show_delivery_date` switch, seen from the ERP end. With the picker
+   * hidden the order is stored with a null `delivery_date`, the claim RPC hands
+   * that null straight through the jsonb, and the pedido has to come out dated
+   * the Madrid business day — the FECPED semantics a paper order has always had.
+   * A throw here would strand the order mid-lease instead.
+   */
+  it("dates a pedido with no delivery date on the Madrid business day", async () => {
+    const { parent } = fakeParent([
+      [{ "": new Date(Date.UTC(2026, 7, 16)) }],
+      [{ TARCLI: 1, TIPIVACLI: "N", regiva: "", FORPAG: "", PRIPAG: 0, NUMPAG: 0, CALENV: "", CAL2: "", CODPOSENV: "", TIPPOR: "" }],
+      [{ T: "G", POSMAT: 1 }],
+      [{ C: "N", A: "G", TPCIVA: 10 }],
+      [{ DES: "ARROZ", PRECOS: 1, T: "G", UNILOT: 0, UNI: "KG" }],
+      [],
+    ]);
+    const prepared = await prepareOrder(
+      parent,
+      cfg,
+      claimedOrder({ delivery_date: null }),
+    );
+    expect(prepared.fecent.toISOString()).toBe("2026-08-16T00:00:00.000Z");
+  });
+
   it("multiplies cajas into base units, and asks stolot for those", async () => {
     const { parent, calls } = fakeParent([
       [{ "": new Date(Date.UTC(2026, 7, 16)) }],

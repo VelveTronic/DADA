@@ -12,7 +12,8 @@ import { SettingsForm } from "./settings-form";
 export const dynamic = "force-dynamic";
 
 /**
- * 项目设置 — the owner's switches. Today: whether customers see prices.
+ * 项目设置 — the owner's switches. Today: whether customers see prices, and
+ * whether checkout offers a delivery-date picker.
  *
  * Owner only, and the redirect is what makes the nav entry's absence honest: a
  * manager who types the URL lands back on the staff home rather than on a page
@@ -38,14 +39,24 @@ export default async function StaffSettingsPage({
   const perf = perfRun(`/${locale}/staff/ajustes`);
   const { supabase, pendingStaff } = await beginStaff(locale);
 
-  // The switch's current value goes out beside the staff row rather than behind
-  // it. Nothing is relaxed by that: `portal_settings_read` opens this row to
-  // EVERY authenticated caller — customer pages read the same one — so it is not
-  // a privilege the owner gate below is protecting. What the gate protects is
-  // the form, and it still fires before any of it is rendered.
-  const [staffUser, showPrices] = await Promise.all([
+  // The switches' current values go out beside the staff row rather than behind
+  // it. Nothing is relaxed by that: `portal_settings_read` opens these rows to
+  // EVERY authenticated caller — customer pages read the same ones — so it is
+  // not a privilege the owner gate below is protecting. What the gate protects
+  // is the forms, and it still fires before any of them is rendered.
+  //
+  // Two reads, one round: `perf.step` wraps the PAIR, so the page line keeps
+  // saying what the settings cost this render rather than growing a timing per
+  // switch as the registry grows.
+  const [staffUser, [showPrices, showDeliveryDate]] = await Promise.all([
     finishStaff(pendingStaff, locale),
-    perf.step("settings", getSetting(supabase, "show_prices")),
+    perf.step(
+      "settings",
+      Promise.all([
+        getSetting(supabase, "show_prices"),
+        getSetting(supabase, "show_delivery_date"),
+      ]),
+    ),
   ]);
   // The owner gate comes BEFORE perf.end(): a redirected request must print no
   // page line, and "a manager on an owner-only page" is the README's own example.
@@ -85,14 +96,32 @@ export default async function StaffSettingsPage({
         </p>
       )}
 
+      {/* One card per switch, each with its own 保存. The banner above is
+          shared because a save redirects here with a single `?result=` — which
+          is honest: only one form can be submitted at a time. */}
       <section className={`${GLASS_CARD} mt-6 p-5`}>
         <h2 className="font-medium">{t("pricesTitle")}</h2>
         <SettingsForm
           locale={locale}
-          showPrices={showPrices}
+          settingKey="show_prices"
+          checked={showPrices}
           labels={{
-            showPrices: t("showPrices"),
-            showPricesHint: t("showPricesHint"),
+            label: t("showPrices"),
+            hint: t("showPricesHint"),
+            save: t("save"),
+          }}
+        />
+      </section>
+
+      <section className={`${GLASS_CARD} mt-6 p-5`}>
+        <h2 className="font-medium">{t("deliveryDateTitle")}</h2>
+        <SettingsForm
+          locale={locale}
+          settingKey="show_delivery_date"
+          checked={showDeliveryDate}
+          labels={{
+            label: t("showDeliveryDate"),
+            hint: t("showDeliveryDateHint"),
             save: t("save"),
           }}
         />

@@ -259,6 +259,9 @@
       "pricesTitle": "价格显示",
       "showPrices": "显示商品价格",
       "showPricesHint": "关闭后客户端不再显示任何价格，员工后台不受影响。",
+      "deliveryDateTitle": "送货日期",
+      "showDeliveryDate": "允许客户选择送货日期",
+      "showDeliveryDateHint": "关闭后下单页不再显示送货日期，新订单按下单当天发往 ERP；已经选过日期的订单不受影响。",
       "save": "保存设置",
       "results": {
         "ok": "设置已保存",

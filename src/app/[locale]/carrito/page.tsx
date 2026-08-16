@@ -82,11 +82,13 @@ export default async function CartPage({
   const ids = Object.keys(cart);
 
   // ONE round: the restaurant's profile row (already in flight from the guard),
-  // the cart's lines and the owner's price switch. None of the three needs
-  // anything from the other two — the line ids come from the cookie above — so
-  // a cart page costs one trip to the database however full it is. An empty cart
-  // has no products query to make, so that half resolves to null.
-  const [portalUser, productResult, showPrices] = await Promise.all([
+  // the cart's lines and the owner's two switches. None of them needs anything
+  // from the others — the line ids come from the cookie above — so a cart page
+  // costs one trip to the database however full it is. An empty cart has no
+  // products query to make, so that half resolves to null. The settings pair
+  // shares one `perf.step` for the same reason the owner page's does: the line
+  // reports what the switches cost, not one timing per switch.
+  const [portalUser, productResult, [showPrices, showDeliveryDate]] = await Promise.all([
     finishCompanyUser(pendingUser, locale),
     // No is_current_variant filter, unlike the catalog: a line already in the
     // cart has to resolve so it can be shown and removed, even once the product
@@ -108,7 +110,13 @@ export default async function CartPage({
             .in("id", ids),
         )
       : Promise.resolve(null),
-    perf.step("settings", getSetting(supabase, "show_prices")),
+    perf.step(
+      "settings",
+      Promise.all([
+        getSetting(supabase, "show_prices"),
+        getSetting(supabase, "show_delivery_date"),
+      ]),
+    ),
   ]);
   perf.end();
   if (productResult?.error)
@@ -348,25 +356,34 @@ export default async function CartPage({
             <input type="hidden" name="client_token" value={clientToken} />
             <h2 className="text-lg font-semibold">{t("checkout")}</h2>
 
-            <div className="mt-4 grid gap-4 sm:grid-cols-2">
-              <div>
-                <label
-                  htmlFor="delivery_date"
-                  className="block text-sm text-muted"
-                >
-                  {t("deliveryDate")}
-                </label>
-                <input
-                  id="delivery_date"
-                  type="date"
-                  name="delivery_date"
-                  // The same window create_order enforces, computed on Madrid's
-                  // calendar rather than the browser's.
-                  min={today}
-                  max={addDays(today, DELIVERY_WINDOW_DAYS)}
-                  className={`mt-1 w-full ${FIELD}`}
-                />
-              </div>
+            {/* With the date switch off the note is the only field left, so the
+                two-column grid goes with the picker: a lone textarea stranded in
+                the left half of a desktop card looks like something failed to
+                render, and `submitOrder` refuses a posted date in that state
+                anyway (a stale tab is the only thing that can send one). */}
+            <div
+              className={`mt-4 grid gap-4 ${showDeliveryDate ? "sm:grid-cols-2" : ""}`}
+            >
+              {showDeliveryDate && (
+                <div>
+                  <label
+                    htmlFor="delivery_date"
+                    className="block text-sm text-muted"
+                  >
+                    {t("deliveryDate")}
+                  </label>
+                  <input
+                    id="delivery_date"
+                    type="date"
+                    name="delivery_date"
+                    // The same window create_order enforces, computed on Madrid's
+                    // calendar rather than the browser's.
+                    min={today}
+                    max={addDays(today, DELIVERY_WINDOW_DAYS)}
+                    className={`mt-1 w-full ${FIELD}`}
+                  />
+                </div>
+              )}
               <div>
                 <label htmlFor="note" className="block text-sm text-muted">
                   {t("note")}

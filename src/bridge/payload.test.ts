@@ -104,8 +104,20 @@ describe("resolveFecent", () => {
     expect(resolveFecent("2025-12-31", today)).toBe(today);
   });
 
+  /**
+   * The `show_delivery_date` switch's whole ERP contract. With the picker off,
+   * checkout stores a null `delivery_date` and `bridge_claim_confirmed` carries
+   * that null through the jsonb untouched — so this fallback is what dates the
+   * pedido, and it must be the Madrid business day (FECPED semantics) rather
+   * than a throw that would strand the order mid-lease.
+   *
+   * `undefined` is pinned beside `null` because the field is optional in the
+   * TYPE as well: a claim payload that predates the column, or one whose key
+   * never arrived, reaches here as `undefined` and must not be a crash either.
+   */
   it("falls back to Madrid today when the order carries no delivery date", () => {
     expect(resolveFecent(null, today)).toBe(today);
+    expect(resolveFecent(undefined, today)).toBe(today);
     expect(resolveFecent("", today)).toBe(today);
   });
 

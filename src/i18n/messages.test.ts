@@ -5,7 +5,7 @@ import {
   ORDER_STATUSES,
 } from "@/lib/orders";
 import { PROFILE_ERRORS } from "@/lib/profile";
-import { SETTINGS_ERRORS } from "@/lib/settings";
+import { SETTING_KEYS, SETTINGS_ERRORS } from "@/lib/settings";
 import { STAFF_ROLES, USER_ADMIN_ERRORS } from "@/lib/user-admin";
 import es from "../../messages/es.json";
 import zh from "../../messages/zh.json";
@@ -65,6 +65,28 @@ describe("translations", () => {
     for (const key of [...SETTINGS_ERRORS, "ok"]) {
       expect(zhResults[key], `zh staff.settings.results.${key}`).toBeTypeOf("string");
       expect(esResults[key], `es staff.settings.results.${key}`).toBeTypeOf("string");
+    }
+  });
+
+  /**
+   * Every switch on /staff/ajustes needs a label and a hint in both languages.
+   * The registry key is snake_case and the message key is its camelCase twin
+   * (`show_delivery_date` → `showDeliveryDate` + `showDeliveryDateHint`), so
+   * adding a setting without writing its strings fails HERE — rather than
+   * drawing the raw `staff.settings.showWhatever` token on the owner's page,
+   * next to a switch that changes what every restaurant sees.
+   */
+  it("carries a label and a hint for every registered setting", () => {
+    const camel = (key: string) =>
+      key.replace(/_(.)/g, (_, char: string) => char.toUpperCase());
+    const zhSettings: Record<string, unknown> = zh.staff.settings;
+    const esSettings: Record<string, unknown> = es.staff.settings;
+    for (const key of SETTING_KEYS) {
+      const label = camel(key);
+      expect(zhSettings[label], `zh staff.settings.${label}`).toBeTypeOf("string");
+      expect(esSettings[label], `es staff.settings.${label}`).toBeTypeOf("string");
+      expect(zhSettings[`${label}Hint`], `zh staff.settings.${label}Hint`).toBeTypeOf("string");
+      expect(esSettings[`${label}Hint`], `es staff.settings.${label}Hint`).toBeTypeOf("string");
     }
   });
 

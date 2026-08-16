@@ -12,13 +12,13 @@ import type { Database } from "@/lib/supabase/database.types";
  * which is what stops a crafted POST from writing rows the UI would then have to
  * defend itself against.
  *
- * **Everything here fails OPEN.** `show_prices` decides whether a restaurant
- * sees any euro amount at all, so every path that cannot produce an answer —
- * no row, a jsonb value of the wrong shape, a query that errored, a database
- * that is simply down — returns the DEFAULT, which is `true`. The failure mode
- * that matters is not "a hidden price leaked"; it is "the catalogue silently
- * stopped showing prices to every restaurant because one SELECT timed out", and
- * that must not be reachable from here.
+ * **Everything here fails OPEN.** Every setting is a switch that HIDES part of
+ * the portal, and each one defaults to `true` — show it. So every path that
+ * cannot produce an answer — no row, a jsonb value of the wrong shape, a query
+ * that errored, a database that is simply down — returns the DEFAULT. The
+ * failure mode that matters is not "a hidden price leaked"; it is "the catalogue
+ * silently stopped showing prices to every restaurant because one SELECT timed
+ * out", and that must not be reachable from here.
  *
  * The parsing is pure and tested; the read is a four-line wrapper around it, so
  * the interesting half of this file can be exercised without a database.
@@ -40,12 +40,20 @@ type SettingSpec = BooleanSetting;
  * `boolean` — under `as const` it would narrow to `true` and `SettingValue`
  * would then promise a value that can never be false.
  *
- * `show_prices: true` is the owner's decision, recorded twice on purpose: here,
- * and as the seeded row in the migration. The two agree, and if the row ever
+ * Both defaults are the owner's decision, recorded twice on purpose: here, and
+ * as the seeded rows in the migrations. The two agree, and if a row ever
  * disappears this one still answers.
+ *
+ * `show_delivery_date` decides whether the CHECKOUT offers a delivery-date
+ * picker at all. Off, the customer chooses nothing and the order is stored with
+ * a null `delivery_date`, which the bridge already reads as "no date given" and
+ * resolves to the Madrid business day (`resolveFecent`). What the switch hides
+ * is the PICKER, never a date an order actually carries: an order placed while
+ * it was on keeps its date, and every screen keeps showing it.
  */
 export const SETTINGS = {
   show_prices: { type: "boolean", default: true },
+  show_delivery_date: { type: "boolean", default: true },
 } satisfies Record<string, SettingSpec>;
 
 export type SettingKey = keyof typeof SETTINGS;
@@ -66,6 +74,7 @@ export type SettingValue<K extends SettingKey = SettingKey> =
  */
 export const SETTINGS_DEFAULTS: { [K in SettingKey]: SettingValue<K> } = {
   show_prices: SETTINGS.show_prices.default,
+  show_delivery_date: SETTINGS.show_delivery_date.default,
 };
 
 /** Everything that can go wrong writing a setting, as a closed list of codes. */

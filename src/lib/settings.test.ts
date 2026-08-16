@@ -15,10 +15,11 @@ import {
 } from "./settings";
 
 /**
- * The whole point of these tests is the fail-open rule: `show_prices` decides
- * whether a restaurant sees any price at all, so the interesting cases are the
- * broken ones — a missing row, a jsonb value of the wrong shape, a SELECT that
- * errored — and every one of them has to answer `true`.
+ * The whole point of these tests is the fail-open rule: these switches decide
+ * whether a restaurant sees any price at all and whether it may choose a
+ * delivery date, so the interesting cases are the broken ones — a missing row, a
+ * jsonb value of the wrong shape, a SELECT that errored — and every one of them
+ * has to answer with the setting's DEFAULT.
  *
  * The only case that may answer `false` is a row that literally holds the jsonb
  * boolean `false`, which is what the owner's toggle writes.
@@ -45,26 +46,38 @@ function fakeClient(outcome: { data: { value: unknown } | null; error: unknown }
   } as unknown as SettingsClient;
 }
 
-describe("parseSettingValue — show_prices", () => {
-  const cases: Array<{ name: string; raw: unknown; expected: boolean }> = [
-    { name: "a missing row (undefined) falls back to the default", raw: undefined, expected: true },
-    { name: "a jsonb null falls back to the default", raw: null, expected: true },
-    { name: 'the string "false" is NOT false', raw: "false", expected: true },
-    { name: 'the string "true" is not a boolean either', raw: "true", expected: true },
-    { name: "the number 0 is not false", raw: 0, expected: true },
-    { name: "the number 1 is not true, it is malformed", raw: 1, expected: true },
-    { name: "an object is malformed", raw: { show: false }, expected: true },
-    { name: "an array is malformed", raw: [false], expected: true },
-    { name: "an empty string is malformed", raw: "", expected: true },
-    { name: "the boolean false is the one value that hides prices", raw: false, expected: false },
-    { name: "the boolean true shows prices", raw: true, expected: true },
+/**
+ * Run against EVERY registered key rather than against `show_prices` alone: the
+ * rule is the registry's, not one setting's, so a key added tomorrow inherits
+ * this suite instead of quietly getting none.
+ */
+describe.each(SETTING_KEYS)("parseSettingValue — %s", (key) => {
+  const fallback = SETTINGS_DEFAULTS[key];
+  const malformed: Array<{ name: string; raw: unknown }> = [
+    { name: "a missing row (undefined) falls back to the default", raw: undefined },
+    { name: "a jsonb null falls back to the default", raw: null },
+    { name: 'the string "false" is NOT false', raw: "false" },
+    { name: 'the string "true" is not a boolean either', raw: "true" },
+    { name: "the number 0 is not false", raw: 0 },
+    { name: "the number 1 is not true, it is malformed", raw: 1 },
+    { name: "an object is malformed", raw: { show: false } },
+    { name: "an array is malformed", raw: [false] },
+    { name: "an empty string is malformed", raw: "" },
   ];
 
-  for (const { name, raw, expected } of cases) {
+  for (const { name, raw } of malformed) {
     it(name, () => {
-      expect(parseSettingValue("show_prices", raw)).toBe(expected);
+      expect(parseSettingValue(key, raw)).toBe(fallback);
     });
   }
+
+  it("the boolean false is the one value that hides anything", () => {
+    expect(parseSettingValue(key, false)).toBe(false);
+  });
+
+  it("the boolean true shows it", () => {
+    expect(parseSettingValue(key, true)).toBe(true);
+  });
 });
 
 describe("getSetting", () => {
@@ -117,12 +130,33 @@ describe("getSetting", () => {
       expect(spy.mock.calls.length > 0).toBe(logs);
     });
   }
+
+  /**
+   * The reader is not `show_prices` with extra steps: the second switch reaches
+   * the same four chained calls and answers off its own row, and a stored
+   * `false` is what removes the delivery-date picker from every checkout.
+   */
+  it("reads the second switch off the same row shape", async () => {
+    await expect(
+      getSetting(fakeClient({ data: { value: false }, error: null }), "show_delivery_date"),
+    ).resolves.toBe(false);
+  });
+
+  it("shows the delivery-date picker when its row is missing", async () => {
+    await expect(
+      getSetting(fakeClient({ data: null, error: null }), "show_delivery_date"),
+    ).resolves.toBe(true);
+  });
 });
 
 describe("parseSettingKey", () => {
   const cases: Array<{ name: string; raw: unknown; ok: boolean }> = [
     { name: "the registered key", raw: "show_prices", ok: true },
     { name: "the registered key with whitespace", raw: "  show_prices  ", ok: true },
+    { name: "the second registered key", raw: "show_delivery_date", ok: true },
+    // A near miss is still a miss: the table takes any text, so only the
+    // registry stands between a typo'd hidden field and a row nothing reads.
+    { name: "a near miss of a registered key", raw: "show_delivery_dates", ok: false },
     { name: "an unknown key", raw: "drop_table", ok: false },
     { name: "a prototype property is not a key", raw: "toString", ok: false },
     { name: "a non-string", raw: 7, ok: false },
@@ -217,7 +251,7 @@ describe("parseToggleFormData — the hidden/checkbox pair", () => {
 
 describe("the registry", () => {
   it("lists exactly the keys it declares", () => {
-    expect(SETTING_KEYS).toEqual(["show_prices"]);
+    expect(SETTING_KEYS).toEqual(["show_prices", "show_delivery_date"]);
     for (const key of SETTING_KEYS) expect(isSettingKey(key)).toBe(true);
   });
 
@@ -230,6 +264,22 @@ describe("the registry", () => {
   /** Prices ON is the owner's decision; a silent flip of this default is a bug. */
   it("defaults show_prices to true", () => {
     expect(SETTINGS_DEFAULTS.show_prices).toBe(true);
+  });
+
+  /**
+   * …and so is the delivery-date picker. A default of `false` here would mean a
+   * portal that quietly stopped asking for a delivery date the day a settings
+   * row went missing, and every order after it going to the ERP dated today.
+   */
+  it("defaults show_delivery_date to true", () => {
+    expect(SETTINGS_DEFAULTS.show_delivery_date).toBe(true);
+  });
+
+  /** Fail-open is the registry's rule, not one entry's: every switch shows. */
+  it("defaults every switch to true", () => {
+    for (const key of SETTING_KEYS) {
+      expect(SETTINGS_DEFAULTS[key], key).toBe(true);
+    }
   });
 
   it("recognises every result code the action can redirect with", () => {
