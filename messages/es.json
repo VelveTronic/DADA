@@ -145,6 +145,7 @@
     },
     "shell": {
       "nav": "Navegación del panel",
+      "drawer": "Menú de administración",
       "breadcrumb": "Ruta de navegación",
       "openMenu": "Abrir el menú",
       "closeMenu": "Cerrar el menú"

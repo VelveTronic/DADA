@@ -149,6 +149,11 @@ export function UserMenu({
    *
    * The close is still deferred a microtask so React unmounts after the focus
    * change has settled rather than in the middle of dispatching it.
+   *
+   * A null `relatedTarget` — alt-tabbing away from the window, or a press on the
+   * panel's own dead space, which focuses nothing — closes too, deliberately: for
+   * a menu, close-on-doubt is the safe default, and both cases leave a panel
+   * nobody is looking at hanging over the page.
    */
   const onPanelFocusOut = (event: React.FocusEvent<HTMLDivElement>) => {
     const next = event.relatedTarget as Node | null;

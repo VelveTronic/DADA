@@ -277,30 +277,43 @@ export function StaffTopBar(props: SidebarProps) {
   }, [open, close]);
 
   return (
-    <div className="sticky top-0 z-40 border-b border-border bg-background/85 backdrop-blur-[14px] sm:hidden">
-      <div className="flex items-center gap-1 px-2 py-1">
-        <button
-          ref={triggerRef}
-          type="button"
-          aria-label={open ? t("shell.closeMenu") : t("shell.openMenu")}
-          aria-expanded={open}
-          aria-controls={open ? "staff-drawer" : undefined}
-          onClick={() => setOpen(!open)}
-          className={ICON_BTN}
-        >
-          <MenuIcon />
-        </button>
-        <Link
-          href={`/${locale}/staff`}
-          className="flex min-w-0 items-center gap-2"
-        >
-          <Mark />
-          <span className="truncate font-semibold tracking-tight">
-            {t("title")}
-          </span>
-        </Link>
+    <>
+      <div className="sticky top-0 z-40 border-b border-border bg-background/85 backdrop-blur-[14px] sm:hidden">
+        <div className="flex items-center gap-1 px-2 py-1">
+          <button
+            ref={triggerRef}
+            type="button"
+            aria-label={open ? t("shell.closeMenu") : t("shell.openMenu")}
+            aria-expanded={open}
+            aria-controls={open ? "staff-drawer" : undefined}
+            onClick={() => setOpen(!open)}
+            className={ICON_BTN}
+          >
+            <MenuIcon />
+          </button>
+          <Link
+            href={`/${locale}/staff`}
+            className="flex min-w-0 items-center gap-2"
+          >
+            <Mark />
+            <span className="truncate font-semibold tracking-tight">
+              {t("title")}
+            </span>
+          </Link>
+        </div>
       </div>
 
+      {/* SIBLINGS of the bar, and that is the whole point of the fragment above.
+          `backdrop-filter` on the bar makes it the containing block for any
+          `fixed` descendant — the same rule as `transform` — so a drawer nested
+          inside it resolved `inset-y-0` against a 52px strip: a 288×52 panel with
+          every row folded out of reach, on the one viewport where the drawer IS
+          the navigation. Out here the containing block is the viewport again,
+          because nothing between this and the initial containing block filters,
+          transforms or contains. `sm:hidden` on both is belt and braces: the
+          trigger is inside a bar that is already `display:none` from `sm` up, and
+          the effect above closes the drawer if the viewport crosses that line
+          while it is open. */}
       {open && (
         <>
           {/* Not a button and not in the tab order: Escape and the close control
@@ -308,15 +321,18 @@ export function StaffTopBar(props: SidebarProps) {
           <div
             aria-hidden="true"
             onClick={() => close(false)}
-            className="fixed inset-0 z-40 bg-ink/30"
+            className="fixed inset-0 z-40 bg-ink/30 sm:hidden"
           />
           <div
             id="staff-drawer"
             role="dialog"
-            aria-label={t("shell.nav")}
+            // Its OWN name, not the nav's: the `navigation` landmark inside it
+            // carries `shell.nav`, and a dialog announced with the same words as
+            // its only child is a dialog announced twice.
+            aria-label={t("shell.drawer")}
             // Opaque, not glass: a translucent panel over a dimmed page samples
             // the dimming and takes the label contrast down with it.
-            className="fixed inset-y-0 left-0 z-50 flex w-72 max-w-[85vw] flex-col border-r border-border bg-background shadow-xl"
+            className="fixed inset-y-0 left-0 z-50 flex w-72 max-w-[85vw] flex-col border-r border-border bg-background shadow-xl sm:hidden"
           >
             <div className="flex justify-end p-2 pb-0">
               <button
@@ -337,6 +353,6 @@ export function StaffTopBar(props: SidebarProps) {
           </div>
         </>
       )}
-    </div>
+    </>
   );
 }
