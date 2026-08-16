@@ -442,6 +442,12 @@ schtasks /change /tn "DADA Bridge Orders" /enable
 锁文件可能是上一轮崩溃留下的。桥接自己会在 30 分钟后接管过期的锁；等不及就停掉
 任务、删掉 `C:\dada\bridge\orders.lock`（日志里 `path=` 就是这个文件）、再启用。
 
+**日志里 `codart … is not weighed but has fractional qty …`（`BAD_QTY_STEP`）**
+这行商品是在**下单之后**才被标成称重的（或称重标志后来被关掉了），订单行上的
+快照和商品当前的标志对不上，桥接按快照拒收、整单不写。处理：在员工后台的
+确认队列里把这一行的数量**重新保存一次**——保存动作会把快照刷新成当前标志
+（2026-08-17 起），下一轮自动重新认领注入。连续多轮不消失再贴日志回来。
+
 **日志里 `mark_injected returned false — pedido exists, portal not updated`**
 ERP 里单子写成功了，门户没记上（租约过期或订单被人改过）。下一轮会自动重试并
 靠去重找回同一个 NUMPED，不会写出第二张 Pedido。连续多轮不消失才需要人工处理。
