@@ -94,6 +94,10 @@ LEASE_SECONDS=300
 配置错了会**立刻失败并说明是哪一项**（错误码形如 `MISSING_SUPABASE_URL`、
 `BAD_WINGEST_SERVER`），不会带着半个配置去写 ERP。
 
+> ⚠️ **配置失败是唯一不写心跳的失败**：没有 `SUPABASE_URL` 和密钥就没法往
+> `bridge_status` 写任何东西。这种情况下员工后台的卡片显示的是「未运行」，
+> 真正的原因只在服务器的 `bridge.log` 里——见第 ⑦ 节。
+
 ### ⚠️ `WINGEST_SERVER`：主机名与端口，二选一
 
 两种写法**互斥**，写成一条会踩坑：
@@ -119,9 +123,9 @@ IPAll → TCP 端口），或者直接问 SQL：
 SELECT local_tcp_port FROM sys.dm_exec_connections WHERE session_id = @@SPID;
 ```
 
-> ⚠️ **配置失败是唯一不写心跳的失败**：没有 `SUPABASE_URL` 和密钥就没法往
-> `bridge_status` 写任何东西。这种情况下员工后台的卡片显示的是「未运行」，
-> 真正的原因只在服务器的 `bridge.log` 里——见第 ⑦ 节。
+结果显示 NULL 说明这条连接走的是共享内存或命名管道（在 ERP 机器本机用 SSMS 连
+`localhost` 时就是这样），不代表没有 TCP 端口——改用上面的配置管理器路径查，
+或用 `tcp:SERVER` 前缀强制走 TCP 再查一次。
 
 ---
 
