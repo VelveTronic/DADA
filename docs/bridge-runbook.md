@@ -303,7 +303,7 @@ GO
 -- 3) 只读：客户、商品、批次、税率、操作员、单据
 GRANT SELECT ON dbo.clientes      TO dada_bridge;  -- codcli 校验、客户抬头
 GRANT SELECT ON dbo.articulo      TO dada_bridge;  -- 行的商品数据 / price-sync 读价
-GRANT SELECT ON dbo.stolot        TO dada_bridge;  -- FIFO 批次（未过期、VENDIBLE=1）
+GRANT SELECT ON dbo.stolot        TO dada_bridge;  -- FIFO 批次（未过期、VENDIBLE=1、真实可用量=CANT−开放pedido占用）
 GRANT SELECT ON dbo.tipivaar      TO dada_bridge;  -- 税槽 POSMAT
 GRANT SELECT ON dbo.iva           TO dada_bridge;  -- 税率（TIPIVACLI × TIPIVAART）
 GRANT SELECT ON dbo.susuario      TO dada_bridge;  -- BRIDGE_ERP_USER 必须存在
