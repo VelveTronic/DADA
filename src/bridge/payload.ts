@@ -40,7 +40,16 @@ export interface ClaimedOrderItem {
   /** Per BASE unit, never per caja — this is the ERP's PREVEN. */
   unit_price_cents: number;
   line_total_cents: number;
-  is_weighed: boolean;
+  /**
+   * Sold by weight: `qty` is kilos rather than a case count.
+   *
+   * Optional in the TYPE only, exactly as `units_per_case` is: the column is
+   * `not null default false` and `bridge_claim_confirmed` has always emitted it.
+   * Absent therefore means a malformed payload rather than an old one, and it
+   * becomes `false` — the value every line carried before weighed goods existed,
+   * and the one that leaves CAJ reading the way it always has.
+   */
+  is_weighed?: boolean;
   is_erp_excluded: boolean;
 }
 
@@ -61,8 +70,10 @@ export interface ClaimedOrder {
 /** A validated line, carried in BOTH units: cents to add up, euros to store. */
 export interface PayloadLine {
   codart: string;
-  /** CAJAS, the way the customer ordered — `pedclili.CAJ`. */
+  /** CAJAS, the way the customer ordered — `pedclili.CAJ` unless weighed. */
   qty: number;
+  /** Sold by weight: `qty` is kilos, and the injector sends CAJ=0. */
+  isWeighed: boolean;
   /** Base units per caja; the injector multiplies to get CANPED/CANSER. */
   unitsPerCase: number;
   unitPriceCents: number;
@@ -225,9 +236,33 @@ export function lineParams(item: ClaimedOrderItem): PayloadLine {
       `codart ${codart} has units_per_case ${item.units_per_case}`,
     );
   }
+  // Absent is the documented default; anything that is not a boolean is a
+  // payload this bridge does not understand, and guessing which way it meant
+  // would decide whether CAJ says 5 cajas or 0 on a 5.2 kg line.
+  if (item.is_weighed !== undefined && typeof item.is_weighed !== "boolean") {
+    throw new PayloadError(
+      "BAD_WEIGHED",
+      `codart ${codart} has a non-boolean is_weighed ${JSON.stringify(item.is_weighed)}`,
+    );
+  }
+  const isWeighed = item.is_weighed ?? false;
+  // A fraction of a caja is not a thing that can be picked, packed or converted,
+  // and no write path in the portal can produce one: `create_order` and
+  // `staff_update_order_line` both raise BAD_QTY_STEP for a fractional quantity
+  // on a product nobody has flagged as weighed. A claim carrying one means the
+  // row was changed by something other than those two, so this order fails
+  // cleanly and loudly here instead of being silently truncated into a CAJ the
+  // customer never ordered.
+  if (!isWeighed && !Number.isInteger(item.qty)) {
+    throw new PayloadError(
+      "BAD_QTY_STEP",
+      `codart ${codart} is not weighed but has fractional qty ${item.qty}`,
+    );
+  }
   return {
     codart,
     qty: item.qty,
+    isWeighed,
     unitsPerCase,
     unitPriceCents: item.unit_price_cents,
     lineTotalCents: item.line_total_cents,

@@ -166,6 +166,7 @@ describe("lineParams", () => {
     expect(lineParams(item())).toEqual({
       codart: "4-007",
       qty: 5,
+      isWeighed: false,
       unitsPerCase: 1,
       unitPriceCents: 1999,
       lineTotalCents: 9995,
@@ -208,6 +209,52 @@ describe("lineParams", () => {
     const line = lineParams(item({ qty: 1.235, is_weighed: true, line_total_cents: 2469 }));
     expect(line.qty).toBe(1.235);
     expect(line.lineTotalEuros).toBe(24.69);
+  });
+
+  it("carries the weighed flag through, so the injector can zero CAJ", () => {
+    expect(lineParams(item({ qty: 5.2, is_weighed: true })).isWeighed).toBe(true);
+    expect(lineParams(item()).isWeighed).toBe(false);
+  });
+
+  it("defaults an absent weighed flag to false, like the factor before it", () => {
+    const withoutFlag = item();
+    delete withoutFlag.is_weighed;
+    expect(lineParams(withoutFlag).isWeighed).toBe(false);
+  });
+
+  it("refuses a weighed flag that is not a boolean", () => {
+    // Guessing would decide whether a 5.2 kg line writes CAJ=0 or CAJ=5.
+    const bad = { is_weighed: "true" } as unknown as Partial<ClaimedOrderItem>;
+    expect(() => lineParams(item(bad))).toThrow(PayloadError);
+    const error = (() => {
+      try {
+        lineParams(item(bad));
+      } catch (thrown) {
+        return thrown as PayloadError;
+      }
+    })();
+    expect(error?.code).toBe("BAD_WEIGHED");
+  });
+
+  /**
+   * No portal write path can produce this: `create_order` and
+   * `staff_update_order_line` both raise BAD_QTY_STEP for a fraction on a
+   * product nobody flagged as weighed. A claim carrying one means the row was
+   * changed by something else, and the old code would have TRUNCATED it into
+   * `CAJ` — 2.5 cajas silently becoming 2 on the albarán.
+   */
+  it("refuses a fractional quantity on a line that is not weighed", () => {
+    expect(() => lineParams(item({ qty: 2.5 }))).toThrow(PayloadError);
+    const error = (() => {
+      try {
+        lineParams(item({ qty: 2.5 }));
+      } catch (thrown) {
+        return thrown as PayloadError;
+      }
+    })();
+    expect(error?.code).toBe("BAD_QTY_STEP");
+    // …and the same quantity is perfectly fine once the product IS weighed.
+    expect(lineParams(item({ qty: 2.5, is_weighed: true })).qty).toBe(2.5);
   });
 
   it("trims the codart the way every ERP lookup does", () => {

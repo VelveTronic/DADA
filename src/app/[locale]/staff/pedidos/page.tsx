@@ -367,8 +367,14 @@ export default async function StaffOrdersPage({
                                   kg: t("kg"),
                                 }}
                               />
+                              {/* The packaging fact the read-only row states,
+                                  kept on the editable one: `CAJA×24` is what
+                                  makes the price beside it legible, and 待确认
+                                  is the tab where somebody is deciding a
+                                  quantity against it. */}
                               <span className="text-xs text-muted tabular-nums">
-                                × {perCase}
+                                {unitLabel(line.unit, line.units_per_case)} ×{" "}
+                                {perCase}
                               </span>
                             </>
                           ) : (

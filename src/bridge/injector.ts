@@ -365,21 +365,53 @@ export function baseUnitsForLine(qty: number, unitsPerCase: number): number {
 }
 
 /**
- * SUBTOT/NETO in integer cents: base units times the per-base-unit price.
+ * SUBTOT/NETO in integer cents: cajas times the factor times the per-base-unit
+ * price, in EXACT integer arithmetic.
  *
  * The portal computed the same product when it stored the line
- * (`round(qty x units_per_case x unit_price_cents)` in `create_order`), and
- * `contractChecks` refuses to commit a pedido where the two disagree. This is
- * the whole reason the caja factor can be trusted end to end: cents times an
- * integer is exact, so "equal" means equal, not equal-to-the-cent.
+ * (`round(p_qty * v_units * v_price)` in `create_order` and
+ * `staff_update_order_line`), and `contractChecks` refuses to commit a pedido
+ * where the two disagree. This is the whole reason the caja factor can be
+ * trusted end to end: "equal" means equal, not equal-to-the-cent.
  *
- * `Math.round` is a NO-OP for every quantity a restaurant can order — integer
- * cajas times an integer factor times integer cents is an integer. It is here so
- * the future weighed line (fractional qty, factor 1) reproduces `create_order`'s
- * own rounding rather than drifting half a cent away from it.
+ * **Why this is not `Math.round(qtyBase * unitPriceCents)`.** Postgres computes
+ * that product in `numeric` — exact decimal — and rounds HALF AWAY FROM ZERO.
+ * The obvious double version agrees for every whole-caja line, and disagreed
+ * with it on exact half-cent ties as soon as weighed goods made a fractional
+ * quantity reachable: 1.005 kg at 1.00 € is exactly 100.5 cents, which Postgres
+ * stores as 101, while `1.005 * 100` in binary floating point is
+ * 100.49999999999999 and rounds DOWN to 100. One cent apart, and fatal rather
+ * than cosmetic — the SUBTOT contract check would refuse that order, and refuse
+ * it identically on every lease retry, so the line would sit in the queue
+ * forever instead of reaching Wingest.
+ *
+ * So the fraction never becomes a fraction. `qty` carries at most three decimals
+ * (`numeric(10,3)`, and the portal validates the scale on both write paths), so
+ * `qty x 1000` is an integer; scaling it up FIRST makes every later step exact
+ * integer arithmetic, and the single division at the end lands on a value the
+ * double format holds exactly whenever it matters. `n + 0.5` is exactly
+ * representable, so `Math.round` breaks the tie upwards — which is Postgres's
+ * half-away-from-zero for the positive amounts this function can ever see.
+ *
+ * **The magnitude is bounded well inside `Number.MAX_SAFE_INTEGER` (2^53).**
+ * `qtyMilli` is at most 9,999,999 (the 9,999-caja cap the cart and
+ * `validateLineQty` both enforce, at three decimals); `qty x unitsPerCase` is
+ * capped at 1,000,000 by both write RPCs, so `qtyMilli x unitsPerCase` is at
+ * most 1e9; and a line whose total does not fit `line_total_cents` (int4, so
+ * under 2.15e9) could not have been stored in the first place. `totalMilli`
+ * therefore stays under about 2.2e12, four orders of magnitude below the point
+ * where an integer stops being exact. Anything that somehow got past all of
+ * that would still not commit: the SUBTOT check compares this against the
+ * portal's own exact number and rolls the order back.
  */
-export function lineSubtotalCents(qtyBase: number, unitPriceCents: number): number {
-  return Math.round(qtyBase * unitPriceCents);
+export function lineSubtotalCents(
+  qty: number,
+  unitsPerCase: number,
+  unitPriceCents: number,
+): number {
+  const qtyMilli = Math.round(qty * 1000);
+  const totalMilli = qtyMilli * unitsPerCase * unitPriceCents;
+  return Math.round(totalMilli / 1000);
 }
 
 /** NUMLIN counts in fives, the way Wingest's own UI numbers lines. */
@@ -667,8 +699,13 @@ export function buildHeaderParams(input: HeaderInput): ParamMap {
 /** One line, already resolved against `articulo` and `stolot`. */
 export interface PreparedLine {
   codart: string;
-  /** CAJAS, as the customer ordered them — this is `pedclili.CAJ`. */
+  /**
+   * CAJAS, as the customer ordered them. This is `pedclili.CAJ` on a
+   * non-weighed line, and NOT the CAJ of a weighed one — see `buildLineParams`.
+   */
   qty: number;
+  /** Sold by weight: `qty` is kilos, and there are no cajas to count. */
+  isWeighed: boolean;
   /** BASE units: `qty x units_per_case` — CANPED, CANSER, and the lot pick. */
   qtyBase: number;
   /** PREVEN in integer cents, per BASE unit. Kept for the SUBTOT invariant. */
@@ -723,11 +760,18 @@ export function buildLineParams(input: LineInput): ParamMap {
     T: P.text(line.tipivaart),
     UNI: P.text(line.unidad),
     // UNILOT is the ERP's own packaging number, read from `articulo` (the
-    // portal's `units_per_case` is a nightly copy of it); CAJ is the case count
-    // the customer ordered, taken straight from the quantity and never divided
-    // back out of it.
+    // portal's `units_per_case` is a nightly copy of it).
+    //
+    // CAJ is the case count the customer ordered, taken straight from the
+    // quantity and never divided back out of it — EXCEPT on a weighed line,
+    // where there is no case count to take. There `qty` is kilos, and CAJ is 0:
+    // the kilos ride on CANPED/CANSER (@QTY) and Wingest's own UI leaves Cajas
+    // at 0 on a KILO line, so this is the shape its pedido→albarán conversion
+    // already expects. `P.int` is an `[int]` parameter and would otherwise
+    // TRUNCATE the kilos into a case count — 5.2 kg silently becoming 5 cajas,
+    // and 0.5 kg becoming 0 — which is a lie in a column staff read.
     UNILOT: P.float(line.unilot),
-    CAJ: P.int(line.qty),
+    CAJ: P.int(line.isWeighed ? 0 : line.qty),
     LOT: P.text(line.codlot),
     FCAD: P.datetime(line.feccad),
     FECENT: P.date(input.fecent),
@@ -1330,10 +1374,17 @@ export async function prepareOrder(
     // and asking for 2 would happily pick a lot with 3 bottles left on it.
     const qtyBase = baseUnitsForLine(line.qty, line.unitsPerCase);
     const lot = await pickLot(parent, cfg, line.codart, qtyBase);
-    const lineTotalCents = lineSubtotalCents(qtyBase, line.unitPriceCents);
+    // The three operands, not the product: `qtyBase` is already a double and the
+    // cent has to be decided on exact integers. See `lineSubtotalCents`.
+    const lineTotalCents = lineSubtotalCents(
+      line.qty,
+      line.unitsPerCase,
+      line.unitPriceCents,
+    );
     lines.push({
       codart: line.codart,
       qty: line.qty,
+      isWeighed: line.isWeighed,
       qtyBase,
       unitPriceCents: line.unitPriceCents,
       prevenEuros: line.unitPriceEuros,

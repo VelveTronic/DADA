@@ -179,6 +179,7 @@ function preparedLine(overrides: Partial<PreparedLine> = {}): PreparedLine {
   return {
     codart: "4-007",
     qty: 5,
+    isWeighed: false,
     qtyBase: 5,
     unitPriceCents: 1999,
     prevenEuros: 19.99,
@@ -441,7 +442,7 @@ describe("pedclili quantities vs the v3.2 reference — the 2026-08-16 caja deci
     expect(params.SUB.value).toBe(46.08);
     // The identity that ties the two systems: base units x PREVEN = SUBTOT, and
     // the portal's per-caja price (23.04) x cajas is the same 46.08.
-    expect(lineSubtotalCents(48, 96)).toBe(4608);
+    expect(lineSubtotalCents(2, 24, 96)).toBe(4608);
     expect(2 * 96 * 24).toBe(4608);
   });
 
@@ -449,6 +450,91 @@ describe("pedclili quantities vs the v3.2 reference — the 2026-08-16 caja deci
     // They are the same number in a synced catalogue (price-sync copies UNILOT
     // into units_per_case nightly), but the column belongs to `articulo`.
     expect(params.UNILOT.value).toBe(24);
+  });
+});
+
+/**
+ * The weighed line, decided 2026-08-17 after review: CAJ is 0, not a truncated
+ * kilo count.
+ *
+ * `@CAJ` is an `[int]` parameter, so `P.int(5.2)` does not fail — it TRUNCATES,
+ * and a half-kilo line would have gone in as `CAJ=0` while a 5.2 kg line went in
+ * as `CAJ=5`, which reads on the albarán as five cases of lemons. The kilos are
+ * already carried exactly by CANPED/CANSER (`@QTY`), and Wingest's own UI leaves
+ * Cajas at 0 on a KILO line, so 0 is both the honest number and the shape its
+ * pedido→albarán conversion already expects.
+ */
+describe("pedclili on a weighed line", () => {
+  const weighed = (overrides: Partial<PreparedLine> = {}) =>
+    preparedLine({
+      codart: "F-003",
+      qty: 5.2,
+      isWeighed: true,
+      qtyBase: 5.2,
+      unitPriceCents: 139,
+      prevenEuros: 1.39,
+      lineTotalEuros: 7.23,
+      lineTotalCents: 723,
+      portalLineTotalCents: 723,
+      unilot: 1,
+      unidad: "KG",
+      ...overrides,
+    });
+
+  const params = buildLineParams({
+    can: "B",
+    eje: 26,
+    numped: 501,
+    numlin: 5,
+    codcli: 3,
+    alm: "00001",
+    fecent: new Date(Date.UTC(2026, 7, 20)),
+    idlinea: 700100,
+    line: weighed(),
+  });
+
+  it("sends the kilos as CANPED/CANSER and 0 cajas", () => {
+    expect(params.QTY.value).toBe(5.2);
+    expect(params.CAJ.value).toBe(0);
+  });
+
+  it("does not truncate the kilos into a case count", () => {
+    // What `P.int(line.qty)` would have written, spelled out so a future edit
+    // that reintroduces it fails here.
+    expect(params.CAJ.value).not.toBe(5);
+    expect(params.CAJ.value).not.toBe(Math.trunc(5.2));
+  });
+
+  it("keeps CAJ at 0 for a sub-kilo line too", () => {
+    // The case truncation was already silently producing this number for half a
+    // kilo; now it is the number on purpose, and CANSER still carries the 0.5.
+    const half = buildLineParams({
+      can: "B",
+      eje: 26,
+      numped: 501,
+      numlin: 10,
+      codcli: 3,
+      alm: "00001",
+      fecent: new Date(Date.UTC(2026, 7, 20)),
+      idlinea: 700101,
+      line: weighed({ qty: 0.5, qtyBase: 0.5, lineTotalCents: 70 }),
+    });
+    expect(half.QTY.value).toBe(0.5);
+    expect(half.CAJ.value).toBe(0);
+  });
+
+  it("leaves a non-weighed line's CAJ exactly as it was", () => {
+    expect(buildLineParams({
+      can: "B",
+      eje: 26,
+      numped: 501,
+      numlin: 5,
+      codcli: 3,
+      alm: "00001",
+      fecent: new Date(Date.UTC(2026, 7, 20)),
+      idlinea: 700100,
+      line: cajaLine(),
+    }).CAJ.value).toBe(2);
   });
 });
 
@@ -791,17 +877,49 @@ describe("baseUnitsForLine", () => {
 });
 
 describe("lineSubtotalCents", () => {
-  it("is base units times the per-base-unit price, exactly", () => {
-    expect(lineSubtotalCents(48, 96)).toBe(4608);
-    expect(lineSubtotalCents(5, 1999)).toBe(9995);
-    expect(lineSubtotalCents(240, 99)).toBe(23_760);
+  it("is cajas times the factor times the per-base-unit price, exactly", () => {
+    expect(lineSubtotalCents(2, 24, 96)).toBe(4608);
+    expect(lineSubtotalCents(5, 1, 1999)).toBe(9995);
+    expect(lineSubtotalCents(10, 24, 99)).toBe(23_760);
   });
 
   it("matches create_order's rounding for a fractional quantity", () => {
     // The portal stores `round(qty x units x price)`; this reproduces it rather
     // than drifting half a cent from the amount the customer was charged.
-    expect(lineSubtotalCents(1.235, 1999)).toBe(2469);
-    expect(lineSubtotalCents(0.5, 101)).toBe(51);
+    expect(lineSubtotalCents(1.235, 1, 1999)).toBe(2469);
+    expect(lineSubtotalCents(0.5, 1, 101)).toBe(51);
+    // The owner's own example: 柠檬 F-003 at 1.39 €/kg, weighed at 5.2 kg. The
+    // live database answered 723 for exactly this line (2026-08-16).
+    expect(lineSubtotalCents(5.2, 1, 139)).toBe(723);
+  });
+
+  /**
+   * The half-cent ties, which are the whole reason this function does not
+   * multiply doubles.
+   *
+   * Postgres computes `qty x units x price` in exact `numeric` and rounds HALF
+   * AWAY FROM ZERO, so each of these lines is stored one cent higher than the
+   * naive `Math.round(qtyBase * unitPriceCents)` produces — and one cent is
+   * enough for the SUBTOT contract check to refuse the order, on this run and
+   * on every lease retry after it. A weighed line that can never be injected is
+   * worse than a wrong one: it is invisible until somebody asks why a pedido
+   * from last Tuesday never reached Wingest.
+   */
+  it("rounds an exact half cent the way Postgres numeric does", () => {
+    expect(lineSubtotalCents(1.005, 1, 100)).toBe(101);
+    expect(lineSubtotalCents(4.1, 1, 15)).toBe(62);
+    expect(lineSubtotalCents(2.3, 1, 25)).toBe(58);
+    expect(lineSubtotalCents(0.145, 1, 100)).toBe(15);
+  });
+
+  it("is not the double arithmetic it replaced", () => {
+    // The bug, pinned: every one of these lands just BELOW the tie in binary
+    // floating point, so the old `Math.round(qtyBase * unitPriceCents)` rounded
+    // down and disagreed with the portal by a cent.
+    expect(Math.round(1.005 * 100)).toBe(100);
+    expect(Math.round(4.1 * 15)).toBe(61);
+    expect(Math.round(2.3 * 25)).toBe(57);
+    expect(Math.round(0.145 * 100)).toBe(14);
   });
 
   it("stays exact where multiplying euros would not", () => {
@@ -809,7 +927,21 @@ describe("lineSubtotalCents", () => {
     // cents it is 720, and 720/100 is exactly 7.2. This is why the invariant
     // compares CENTS and not the euro amounts the ERP columns hold.
     expect(240 * 0.03).not.toBe(7.2);
-    expect(lineSubtotalCents(240, 3) / 100).toBe(7.2);
+    expect(lineSubtotalCents(10, 24, 3) / 100).toBe(7.2);
+  });
+
+  it("stays exact at the caps the write paths enforce", () => {
+    // The magnitude bound in the doc comment, exercised rather than asserted.
+    // The largest quantity the cart can hold, at three decimals:
+    // 9,999,999 milli-cajas x 99 cents = 989,999,901 milli-cents = 989,999.901,
+    // which rounds to 990,000 and never stopped being an exact integer.
+    expect(lineSubtotalCents(9999.999, 1, 99)).toBe(990_000);
+    // …and the widest product the two write RPCs can let through — the 1e6 cap
+    // on `qty x units_per_case`, at a price that still fits int4 cents — is four
+    // orders of magnitude short of where a double stops counting exactly.
+    const widest = Math.round(1_000_000 * 1000) * 1 * 2000;
+    expect(Number.isSafeInteger(widest)).toBe(true);
+    expect(widest).toBeLessThan(Number.MAX_SAFE_INTEGER / 4000);
   });
 });
 
