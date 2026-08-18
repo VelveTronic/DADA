@@ -62,7 +62,7 @@ export function SettingsForm({
         />
         <span
           aria-hidden="true"
-          className="relative mt-0.5 inline-block h-6 w-11 shrink-0 rounded-full border border-border bg-white/70 transition-colors after:absolute after:top-1 after:left-1 after:h-4 after:w-4 after:rounded-full after:bg-muted after:transition-transform peer-checked:border-brand peer-checked:bg-brand peer-checked:after:translate-x-5 peer-checked:after:bg-white peer-focus-visible:ring-2 peer-focus-visible:ring-brand"
+          className="relative mt-0.5 inline-block h-6 w-11 shrink-0 rounded-full border border-border bg-surface-dim transition-colors after:absolute after:top-1 after:left-1 after:h-4 after:w-4 after:rounded-full after:bg-muted after:transition-transform peer-checked:border-brand peer-checked:bg-brand peer-checked:after:translate-x-5 peer-checked:after:bg-white peer-focus-visible:ring-2 peer-focus-visible:ring-brand"
         />
         <span className="min-w-0">
           <span className="block text-sm font-medium">{labels.label}</span>

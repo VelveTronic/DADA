@@ -62,7 +62,7 @@ type StaffRow = Pick<
  * column instead of stopping at it.
  */
 const ROW =
-  "-mx-2 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg px-2 py-2 text-sm transition-colors hover:bg-white/50";
+  "-mx-2 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg px-2 py-2 text-sm transition-colors hover:bg-surface-dim";
 
 /** Active = the account can sign in; inactive is this app's delete. */
 const BADGE = "rounded-md px-1.5 py-0.5 text-xs";

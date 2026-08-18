@@ -304,7 +304,7 @@ export default async function StaffOrdersPage({
               // the tint reach past the text column instead of stopping at it.
               <li
                 key={order.id}
-                className="-mx-2 rounded-lg px-2 py-3 transition-colors hover:bg-white/50"
+                className="-mx-2 rounded-lg px-2 py-3 transition-colors hover:bg-surface-dim"
               >
                 <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
                   <p className="font-medium">

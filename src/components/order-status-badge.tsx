@@ -20,7 +20,11 @@ import { isOrderStatus, type OrderStatus } from "@/lib/orders";
  */
 const STATUS_CLASS: Record<OrderStatus, string> = {
   submitted: "bg-brand-soft text-brand-ink",
-  confirmed: "bg-[#FFF4E6] text-[#B26A00]",
+  // The mockup's own amber ink is `#B26A00`, and at chip size — 12px, semibold,
+  // which is NORMAL text to WCAG, not large — it lands at 3.90:1 on this
+  // background and misses AA's 4.5:1. `#9A5C00` is the nearest darkening that
+  // clears it (4.95:1) on the mockup's unchanged `#FFF4E6`.
+  confirmed: "bg-[#FFF4E6] text-[#9A5C00]",
   processing: "bg-violet-100 text-violet-800",
   bridge_failed: "bg-red-100 text-red-800",
   injected: "bg-[#EEF2F7] text-[#3E5A78]",

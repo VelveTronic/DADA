@@ -179,7 +179,7 @@ export default async function StaffProductsPage({
                 return (
                   <tr
                     key={p.id}
-                    className={`align-top transition-colors hover:bg-white/50 ${
+                    className={`align-top transition-colors hover:bg-surface-dim ${
                       p.is_available ? "" : "opacity-50"
                     }`}
                   >
