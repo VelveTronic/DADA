@@ -29,34 +29,62 @@ import type { CustomerCatalogProduct } from "@/lib/supabase/public.types";
  * the other two tracks left, and `line-clamp-2` caps what overflows vertically.
  *
  * ```text
- *   ┌───────┬─────────────────────────┬──────────────────────────┐
- *   │2.75rem│ minmax(0,1fr)           │ 8.75rem  (FIXED)         │
- *   │ thumb │ name (2 lines max)      │  [stepper slot] ␣ [★]    │
- *   │       │ codart · CAJA×24 (1 ln) │   6.25rem     4px 2.25rem│
- *   │       │ 12,00 €                 │                          │
- *   └───────┴─────────────────────────┴──────────────────────────┘
+ *   ┌───────┬────────────────────────────┬───────────────┐
+ *   │2.75rem│ minmax(0,1fr)              │ 5.875rem FIXED│
+ *   │ thumb │ name (2 lines max)         │ [stepper slot]│
+ *   │       │ codart · CAJA×24  [称重] ★ │   − n +  94px │
+ *   │       │ 12,00 €                    │               │
+ *   └───────┴────────────────────────────┴───────────────┘
  * ```
  *
  * **Why the action column is a FIXED track and not `auto`.** The stepper inside
- * it grows from a lone `+` (32px) to `− n +` (100px) the moment the product is
- * in the cart. An `auto` track would resize on that press: every row's name
- * column would jump 68px narrower, re-wrapping titles down the whole list, and
- * the button under the customer's finger would move while they were pressing it.
- * The track is sized for the WIDE state and the stepper is right-aligned in it,
- * so the geometry is identical in both — which is also what keeps the stars in a
- * column down a 50-row page however many rows are already in the cart.
+ * it grows from a lone `+` (32px) to `− n +` (94px) the moment the product is in
+ * the cart. An `auto` track would resize on that press: every row's name column
+ * would jump 62px narrower, re-wrapping titles down the whole list, and the
+ * button under the customer's finger would move while they were pressing it. The
+ * track is sized for the WIDE state and the stepper is right-aligned in it, so
+ * the geometry is identical in both — which is also what keeps the `+` squares
+ * in a column down a 50-row page however many rows are already in the cart.
  *
- * The 8.75rem is the sum of what stands in it and nothing else: 6.25rem for the
- * stepper (see `STEPPER_SLOT`), a 4px gap, and the 2.25rem star. **The gap is
- * not decoration.** Flush against each other, the `+`'s right edge IS the star's
- * left edge, and a thumb aiming at `+` that lands 2px wide adds nothing to the
- * cart — it silently toggles a favourite instead. Two adjacent controls whose
- * outcomes have nothing to do with each other need a miss margin between them,
- * and 4px of dead pixels is the cheapest one available on a 375px row.
+ * **5.875rem is the stepper and nothing else** (94px — see `STEPPER_SLOT`), and
+ * that is the whole point of this revision. The track used to be 8.75rem,
+ * because the star stood beside the stepper: 6.25rem + a 4px gap + the 2.25rem
+ * star = 140px. Measured on a 390px phone, what the name was left with was
+ * 390 − 88 rail − 24 row insets − 44 thumb − 20 column gaps − 140 = 74px:
+ * three or four characters and an ellipsis. Customers here identify goods BY
+ * NAME, so that is not a product list. With the star out of the column the same
+ * arithmetic ends 390 − 88 − 24 − 44 − 20 − 94 = 120px — which is exactly the
+ * name width the design mockup draws.
  *
- * The star is 36px rather than the 44px a full-width touch target would be: on a
- * phone the extra 8px would come out of the product name, which is the row's
- * whole point, and 36px still clears WCAG 2.2 AA's 24px target minimum.
+ * **The star moved DOWN a line, not off the row.** A favourite is row STATE —
+ * what this product already is to this customer — and not a third action
+ * competing with `+`, so it belongs with the reference data on the meta line
+ * (`codart · CAJA×24`, the badges) rather than in the column of things to press.
+ * The name is what the row exists to show, and it gets the pixels the move frees.
+ * `ml-auto` pushes the star to the line's right edge, so it still reads as a
+ * column down the page however long each codart is, and the `truncate`d codart
+ * is what gives way when the line runs out of room.
+ *
+ * **The miss margin got bigger, not smaller.** Flush against each other, the
+ * `+`'s right edge IS the star's left edge, and a thumb aiming at `+` that lands
+ * 2px wide adds nothing to the cart — it silently toggles a favourite instead.
+ * Two adjacent controls whose outcomes have nothing to do with each other need
+ * dead pixels between them, and side by side the row could only afford 4px. The
+ * star now sits a line lower and on the far side of the 10px column gap from the
+ * `−` square, so the nearest approach between the two is that gap.
+ *
+ * **A 36px hit box that costs the row no height.** The meta line is a 16px text
+ * line (20px on the rows where a badge sits in it) and the star's box is 36px,
+ * which on its own would make that line — and every row in the catalogue — 20px
+ * taller. `-my-2.5` gives 10px back at the top and 10px at the bottom, so the
+ * star contributes 36 − 20 = 16px of FLOW height, never more than the line it is
+ * on, and simply overhangs the name above it and the price below it without
+ * moving either. `relative` is what makes the overhang a target and not paint:
+ * a positioned element hit-tests above the in-flow price line that follows it in
+ * the DOM, so the part of the box hanging over that line still takes the press.
+ * 36px is short of the 44px a full-width touch target would be — on a phone the
+ * extra 8px would come straight back out of the name — and clears WCAG 2.2 AA's
+ * 24px target minimum.
  *
  * **The row owns its own insets and its own top rule** (`px-3 py-2.5 border-t`),
  * where it used to inherit both from the card the list was drawn on. There is no
@@ -66,23 +94,25 @@ import type { CustomerCatalogProduct } from "@/lib/supabase/public.types";
  * makes that rule full-bleed, as the design draws it.
  *
  * The 10px column gap is the design's, and on a phone it is not decoration
- * either: the two gaps are 20px of the ~74px the name column is left with once
- * the 88px rail, the thumb and the fixed action column have taken their share.
+ * either: the two gaps are 20px of the 278px the row has inside its insets, and
+ * they come out of the name like everything else here — the right-hand one is
+ * now also the dead space between the `−` square and the star above it.
  */
 const ROW =
-  "grid grid-cols-[2.75rem_minmax(0,1fr)_8.75rem] items-center gap-x-2.5 border-t border-[#F4F0EC] px-3 py-2.5";
+  "grid grid-cols-[2.75rem_minmax(0,1fr)_5.875rem] items-center gap-x-2.5 border-t border-[#F4F0EC] px-3 py-2.5";
 
 /**
- * The stepper's fixed footprint, right-aligned. 6.25rem = 100px, which is the
+ * The stepper's fixed footprint, right-aligned. 5.875rem = 94px, which is the
  * widest the stepper can ever be: a 32px `−`, a 2px gap, the quantity capped at
- * 32px by `max-w-8` in `STEPPER_QTY`, another 2px gap and a 32px `+` = 100px.
+ * 26px by `max-w-[26px]` in `STEPPER_QTY`, another 2px gap and a 32px `+` = 94px.
  * Sized from the control rather than guessed, so no quantity can make the
  * stepper overhang the track and reach back over the name.
  *
  * A row that cannot be ordered renders the slot EMPTY rather than dropping it:
- * the star column stays where it is, and so does everything below.
+ * the track still claims its 94px, so the name column keeps the same width on
+ * every row of the list and the `+` squares stay in a column.
  */
-const STEPPER_SLOT = "flex w-[6.25rem] shrink-0 justify-end";
+const STEPPER_SLOT = "flex w-[5.875rem] shrink-0 justify-end";
 
 export async function ProductRow({
   product,
@@ -127,8 +157,8 @@ export async function ProductRow({
 
             `break-words` is what makes the clamp honest on a LATIN name.
             `line-clamp` only ever ellipsises a line-COUNT overflow: a word with
-            no break opportunity in it — ESPECIALIDADES, ~12 characters, wider
-            than the ~74px this column gets on a phone — is one line that
+            no break opportunity in it — ESPECIALIDADES, 14 characters, still
+            wider than the 120px this column gets on a phone — is one line that
             overflows sideways, so the clamp has nothing to count and the word is
             cut mid-glyph with no ellipsis at all. Allowing the break puts the
             rest of the word on line two, where the clamp can do its job. Chinese
@@ -138,7 +168,13 @@ export async function ProductRow({
           {name}
         </p>
 
-        <p className="mt-0.5 flex items-center gap-1.5 text-xs text-muted">
+        {/* A `div`, not a `p`, ONLY because the favourite `form` below is one of
+            its children: `p` may contain nothing but phrasing content, so the
+            HTML parser closes it the moment it meets a `<form>`. The server
+            markup would then say one thing and React's tree another, and
+            hydration breaks on the row every product in the catalogue uses. The
+            name and the price stay `p` — nothing interactive lives in them. */}
+        <div className="mt-0.5 flex items-center gap-1.5 text-xs text-muted">
           {/* `1-002 · CAJA×24`: the factor is what turns the price below into an
               offer a restaurant can judge. It is silent at 1 — see `unitLabel`.
               One line, truncated: this is reference detail, and a second line of
@@ -158,7 +194,32 @@ export async function ProductRow({
               {t("unavailable")}
             </span>
           )}
-        </p>
+          {/* The favourite, LAST on the line and pushed to its right edge. The
+              negative margin and `relative` are the whole trick that keeps a
+              36px target from making the row taller — see the note on `ROW`.
+              `flex` is here so the form's height is the button's 36px exactly,
+              rather than a line box that adds a stray pixel of descender space
+              under it and puts the star off the line's centre. */}
+          <form
+            action={toggleFavorite}
+            className="relative -my-2.5 ml-auto flex shrink-0"
+          >
+            <input type="hidden" name="product_id" value={id} />
+            <input type="hidden" name="locale" value={locale} />
+            <input type="hidden" name="on" value={isFavorite ? "0" : "1"} />
+            <button
+              type="submit"
+              aria-label={isFavorite ? t("favRemove") : t("favAdd")}
+              // Amber, not brand: a starred product is a state of the row, and
+              // the accent is spent on actions.
+              className={`inline-flex size-9 items-center justify-center rounded-full text-lg transition-colors ${
+                isFavorite ? "text-amber-500" : "text-muted/40 hover:text-muted"
+              }`}
+            >
+              ★
+            </button>
+          </form>
+        </div>
 
         {/* The price sits UNDER the name, inside the text column, rather than in
             a column of its own: at 375px a fourth track would have come out of
@@ -173,12 +234,14 @@ export async function ProductRow({
             {caseCents != null ? (
               formatEuros(caseCents, locale)
             ) : (
-              // A note, not a figure, and sized like one: at the price's own
-              // 14px "Precio pendiente" is 106px wide, half again the column a
-              // phone leaves this text — on every row, since every price is NULL
-              // until the owner's Wingest merge. At 12px it is 94px, which still
-              // wraps here but into the shortest shape it has, and it is the
-              // size the meta line above uses for everything that is not money.
+              // A note, not a figure, and sized like one. At the price's own
+              // 14px semibold Archivo, "Precio pendiente" measures 109px
+              // against the 120px this column now gets — it clears the width
+              // by 11px, and it is on EVERY row until the owner's Wingest
+              // merge lands a tarifa, so the margin is worth having rather
+              // than spending. At 12px it is 90px, which is the same one line
+              // with room around it, and 12px is already the size the meta
+              // line above uses for everything that is not money.
               <span className="text-xs font-normal text-muted">
                 {t("noPrice")}
               </span>
@@ -187,36 +250,18 @@ export async function ProductRow({
         )}
       </div>
 
-      <div className="flex items-center justify-end gap-1">
-        <div className={STEPPER_SLOT}>
-          {/* Ordering gates on is_orderable (is_available AND
-              is_current_variant): a row that cannot be ordered gets no control
-              at all, rather than one that would fail. */}
-          {product.is_orderable && (
-            <QtyStepper
-              productId={id}
-              name={name}
-              priced={priced}
-              showPrices={showPrices}
-            />
-          )}
-        </div>
-        <form action={toggleFavorite} className="shrink-0">
-          <input type="hidden" name="product_id" value={id} />
-          <input type="hidden" name="locale" value={locale} />
-          <input type="hidden" name="on" value={isFavorite ? "0" : "1"} />
-          <button
-            type="submit"
-            aria-label={isFavorite ? t("favRemove") : t("favAdd")}
-            // Amber, not brand: a starred product is a state of the row, and the
-            // accent is spent on actions.
-            className={`inline-flex size-9 items-center justify-center rounded-full text-lg transition-colors ${
-              isFavorite ? "text-amber-500" : "text-muted/40 hover:text-muted"
-            }`}
-          >
-            ★
-          </button>
-        </form>
+      <div className={STEPPER_SLOT}>
+        {/* Ordering gates on is_orderable (is_available AND is_current_variant):
+            a row that cannot be ordered gets no control at all, rather than one
+            that would fail. */}
+        {product.is_orderable && (
+          <QtyStepper
+            productId={id}
+            name={name}
+            priced={priced}
+            showPrices={showPrices}
+          />
+        )}
       </div>
     </li>
   );
