@@ -423,19 +423,6 @@ select is(
   true,
   'active staff can requeue a terminal order'
 );
-select ok(
-  (
-    select status = 'confirmed'
-      and bridge_attempt_count = 0
-      and bridge_last_error_code is null
-      and bridge_last_error_message is null
-      and bridge_failed_at is null
-      and bridge_next_attempt_at is null
-    from public.orders
-    where id = '10000000-0000-0000-0000-000000000011'
-  ),
-  'staff requeue starts a clean attempt cycle'
-);
 select is(
   public.staff_requeue_order(
     '10000000-0000-0000-0000-000000000011'
@@ -457,6 +444,26 @@ select ok(
 
 reset role;
 set local role service_role;
+
+-- Read the requeued row's failure fields from HERE, not from the staff session
+-- above: the five bridge_* columns are revoked from `authenticated` (the very
+-- first assertion in this file pins that), so a staff-key select of them is a
+-- permission error rather than a false assertion. The state is unchanged since
+-- the requeue — the second requeue returned false without touching the row —
+-- and the claim below is the first thing that moves it again.
+select ok(
+  (
+    select status = 'confirmed'
+      and bridge_attempt_count = 0
+      and bridge_last_error_code is null
+      and bridge_last_error_message is null
+      and bridge_failed_at is null
+      and bridge_next_attempt_at is null
+    from public.orders
+    where id = '10000000-0000-0000-0000-000000000011'
+  ),
+  'staff requeue starts a clean attempt cycle'
+);
 
 select is(
   pg_catalog.jsonb_array_length(
