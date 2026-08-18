@@ -50,7 +50,16 @@ export interface ClaimedOrderItem {
    * and the one that leaves CAJ reading the way it always has.
    */
   is_weighed?: boolean;
-  is_erp_excluded: boolean;
+  /**
+   * Handled by staff outside the ERP: the line stays off the pedido entirely.
+   *
+   * Optional in the TYPE only, on the same terms as `is_weighed`: the column is
+   * `not null default false` and `bridge_claim_confirmed` has always emitted it,
+   * so absent means a malformed payload rather than an old one, and it becomes
+   * `false` — the value that puts the line on the pedido, which is what every
+   * line did before exclusions existed.
+   */
+  is_erp_excluded?: boolean;
 }
 
 /** One claimed order as `bridge_claim_confirmed` emits it. */
@@ -185,7 +194,22 @@ export function splitLines(items: readonly ClaimedOrderItem[]): {
   const included: ClaimedOrderItem[] = [];
   const excluded: ClaimedOrderItem[] = [];
   for (const item of items) {
-    (item.is_erp_excluded ? excluded : included).push(item);
+    // Validated exactly as strictly as `is_weighed`, and for a heavier reason:
+    // this flag decides whether the line reaches the pedido AT ALL. A raw
+    // truthiness test would read the string "false" as true and silently drop a
+    // line the customer ordered and paid for — an under-delivery nothing
+    // downstream can detect, because every total is computed from what is left.
+    if (
+      item.is_erp_excluded !== undefined &&
+      typeof item.is_erp_excluded !== "boolean"
+    ) {
+      throw new PayloadError(
+        "BAD_ERP_EXCLUDED",
+        `codart ${item.codart} has a non-boolean is_erp_excluded ` +
+          JSON.stringify(item.is_erp_excluded),
+      );
+    }
+    ((item.is_erp_excluded ?? false) ? excluded : included).push(item);
   }
   return { included, excluded };
 }

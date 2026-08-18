@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { BRIDGE_SUPABASE_ORIGIN, BridgeConfigError } from "./config";
 import {
   SupabaseHttpError,
   SupabaseNetworkError,
@@ -8,7 +9,7 @@ import {
 } from "./supabase";
 
 const cfg = {
-  supabaseUrl: "https://project.supabase.co",
+  supabaseUrl: BRIDGE_SUPABASE_ORIGIN,
   supabaseServiceRoleKey: "sb_secret_service_role",
 };
 
@@ -17,6 +18,7 @@ interface Recorded {
   method: string;
   headers: Record<string, string>;
   body: string | undefined;
+  redirect: RequestRedirect | undefined;
 }
 
 /**
@@ -36,6 +38,7 @@ function fakeFetch(outcomes: (Response | Error)[]): {
       method: String(init.method),
       headers: (init.headers ?? {}) as Record<string, string>,
       body: init.body as string | undefined,
+      redirect: init.redirect,
     });
     const next = queue.shift();
     if (next instanceof Error) return Promise.reject(next);
@@ -49,6 +52,13 @@ function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
     headers: { "Content-Type": "application/json" },
+  });
+}
+
+function counted(total: string): Response {
+  return new Response("[]", {
+    status: 200,
+    headers: { "Content-Type": "application/json", "Content-Range": total },
   });
 }
 
@@ -73,98 +83,227 @@ const ORDER = {
   items: [],
 };
 
+describe("service-role destination", () => {
+  it("rejects a hand-built client for any unpinned origin before fetch", () => {
+    expect(() =>
+      createBridgeSupabase({
+        ...cfg,
+        supabaseUrl: "https://attacker.example",
+      }),
+    ).toThrow(BridgeConfigError);
+  });
+});
+
 describe("claimConfirmed", () => {
   it("posts the RPC arguments and returns the claimed orders", async () => {
     const { api, calls } = client([json([ORDER])]);
-    const orders = await api.claimConfirmed(ORDER.claim_token, 20, 300);
+    const orders = await api.claimConfirmed(ORDER.claim_token, 20, 300, null);
 
     expect(orders).toHaveLength(1);
     expect(orders[0].order_number).toBe(4242);
     expect(calls[0].url).toBe(
-      "https://project.supabase.co/rest/v1/rpc/bridge_claim_confirmed",
+      `${BRIDGE_SUPABASE_ORIGIN}/rest/v1/rpc/bridge_claim_confirmed`,
     );
     expect(calls[0].method).toBe("POST");
     expect(JSON.parse(calls[0].body ?? "")).toEqual({
       p_claim_token: ORDER.claim_token,
       p_limit: 20,
       p_lease_seconds: 300,
+      p_order_id: null,
+    });
+  });
+
+  it("posts a verified historical Pedido identity to the backfill RPC", async () => {
+    const { api, calls } = client([json(true)]);
+    await api.backfillOrderIdentity("order-id", "A", 25, 501);
+    expect(calls[0].url).toBe(
+      `${BRIDGE_SUPABASE_ORIGIN}/rest/v1/rpc/bridge_backfill_order_identity`,
+    );
+    expect(JSON.parse(calls[0].body ?? "")).toEqual({
+      p_order_id: "order-id",
+      p_can: "A",
+      p_eje: 25,
+      p_numped: 501,
+    });
+  });
+
+  it("passes a supervised historical order target to the claim RPC", async () => {
+    const { api, calls } = client([json([])]);
+    await api.claimConfirmed(ORDER.claim_token, 1, 300, ORDER.id);
+
+    expect(JSON.parse(calls[0].body ?? "")).toEqual({
+      p_claim_token: ORDER.claim_token,
+      p_limit: 1,
+      p_lease_seconds: 300,
+      p_order_id: ORDER.id,
     });
   });
 
   it("authenticates with the service-role key and never puts it in the URL", async () => {
     const { api, calls } = client([json([])]);
-    await api.claimConfirmed(ORDER.claim_token, 20, 300);
+    await api.claimConfirmed(ORDER.claim_token, 20, 300, null);
     expect(calls[0].headers.apikey).toBe(cfg.supabaseServiceRoleKey);
     expect(calls[0].headers.Authorization).toBe(`Bearer ${cfg.supabaseServiceRoleKey}`);
     expect(calls[0].url).not.toContain(cfg.supabaseServiceRoleKey);
+    expect(calls[0].redirect).toBe("error");
   });
 
   it("refuses a payload that is not the claim contract", async () => {
-    await expect(client([json({ nope: true })]).api.claimConfirmed("t", 1, 30)).rejects.toBeInstanceOf(
-      SupabasePayloadError,
-    );
+    await expect(
+      client([json({ nope: true })]).api.claimConfirmed("t", 1, 30, null),
+    ).rejects.toBeInstanceOf(SupabasePayloadError);
     await expect(
       client([json([{ id: "x", order_number: 1, claim_token: "t", codcli: 3 }])]).api.claimConfirmed(
         "t",
         1,
         30,
+        null,
       ),
     ).rejects.toThrow(/items/);
   });
 
   it("refuses an order whose company has no codcli", async () => {
     const { api } = client([json([{ ...ORDER, codcli: null }])]);
-    await expect(api.claimConfirmed("t", 1, 30)).rejects.toThrow(/codcli/);
+    await expect(api.claimConfirmed("t", 1, 30, null)).rejects.toThrow(/codcli/);
   });
 });
 
 describe("marks", () => {
   it("returns the RPC's boolean verbatim — false is the caller's alert", async () => {
-    expect(await client([json(true)]).api.markInjected("id", "token", 501)).toBe(true);
-    expect(await client([json(false)]).api.markInjected("id", "token", 501)).toBe(false);
-    expect(await client([json(true)]).api.markAlbaran("id", 900)).toBe(true);
+    expect(await client([json(true)]).api.markInjected("id", "token", "B", 26, 501)).toBe(
+      true,
+    );
+    expect(await client([json(false)]).api.markInjected("id", "token", "B", 26, 501)).toBe(
+      false,
+    );
+    expect(await client([json(true)]).api.markAlbaran("id", "B", 27, 900)).toBe(true);
   });
 
   it("passes the claim token through, which is what binds the mark to the claim", async () => {
     const { api, calls } = client([json(true)]);
-    await api.markInjected("order-id", "claim-token", 501);
+    await api.markInjected("order-id", "claim-token", "B", 26, 501);
     expect(JSON.parse(calls[0].body ?? "")).toEqual({
       p_order_id: "order-id",
       p_claim_token: "claim-token",
+      p_can: "B",
+      p_eje: 26,
       p_numped: 501,
     });
   });
 
+  it("passes the independent Albarán identity to the mark RPC", async () => {
+    const { api, calls } = client([json(true)]);
+    await api.markAlbaran("order-id", "B", 27, 900);
+    expect(JSON.parse(calls[0].body ?? "")).toEqual({
+      p_order_id: "order-id",
+      p_can: "B",
+      p_eje: 27,
+      p_numalb: 900,
+    });
+  });
+
   it("refuses a non-boolean answer rather than coercing it", async () => {
-    await expect(client([json("true")]).api.markInjected("id", "t", 1)).rejects.toBeInstanceOf(
-      SupabasePayloadError,
+    await expect(
+      client([json("true")]).api.markInjected("id", "t", "B", 26, 1),
+    ).rejects.toBeInstanceOf(SupabasePayloadError);
+  });
+
+  it("posts a classified order failure and maps the atomic outcome", async () => {
+    const { api, calls } = client([
+      json({ marked: true, outcome: "requeued", attempt_count: 2 }),
+    ]);
+
+    await expect(
+      api.markOrderFailed(
+        "order-id",
+        "claim-token",
+        "PREFLIGHT_FAILED",
+        "ERP timed out",
+        true,
+      ),
+    ).resolves.toEqual({ marked: true, outcome: "requeued", attemptCount: 2 });
+    expect(calls[0].url).toBe(
+      `${BRIDGE_SUPABASE_ORIGIN}/rest/v1/rpc/bridge_mark_order_failed`,
     );
+    expect(JSON.parse(calls[0].body ?? "")).toEqual({
+      p_order_id: "order-id",
+      p_claim_token: "claim-token",
+      p_error_code: "PREFLIGHT_FAILED",
+      p_error_message: "ERP timed out",
+      p_retryable: true,
+    });
+  });
+
+  it("accepts the terminal and stale-claim failure outcomes", async () => {
+    await expect(
+      client([json({ marked: true, outcome: "terminal", attempt_count: 1 })]).api
+        .markOrderFailed("id", "token", "ALL_LINES_EXCLUDED", "nothing to inject", false),
+    ).resolves.toEqual({ marked: true, outcome: "terminal", attemptCount: 1 });
+
+    await expect(
+      client([json({ marked: false, outcome: "stale_claim", attempt_count: null })]).api
+        .markOrderFailed("id", "token", "PREFLIGHT_FAILED", "timeout", true),
+    ).resolves.toEqual({ marked: false, outcome: "stale_claim", attemptCount: null });
+  });
+
+  it("refuses malformed or internally inconsistent failure-mark results", async () => {
+    await expect(
+      client([json({ marked: true, outcome: "later", attempt_count: 1 })]).api
+        .markOrderFailed("id", "token", "X", "x", true),
+    ).rejects.toBeInstanceOf(SupabasePayloadError);
+    await expect(
+      client([json({ marked: false, outcome: "terminal", attempt_count: 1 })]).api
+        .markOrderFailed("id", "token", "X", "x", false),
+    ).rejects.toBeInstanceOf(SupabasePayloadError);
+    await expect(
+      client([json({ marked: true, outcome: "terminal", attempt_count: null })]).api
+        .markOrderFailed("id", "token", "X", "x", false),
+    ).rejects.toBeInstanceOf(SupabasePayloadError);
   });
 });
 
 describe("listInjected", () => {
-  it("selects only id and numped", async () => {
-    const { api, calls } = client([json([{ id: "a", numped: 501 }, { id: "b", numped: null }])]);
+  it("selects and maps the complete persisted ERP identity", async () => {
+    const { api, calls } = client([
+      json([
+        { id: "a", order_number: 4242, erp_can: "B", erp_eje: 26, numped: 501 },
+        { id: "b", order_number: 4243, erp_can: null, erp_eje: null, numped: null },
+      ]),
+    ]);
     expect(await api.listInjected()).toEqual([
-      { id: "a", numped: 501 },
-      { id: "b", numped: null },
+      { id: "a", orderNumber: 4242, erpCan: "B", erpEje: 26, numped: 501 },
+      { id: "b", orderNumber: 4243, erpCan: null, erpEje: null, numped: null },
     ]);
     expect(calls[0].url).toBe(
-      "https://project.supabase.co/rest/v1/orders?status=eq.injected&select=id,numped",
+      `${BRIDGE_SUPABASE_ORIGIN}/rest/v1/orders?status=eq.injected&select=id,order_number,erp_can,erp_eje,numped`,
     );
+  });
+
+  it("fails closed on missing, coerced or non-normalised identity fields", async () => {
+    for (const row of [
+      { id: "a", erp_can: "B", numped: 501 },
+      { id: "a", erp_can: "B", erp_eje: "26", numped: 501 },
+      { id: "a", erp_can: " b", erp_eje: 26, numped: 501 },
+      { id: "a", erp_can: "b", erp_eje: 26, numped: 501 },
+      { id: "a", erp_can: "B", erp_eje: 26, numped: 501.5 },
+    ]) {
+      await expect(client([json([row])]).api.listInjected()).rejects.toBeInstanceOf(
+        SupabasePayloadError,
+      );
+    }
   });
 });
 
 describe("transport", () => {
   it("retries once when the request never got an answer", async () => {
     const { api, calls } = client([new TypeError("fetch failed"), json([])]);
-    await expect(api.claimConfirmed("t", 1, 30)).resolves.toEqual([]);
+    await expect(api.claimConfirmed("t", 1, 30, null)).resolves.toEqual([]);
     expect(calls).toHaveLength(2);
   });
 
   it("gives up after the second network failure, naming the path", async () => {
     const { api, calls } = client([new TypeError("fetch failed"), new TypeError("fetch failed")]);
-    const error = await api.claimConfirmed("t", 1, 30).catch((e: unknown) => e);
+    const error = await api.claimConfirmed("t", 1, 30, null).catch((e: unknown) => e);
     expect(error).toBeInstanceOf(SupabaseNetworkError);
     expect((error as SupabaseNetworkError).path).toContain("bridge_claim_confirmed");
     expect(calls).toHaveLength(2);
@@ -172,7 +311,7 @@ describe("transport", () => {
 
   it("does NOT retry a status code — a second claim would lease a second batch", async () => {
     const { api, calls } = client([json({ message: "boom" }, 500)]);
-    const error = await api.claimConfirmed("t", 1, 30).catch((e: unknown) => e);
+    const error = await api.claimConfirmed("t", 1, 30, null).catch((e: unknown) => e);
     expect(error).toBeInstanceOf(SupabaseHttpError);
     expect((error as SupabaseHttpError).status).toBe(500);
     expect((error as SupabaseHttpError).body).toContain("boom");
@@ -266,13 +405,6 @@ describe("patchProduct", () => {
 });
 
 describe("countProducts", () => {
-  function counted(total: string): Response {
-    return new Response("[]", {
-      status: 200,
-      headers: { "Content-Type": "application/json", "Content-Range": total },
-    });
-  }
-
   it("asks for an exact count and no rows", async () => {
     const { api, calls } = client([counted("*/102")]);
     expect(await api.countProducts({ price_1_cents: "is.null" })).toBe(102);
@@ -297,5 +429,42 @@ describe("countProducts", () => {
   it("raises a real failure", async () => {
     const { api } = client([json({ message: "boom" }, 500)]);
     await expect(api.countProducts({})).rejects.toBeInstanceOf(SupabaseHttpError);
+  });
+});
+
+describe("countOrders", () => {
+  it("asks for an exact filtered count without downloading order rows", async () => {
+    const { api, calls } = client([counted("*/7")]);
+    await expect(
+      api.countOrders({
+        status: "eq.confirmed",
+        bridge_attempt_count: "gt.0",
+      }),
+    ).resolves.toBe(7);
+
+    expect(calls[0]).toMatchObject({
+      method: "GET",
+      headers: expect.objectContaining({ Prefer: "count=exact" }),
+    });
+    expect(calls[0].url).toBe(
+      `${BRIDGE_SUPABASE_ORIGIN}/rest/v1/orders?status=eq.confirmed&bridge_attempt_count=gt.0&select=id&limit=0`,
+    );
+  });
+
+  it("returns null when the backlog count cannot be proven", async () => {
+    const { api } = client([counted("*/*")]);
+    await expect(api.countOrders({ status: "eq.processing" })).resolves.toBeNull();
+  });
+
+  it("preserves an exact zero instead of treating it as a withheld count", async () => {
+    const { api } = client([counted("*/0")]);
+    await expect(api.countOrders({ status: "eq.bridge_failed" })).resolves.toBe(0);
+  });
+
+  it("raises a real failure", async () => {
+    const { api } = client([json({ message: "permission denied" }, 403)]);
+    await expect(api.countOrders({ status: "eq.processing" })).rejects.toBeInstanceOf(
+      SupabaseHttpError,
+    );
   });
 });

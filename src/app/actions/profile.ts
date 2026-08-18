@@ -13,7 +13,6 @@ import {
   validatePasswordChange,
   type ProfileError,
 } from "@/lib/profile";
-import { createAdminClient } from "@/lib/supabase/admin";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { describeDbError } from "@/lib/user-admin";
 
@@ -27,18 +26,14 @@ import { describeDbError } from "@/lib/user-admin";
  * id, an email or a company from the form. A Server Action is its own POST
  * endpoint; a form field naming whose row to update would be an invitation.
  *
- * The two halves reach the database very differently, and the difference is not
- * a preference:
+ * Both halves stay on the caller's own session, but reach different Supabase
+ * APIs:
  *
- * - **Display name → service-role client.** Checked against the live project
- *   before writing this: `portal_users` has `portal_users_select` (own row or
- *   staff) but its only UPDATE policy is `portal_users_staff_update`, gated on
- *   `private.is_staff()`. There is NO self-update policy, so the customer's own
- *   session simply cannot write this column — an authenticated update matches no
- *   policy and silently affects zero rows, which would show the customer a
- *   success banner over the name they failed to change. The service-role client
- *   is therefore the only way, and it is keyed to `user.id` and filtered
- *   `.eq("id", user.id)` — the session's own uuid, never a form's.
+ * - **Display name → checked RPC on the customer's session.** Direct UPDATE on
+ *   `portal_users` remains unavailable to customers. `update_own_display_name`
+ *   derives the target exclusively from `auth.uid()`, rechecks the active user
+ *   and company in the database, updates exactly that row and returns whether it
+ *   matched. No service-role key and no user id enter this action.
  * - **Password → the customer's OWN session.** No admin client anywhere near it.
  *   `signInWithPassword` re-authenticates with the SESSION's email (see
  *   `getSessionUser`) and the password just typed, and `auth.updateUser` then
@@ -90,26 +85,33 @@ function finish(
 /** 显示名称 — the name the header greets this restaurant by. Their own row only. */
 export async function updateDisplayName(formData: FormData): Promise<void> {
   const locale = safeLocale(formData.get("locale"));
-  const { user } = await requireCompanyUser(locale);
+  // Early application gate for a clean redirect. The RPC repeats the active
+  // user/company checks because this Server Action is not its security boundary.
+  await requireCompanyUser(locale);
 
   const name = validateDisplayName(formData.get("display_name"));
   if (!name.ok) return finish(locale, "name", name.error);
 
-  const admin = createAdminClient();
-  const { error } = await admin
-    .from("portal_users")
-    .update({ display_name: name.value })
-    // The session's uuid, the only id this action will ever accept. `.eq` and
-    // not `.match` on anything the form sent: the admin client has no RLS left
-    // to catch a mistake here.
-    .eq("id", user.id);
-
-  if (error) {
-    console.error("updateDisplayName:", describeDbError(error));
-    return finish(locale, "name", "DB_ERROR");
+  let result: "ok" | ProfileError = "DB_ERROR";
+  try {
+    const supabase = await createServerSupabase();
+    const { data, error } = await supabase.rpc("update_own_display_name", {
+      p_display_name: name.value,
+    });
+    if (error) {
+      console.error("updateDisplayName:", describeDbError(error));
+    } else if (data === true) {
+      result = "ok";
+    } else {
+      // `false` is a failed closed gate (the account/company changed under the
+      // request), not a successful zero-row update.
+      console.error("updateDisplayName: RPC returned false");
+    }
+  } catch (cause) {
+    console.error("updateDisplayName:", describeDbError(cause));
   }
 
-  return finish(locale, "name", "ok");
+  return finish(locale, "name", result);
 }
 
 /**

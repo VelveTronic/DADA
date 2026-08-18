@@ -4,15 +4,15 @@
  *
  * Raw fetch rather than `@supabase/supabase-js` because the bridge ships as one
  * esbuild bundle onto a Windows server: every dependency is code the owner has
- * to trust and we have to rebuild, and the five calls below are three RPCs, one
- * table read and one upsert. The client library would add a megabyte to buy
+ * to trust and we have to rebuild, while this module uses only a small fixed set
+ * of RPC and table calls. The client library would add a megabyte to buy
  * nothing.
  *
- * Everything here is service-role. The three `bridge_*` functions are EXECUTE-
- * granted to `service_role` alone (see migration 20260815101406), so no other
- * key can reach them — which is also why the key never appears in a log line,
- * an error body, or a URL.
+ * Everything here is service-role. The `bridge_*` functions are EXECUTE-granted
+ * to `service_role` alone, so no other key can reach them — which is also why
+ * the key never appears in a log line, an error body, or a URL.
  */
+import { BRIDGE_SUPABASE_ORIGIN, BridgeConfigError } from "./config";
 import type { ClaimedOrder } from "./payload";
 
 /** The server answered, and the answer was not a success. Carries status + body. */
@@ -60,6 +60,9 @@ export class SupabasePayloadError extends Error {
 
 export interface InjectedOrderRef {
   id: string;
+  orderNumber: number;
+  erpCan: string | null;
+  erpEje: number | null;
   numped: number | null;
 }
 
@@ -70,14 +73,48 @@ export interface HeartbeatRow {
   detail: unknown;
 }
 
+export type OrderFailureOutcome = "requeued" | "terminal" | "stale_claim";
+
+/** Result of the atomic failure-state transition in `bridge_mark_order_failed`. */
+export interface OrderFailureMark {
+  marked: boolean;
+  outcome: OrderFailureOutcome;
+  attemptCount: number | null;
+}
+
 export interface BridgeSupabase {
   claimConfirmed(
     claimToken: string,
     limit: number,
     leaseSeconds: number,
+    orderId: string | null,
   ): Promise<ClaimedOrder[]>;
-  markInjected(orderId: string, claimToken: string, numped: number): Promise<boolean>;
-  markAlbaran(orderId: string, numalb: number): Promise<boolean>;
+  markInjected(
+    orderId: string,
+    claimToken: string,
+    can: string,
+    eje: number,
+    numped: number,
+  ): Promise<boolean>;
+  backfillOrderIdentity(
+    orderId: string,
+    can: string,
+    eje: number,
+    numped: number,
+  ): Promise<boolean>;
+  markOrderFailed(
+    orderId: string,
+    claimToken: string,
+    errorCode: string,
+    errorMessage: string,
+    retryable: boolean,
+  ): Promise<OrderFailureMark>;
+  markAlbaran(
+    orderId: string,
+    can: string,
+    eje: number,
+    numalb: number,
+  ): Promise<boolean>;
   listInjected(): Promise<InjectedOrderRef[]>;
   /** False when `bridge_status` does not exist yet (Task 3 adds it). */
   heartbeat(row: HeartbeatRow): Promise<boolean>;
@@ -91,6 +128,8 @@ export interface BridgeSupabase {
    * column names.
    */
   patchProduct(codart: string, patch: object): Promise<boolean>;
+  /** `orders` matching `filters`, or null if PostgREST withheld the total. */
+  countOrders(filters: Record<string, string>): Promise<number | null>;
   /** `products` matching `filters`, or null if PostgREST withheld the total. */
   countProducts(filters: Record<string, string>): Promise<number | null>;
 }
@@ -139,6 +178,14 @@ export function createBridgeSupabase(
   cfg: { supabaseUrl: string; supabaseServiceRoleKey: string },
   options: SupabaseClientOptions = {},
 ): BridgeSupabase {
+  // Keep this sink guarded even when a test/future caller constructs config by
+  // hand instead of going through loadBridgeConfig.
+  if (cfg.supabaseUrl !== BRIDGE_SUPABASE_ORIGIN) {
+    throw new BridgeConfigError(
+      "BAD_SUPABASE_URL",
+      `SUPABASE_URL must be exactly ${BRIDGE_SUPABASE_ORIGIN}`,
+    );
+  }
   const {
     timeoutMs = DEFAULT_TIMEOUT_MS,
     retryDelayMs = DEFAULT_RETRY_DELAY_MS,
@@ -158,14 +205,18 @@ export function createBridgeSupabase(
    * The retry covers only a request that never got an answer — a dropped
    * connection or our own timeout — because that is the case where the ERP
    * server's flaky link, not the database, is the problem. It is deliberately
-   * not a retry on 5xx: a repeated `bridge_claim_confirmed` would lease a second
-   * batch of orders while the first is still out, and the caller can see and
-   * decide about a status code, which it cannot do about a socket error.
+   * not a retry on 5xx: the caller can see and decide about a status code, which
+   * it cannot do about a socket error. `bridge_claim_confirmed` is safe in this
+   * narrow retry window: migration 20260817130000 replays the rows already held
+   * by the same claim token instead of leasing a second batch.
    *
    * The known cost: if the FIRST attempt actually reached the database and only
    * the response was lost, the retry sees the world already changed —
-   * `markInjected` then returns false, which the orders job reports as an
-   * alertable mark failure rather than silently mis-recording anything.
+   * `markInjected` can then return false and `markOrderFailed` can report a stale
+   * claim. The orders job keeps both outcomes alertable; its post-run persistent
+   * backlog counts (and later runs) reveal the committed database state rather
+   * than silently assuming whether the first response was lost before or after
+   * commit.
    */
   async function send(
     path: string,
@@ -183,6 +234,9 @@ export function createBridgeSupabase(
           headers: { ...headers, ...init.extraHeaders },
           body: init.body,
           signal: controller.signal,
+          // Never forward the service-role Authorization header to a redirect
+          // target. Config pins the origin too; this closes the HTTP layer.
+          redirect: "error",
         });
         const text = await response.text();
         // The count calls read Content-Range; every other caller destructures
@@ -261,8 +315,61 @@ export function createBridgeSupabase(
     return value;
   }
 
+  function assertOrderFailureMark(path: string, value: unknown): OrderFailureMark {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      throw new SupabasePayloadError(path, `expected an object, got ${typeof value}`);
+    }
+    const row = value as {
+      marked?: unknown;
+      outcome?: unknown;
+      attempt_count?: unknown;
+    };
+    if (typeof row.marked !== "boolean") {
+      throw new SupabasePayloadError(path, "result has no boolean marked");
+    }
+    if (
+      row.outcome !== "requeued" &&
+      row.outcome !== "terminal" &&
+      row.outcome !== "stale_claim"
+    ) {
+      throw new SupabasePayloadError(
+        path,
+        `result has invalid outcome ${JSON.stringify(row.outcome)}`,
+      );
+    }
+    if (
+      row.attempt_count !== null &&
+      (!Number.isInteger(row.attempt_count) || Number(row.attempt_count) < 0)
+    ) {
+      throw new SupabasePayloadError(
+        path,
+        `result has invalid attempt_count ${JSON.stringify(row.attempt_count)}`,
+      );
+    }
+    if (row.marked === (row.outcome === "stale_claim")) {
+      throw new SupabasePayloadError(
+        path,
+        `inconsistent marked/outcome ${row.marked}/${row.outcome}`,
+      );
+    }
+    if (
+      (row.marked && !Number.isInteger(row.attempt_count)) ||
+      (!row.marked && row.attempt_count !== null)
+    ) {
+      throw new SupabasePayloadError(
+        path,
+        `inconsistent marked/attempt_count ${row.marked}/${JSON.stringify(row.attempt_count)}`,
+      );
+    }
+    return {
+      marked: row.marked,
+      outcome: row.outcome,
+      attemptCount: row.attempt_count as number | null,
+    };
+  }
+
   return {
-    async claimConfirmed(claimToken, limit, leaseSeconds) {
+    async claimConfirmed(claimToken, limit, leaseSeconds, orderId) {
       const path = "/rest/v1/rpc/bridge_claim_confirmed";
       const value = await call(path, {
         method: "POST",
@@ -270,47 +377,131 @@ export function createBridgeSupabase(
           p_claim_token: claimToken,
           p_limit: limit,
           p_lease_seconds: leaseSeconds,
+          p_order_id: orderId,
         }),
       });
       return assertClaimedOrders(path, value);
     },
 
-    async markInjected(orderId, claimToken, numped) {
+    async markInjected(orderId, claimToken, can, eje, numped) {
       const path = "/rest/v1/rpc/bridge_mark_injected";
       const value = await call(path, {
         method: "POST",
         body: JSON.stringify({
           p_order_id: orderId,
           p_claim_token: claimToken,
+          p_can: can,
+          p_eje: eje,
           p_numped: numped,
         }),
       });
       return assertBoolean(path, value);
     },
 
-    async markAlbaran(orderId, numalb) {
+    async backfillOrderIdentity(orderId, can, eje, numped) {
+      const path = "/rest/v1/rpc/bridge_backfill_order_identity";
+      const value = await call(path, {
+        method: "POST",
+        body: JSON.stringify({
+          p_order_id: orderId,
+          p_can: can,
+          p_eje: eje,
+          p_numped: numped,
+        }),
+      });
+      return assertBoolean(path, value);
+    },
+
+    async markOrderFailed(orderId, claimToken, errorCode, errorMessage, retryable) {
+      const path = "/rest/v1/rpc/bridge_mark_order_failed";
+      const value = await call(path, {
+        method: "POST",
+        body: JSON.stringify({
+          p_order_id: orderId,
+          p_claim_token: claimToken,
+          p_error_code: errorCode,
+          p_error_message: errorMessage,
+          p_retryable: retryable,
+        }),
+      });
+      return assertOrderFailureMark(path, value);
+    },
+
+    async markAlbaran(orderId, can, eje, numalb) {
       const path = "/rest/v1/rpc/bridge_mark_albaran";
       const value = await call(path, {
         method: "POST",
-        body: JSON.stringify({ p_order_id: orderId, p_numalb: numalb }),
+        body: JSON.stringify({
+          p_order_id: orderId,
+          p_can: can,
+          p_eje: eje,
+          p_numalb: numalb,
+        }),
       });
       return assertBoolean(path, value);
     },
 
     async listInjected() {
-      const path = "/rest/v1/orders?status=eq.injected&select=id,numped";
+      const path =
+        "/rest/v1/orders?status=eq.injected&select=id,order_number,erp_can,erp_eje,numped";
       const value = await call(path, { method: "GET" });
       if (!Array.isArray(value)) {
         throw new SupabasePayloadError(path, `expected an array, got ${typeof value}`);
       }
       return value.map((row, index) => {
-        const order = row as { id?: unknown; numped?: unknown };
-        if (typeof order.id !== "string") {
+        if (!row || typeof row !== "object" || Array.isArray(row)) {
+          throw new SupabasePayloadError(path, `row ${index} is not an object`);
+        }
+        const order = row as {
+          id?: unknown;
+          order_number?: unknown;
+          erp_can?: unknown;
+          erp_eje?: unknown;
+          numped?: unknown;
+        };
+        if (typeof order.id !== "string" || order.id.length === 0) {
           throw new SupabasePayloadError(path, `row ${index} has no id`);
+        }
+        if (
+          typeof order.order_number !== "number" ||
+          !Number.isSafeInteger(order.order_number) ||
+          order.order_number <= 0
+        ) {
+          throw new SupabasePayloadError(
+            path,
+            `row ${index} has invalid order_number ${JSON.stringify(order.order_number)}`,
+          );
+        }
+        if (
+          order.erp_can !== null &&
+          (typeof order.erp_can !== "string" ||
+            order.erp_can.length < 1 ||
+            order.erp_can.length > 2 ||
+            order.erp_can !== order.erp_can.trim() ||
+            order.erp_can !== order.erp_can.toUpperCase())
+        ) {
+          throw new SupabasePayloadError(
+            path,
+            `row ${index} has invalid erp_can ${JSON.stringify(order.erp_can)}`,
+          );
+        }
+        for (const [field, number] of [
+          ["erp_eje", order.erp_eje],
+          ["numped", order.numped],
+        ] as const) {
+          if (number !== null && !Number.isInteger(number)) {
+            throw new SupabasePayloadError(
+              path,
+              `row ${index} has invalid ${field} ${JSON.stringify(number)}`,
+            );
+          }
         }
         return {
           id: order.id,
-          numped: typeof order.numped === "number" ? order.numped : null,
+          orderNumber: order.order_number,
+          erpCan: order.erp_can as string | null,
+          erpEje: order.erp_eje as number | null,
+          numped: order.numped as number | null,
         };
       });
     },
@@ -339,6 +530,25 @@ export function createBridgeSupabase(
       }
       // codart is unique, so this is 0 or 1 and a row tally would only restate it.
       return value.length > 0;
+    },
+
+    /**
+     * Exact current order backlog count for the heartbeat's persistent health.
+     *
+     * These are GETs under the service-role key, so retries are idempotent. The
+     * body is deliberately empty (`limit=0`); only Content-Range is needed.
+     */
+    async countOrders(filters) {
+      const query = new URLSearchParams({ ...filters, select: "id", limit: "0" });
+      const path = `/rest/v1/orders?${query.toString()}`;
+      const { status, text, headers: responseHeaders } = await send(path, {
+        method: "GET",
+        extraHeaders: { Prefer: "count=exact" },
+      });
+      if (status < 200 || status >= 300) {
+        throw new SupabaseHttpError(path, status, text.slice(0, MAX_ERROR_BODY));
+      }
+      return parseContentRangeTotal(responseHeaders.get("content-range"));
     },
 
     /**

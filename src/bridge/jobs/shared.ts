@@ -5,12 +5,13 @@
  * decide an exit code from `ok`, and print/heartbeat `counts`.
  *
  * `ok` means THE RUN COMPLETED — not "nothing went wrong". A per-order failure
- * in the orders job leaves `ok` true and shows up as a non-zero `failed` count:
- * the order stays `processing`, its lease expires, and the next run re-claims
- * it. Exiting non-zero there would make Task Scheduler's history red every time
- * one order out of twenty had a bad codart, which is exactly how a red light
- * stops meaning anything. `ok` is false only when the run itself could not be
- * done: no config, no lock, no database, no Supabase.
+ * in the orders job leaves `ok` true and shows up as a non-zero `failed` count;
+ * its detail says whether the order was requeued with backoff, moved to the
+ * staff failure queue, or could not be marked. Exiting non-zero there would
+ * make Task Scheduler's history red every time one order out of twenty had a
+ * bad codart, which is exactly how a red light stops meaning anything. `ok` is
+ * false only when the run itself could not be done: no config, no lock, no
+ * database, no Supabase.
  */
 /**
  * A string ARRAY is allowed alongside the scalars for one case: price-sync's

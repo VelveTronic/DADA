@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  BRIDGE_SUPABASE_ORIGIN,
   BridgeConfigError,
   bridgeSecrets,
   describeConfig,
@@ -17,6 +18,7 @@ const MINIMAL = {
   WINGEST_USER: "dada_bridge",
   WINGEST_PASSWORD: "correct horse battery staple",
 };
+const HISTORICAL_ORDER_ID = "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA";
 
 describe("parseEnvFile", () => {
   it("reads KEY=VALUE, skipping blanks and comments", () => {
@@ -72,6 +74,8 @@ describe("loadBridgeConfig", () => {
       erpUser: "SFY",
       can: "B",
       eje: 26,
+      allowHistoricalEje: false,
+      historicalOrderId: null,
       alm: "00001",
       serfac: 1,
       claimLimit: 20,
@@ -99,14 +103,26 @@ describe("loadBridgeConfig", () => {
 
   it("normalises the Supabase URL so paths never double up on the slash", () => {
     expect(
-      loadBridgeConfig({ ...MINIMAL, SUPABASE_URL: "https://x.supabase.co/" }).supabaseUrl,
-    ).toBe("https://x.supabase.co");
+      loadBridgeConfig({ ...MINIMAL, SUPABASE_URL: `${BRIDGE_SUPABASE_ORIGIN}/` })
+        .supabaseUrl,
+    ).toBe(BRIDGE_SUPABASE_ORIGIN);
   });
 
-  it("rejects a Supabase URL that is not http(s)", () => {
-    expect(() => loadBridgeConfig({ ...MINIMAL, SUPABASE_URL: "not a url" })).toThrow(
-      /BAD_SUPABASE_URL|SUPABASE_URL/,
-    );
+  it("pins the service-role credential to this exact HTTPS project origin", () => {
+    for (const invalid of [
+      "not a url",
+      "http://gudiykhngonoqsjoigza.supabase.co",
+      "https://otherproject.supabase.co",
+      "https://gudiykhngonoqsjoigza.supabase.co:444",
+      "https://user:pass@gudiykhngonoqsjoigza.supabase.co",
+      "https://gudiykhngonoqsjoigza.supabase.co/rest/v1",
+      "https://gudiykhngonoqsjoigza.supabase.co?redirect=evil",
+      "https://gudiykhngonoqsjoigza.supabase.co#fragment",
+    ]) {
+      expect(() => loadBridgeConfig({ ...MINIMAL, SUPABASE_URL: invalid })).toThrow(
+        /BAD_SUPABASE_URL|SUPABASE_URL/,
+      );
+    }
   });
 
   it("rejects a database name that is not an identifier", () => {
@@ -131,11 +147,74 @@ describe("loadBridgeConfig", () => {
     expect(() => loadBridgeConfig({ ...MINIMAL, BRIDGE_EJE: "twenty-six" })).toThrow(/BRIDGE_EJE/);
   });
 
+  it("accepts only literal true/false for the historical-year escape hatch", () => {
+    const historical = loadBridgeConfig({
+      ...MINIMAL,
+      BRIDGE_ALLOW_HISTORICAL_EJE: "true",
+      BRIDGE_HISTORICAL_ORDER_ID: HISTORICAL_ORDER_ID,
+    });
+    expect(historical.allowHistoricalEje).toBe(true);
+    expect(historical.historicalOrderId).toBe(HISTORICAL_ORDER_ID.toLowerCase());
+    expect(
+      loadBridgeConfig({ ...MINIMAL, BRIDGE_ALLOW_HISTORICAL_EJE: "false" })
+        .allowHistoricalEje,
+    ).toBe(false);
+    for (const invalid of ["1", "yes", "TRUE", "False"]) {
+      expect(() =>
+        loadBridgeConfig({ ...MINIMAL, BRIDGE_ALLOW_HISTORICAL_EJE: invalid }),
+      ).toThrow(/BRIDGE_ALLOW_HISTORICAL_EJE/);
+    }
+  });
+
+  it("requires the historical switch and one canonical order UUID together", () => {
+    expect(() =>
+      loadBridgeConfig({ ...MINIMAL, BRIDGE_ALLOW_HISTORICAL_EJE: "true" }),
+    ).toThrow(/BRIDGE_HISTORICAL_ORDER_ID/);
+    expect(() =>
+      loadBridgeConfig({
+        ...MINIMAL,
+        BRIDGE_ALLOW_HISTORICAL_EJE: "false",
+        BRIDGE_HISTORICAL_ORDER_ID: HISTORICAL_ORDER_ID,
+      }),
+    ).toThrow(/BRIDGE_HISTORICAL_ORDER_ID/);
+  });
+
+  it("rejects a historical target that is not a standard hyphenated UUID", () => {
+    for (const invalid of [
+      "aaaaaaaaaaaa4aaa8aaaaaaaaaaaaaaa",
+      "{aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa}",
+      "00000000-0000-0000-0000-000000000000",
+      "aaaaaaaa-aaaa-9aaa-8aaa-aaaaaaaaaaaa",
+      "aaaaaaaa-aaaa-4aaa-7aaa-aaaaaaaaaaaa",
+    ]) {
+      expect(() =>
+        loadBridgeConfig({
+          ...MINIMAL,
+          BRIDGE_ALLOW_HISTORICAL_EJE: "true",
+          BRIDGE_HISTORICAL_ORDER_ID: invalid,
+        }),
+      ).toThrow(/BRIDGE_HISTORICAL_ORDER_ID/);
+    }
+  });
+
   it("rejects an ERP user wider than susuario.CODUSU", () => {
     expect(() => loadBridgeConfig({ ...MINIMAL, BRIDGE_ERP_USER: "TOOLONG" })).toThrow(
       /BRIDGE_ERP_USER/,
     );
     expect(loadBridgeConfig({ ...MINIMAL, BRIDGE_ERP_USER: "ABCD" }).erpUser).toBe("ABCD");
+  });
+
+  it("normalises BRIDGE_CAN to the uppercase ERP identity spelling", () => {
+    expect(loadBridgeConfig({ ...MINIMAL, BRIDGE_CAN: " b " }).can).toBe("B");
+    expect(loadBridgeConfig({ ...MINIMAL, BRIDGE_CAN: "a1" }).can).toBe("A1");
+  });
+
+  it("rejects non-ASCII, punctuation and values that expand during CAN uppercasing", () => {
+    for (const invalid of ["ß", "é", "A-", "ABC", "中"]) {
+      expect(() => loadBridgeConfig({ ...MINIMAL, BRIDGE_CAN: invalid })).toThrow(
+        /BRIDGE_CAN/,
+      );
+    }
   });
 });
 
@@ -147,7 +226,7 @@ describe("wingestPoolConfig", () => {
     expect(pool.server).toBe("localhost");
     expect(pool.port).toBe(50352);
     expect(pool.database).toBe("wg_test");
-    expect(pool.options?.encrypt).toBe(false);
+    expect(pool.options?.encrypt).toBe(true);
     expect(pool.options?.trustServerCertificate).toBe(true);
   });
 

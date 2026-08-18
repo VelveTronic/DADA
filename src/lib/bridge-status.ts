@@ -71,6 +71,20 @@ export type BridgeFreshness = "fresh" | "stale" | "missing";
 /** What the last run we DID hear about reported. */
 export type BridgeOutcome = "ok" | "busy" | "failed" | "unknown";
 
+/**
+ * Whether the work completed by a successful run still needs attention.
+ *
+ * Kept separate from `outcome` on purpose: `bridge_status.ok` answers whether
+ * the PROGRAM completed its run, while these counts answer what happened to
+ * the ORDERS inside that run. A completed run with one poisoned order is still
+ * `outcome: "ok"`, but it must not paint the card green.
+ */
+export type BridgeBusinessHealth =
+  | "healthy"
+  | "degraded"
+  | "failed"
+  | "unknown";
+
 /** Which of the four visual treatments the row gets. */
 export type BridgeTone = "good" | "busy" | "warn" | "bad";
 
@@ -90,6 +104,7 @@ export interface BridgeStatusView {
   job: BridgeJob;
   freshness: BridgeFreshness;
   outcome: BridgeOutcome;
+  businessHealth: BridgeBusinessHealth;
   tone: BridgeTone;
   /** The row's timestamp, or null when there is no usable one. */
   lastRunAt: string | null;
@@ -118,8 +133,21 @@ export interface BridgeStatusView {
  * a number worth seeing, and a wrong label is worse than a bare one.
  */
 const COUNT_LABEL_KEYS = {
-  orders: ["claimed", "injected", "recovered", "markFailed", "failed"],
-  "albaran-sync": ["injected", "matched", "marked"],
+  orders: [
+    "claimed",
+    "injected",
+    "recovered",
+    "failed",
+    "requeued",
+    "terminal",
+    "markFailed",
+    "failureMarkFailed",
+    "manualRequired",
+    "retryPending",
+    "processingPending",
+    "backlogCountError",
+  ],
+  "albaran-sync": ["injected", "matched", "marked", "failed"],
   "price-sync": [
     "articles",
     "matched",
@@ -212,6 +240,59 @@ export function readBridgeDetail(detail: unknown): {
   return { code, counts, notes, sample };
 }
 
+/** A finite non-negative count, or zero for an absent/invalid one. */
+function countValue(counts: readonly BridgeCount[], key: string): number {
+  const value = counts.find((count) => count.key === key)?.value;
+  return typeof value === "number" && value > 0 ? value : 0;
+}
+
+/**
+ * Interpret an orders heartbeat without changing what its `ok` flag means.
+ *
+ * The bridge emits these invariants:
+ *
+ * - injected + recovered + failed = claimed
+ * - requeued + terminal + failureMarkFailed = failed
+ *
+ * The first counters describe this run; the backlog counters describe current
+ * database state and therefore survive the next empty run. A pending retry is
+ * amber. A terminal/manual order, an unresolved processing lease, an uncertain
+ * count or failure-state write, or an injected Pedido whose portal mark failed
+ * is red for operator inspection.
+ */
+export function deriveBridgeBusinessHealth(
+  job: BridgeJob,
+  counts: readonly BridgeCount[],
+): BridgeBusinessHealth {
+  if (job === "albaran-sync") {
+    return countValue(counts, "failed") > 0 ? "failed" : "healthy";
+  }
+  if (job !== "orders") return "healthy";
+
+  const failed = countValue(counts, "failed");
+  const requeued = countValue(counts, "requeued");
+  const terminal = countValue(counts, "terminal");
+  const markFailed = countValue(counts, "markFailed");
+  const failureMarkFailed = countValue(counts, "failureMarkFailed");
+  const manualRequired = countValue(counts, "manualRequired");
+  const retryPending = countValue(counts, "retryPending");
+  const processingPending = countValue(counts, "processingPending");
+  const backlogCountError = countValue(counts, "backlogCountError");
+
+  if (
+    terminal > 0 ||
+    markFailed > 0 ||
+    failureMarkFailed > 0 ||
+    manualRequired > 0 ||
+    processingPending > 0 ||
+    backlogCountError > 0
+  ) {
+    return "failed";
+  }
+  if (failed > 0 || requeued > 0 || retryPending > 0) return "degraded";
+  return "healthy";
+}
+
 /**
  * One row (or its absence) → everything the card needs to draw it.
  *
@@ -249,6 +330,7 @@ export function deriveBridgeStatus(
     counts: [] as BridgeCount[],
     notes: [] as BridgeNote[],
     sample: [] as string[],
+    businessHealth: "unknown" as const,
   };
 
   if (!row) {
@@ -274,6 +356,7 @@ export function deriveBridgeStatus(
     : detail.code === LOCK_HELD
       ? "busy"
       : "failed";
+  const businessHealth = deriveBridgeBusinessHealth(job, detail.counts);
 
   return {
     ...base,
@@ -282,9 +365,18 @@ export function deriveBridgeStatus(
     ageMs,
     freshness: fresh ? "fresh" : "stale",
     outcome,
+    businessHealth,
     // A failure outranks silence: both need attention, and the failure names
-    // itself. Everything else that is not fresh is amber, not green.
-    tone: outcome === "failed" ? "bad" : !fresh ? "warn" : outcome === "busy" ? "busy" : "good",
+    // itself. Business failures are judged separately from `ok`: a run can
+    // finish cleanly while an order enters manual handling.
+    tone:
+      outcome === "failed" || businessHealth === "failed"
+        ? "bad"
+        : !fresh || businessHealth === "degraded"
+          ? "warn"
+          : outcome === "busy"
+            ? "busy"
+            : "good",
   };
 }
 
@@ -296,16 +388,25 @@ export function deriveBridgeStatus(
  * Otherwise silence wins over the stale row's own verdict: "nothing has run" is
  * the more urgent fact than what the last run that did happen thought.
  *
- * The five keys are message keys (`staff.bridge.state.*`) and match `tone`
- * one-for-one, so a badge can never say 正常 in amber.
+ * These keys are messages under `staff.bridge.state.*`; each is chosen from the
+ * same facts as `tone`, so a badge can never say 正常 in amber.
  */
-export type BridgeStateKey = "ok" | "busy" | "failed" | "stale" | "missing";
+export type BridgeStateKey =
+  | "ok"
+  | "busy"
+  | "degraded"
+  | "businessFailed"
+  | "failed"
+  | "stale"
+  | "missing";
 
 export function bridgeStateKey(view: BridgeStatusView): BridgeStateKey {
   if (view.outcome === "failed") return "failed";
+  if (view.businessHealth === "failed") return "businessFailed";
   if (view.freshness === "missing") return "missing";
   if (view.freshness === "stale") return "stale";
-  return view.outcome === "busy" ? "busy" : "ok";
+  if (view.outcome === "busy") return "busy";
+  return view.businessHealth === "degraded" ? "degraded" : "ok";
 }
 
 /**

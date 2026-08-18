@@ -4,7 +4,7 @@ import { hasLocale } from "next-intl";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { routing } from "@/i18n/routing";
-import { requireStaff } from "@/lib/auth/guards";
+import { beginStaff, finishStaff } from "@/lib/auth/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
   assertNotSelf,
@@ -27,20 +27,23 @@ import {
 } from "@/lib/user-admin";
 
 /**
- * Account administration: the only writes in this app that need the
- * service-role key, because `auth.admin.createUser` exists nowhere else.
+ * Account administration crosses two deliberately separate trust boundaries.
  *
- * That key bypasses RLS completely, so the database has no say left once these
- * functions start. Every one of them therefore does the same three things in
- * the same order before touching the admin client:
+ * The service-role client is used ONLY for GoTrue's `auth.admin.createUser` and
+ * compensating `deleteUser`; public companies/profile rows are written through
+ * the caller's cookie-authenticated client and role-checking database RPCs.
+ * Every action therefore has two authorization layers in this order:
  *
- *   requireStaff(locale)  → who is asking, and are they still active
- *   canManage*(role)      → may they do THIS (pure, tested, in user-admin.ts)
+ *   begin/finishStaff      → who is asking, and are they still active
+ *   canManage*(role)      → early UX gate for THIS operation
  *   validate…(formData)   → is the request even well-formed
+ *   staff_* RPC           → database re-authenticates uid, active state + role
  *
  * A Server Action is its own POST endpoint, reachable by anyone who learns the
  * action id without ever rendering `/staff/usuarios`, which is why the role gate
- * is repeated here rather than left to the page that hides the buttons.
+ * is repeated here rather than left to the page that hides the buttons. It is
+ * intentionally not the final authority: the RPC repeats it under the caller's
+ * JWT before touching a public row.
  *
  * The PASSWORD rule, which every line below respects: it goes from the form to
  * `auth.admin.createUser` and nowhere else. Not into a log line, not into a
@@ -153,6 +156,8 @@ class ProvisionFailure extends Error {
   constructor(
     readonly code: UserAdminError,
     message: string,
+    /** True only when the RPC may have committed but its reply cannot prove it. */
+    readonly outcomeAmbiguous = false,
   ) {
     super(message);
     this.name = "ProvisionFailure";
@@ -160,10 +165,66 @@ class ProvisionFailure extends Error {
 }
 
 type AdminClient = ReturnType<typeof createAdminClient>;
+type StaffRpcClient = Awaited<ReturnType<typeof beginStaff>>["supabase"];
 
 type ProvisionRequest =
   | { kind: "customer"; input: NewCustomerInput }
   | { kind: "staff"; input: NewStaffInput };
+
+/** Active staff plus the same cookie client every authorization RPC must use. */
+async function requireRpcStaff(locale: Parameters<typeof beginStaff>[0]) {
+  const { user, supabase, pendingStaff } = await beginStaff(locale);
+  return {
+    user,
+    supabase,
+    staffUser: await finishStaff(pendingStaff, locale),
+  };
+}
+
+/**
+ * RPC booleans are a three-way contract: true, a real false/NOT_FOUND, or an
+ * invalid payload that must fail closed rather than being coerced to success.
+ */
+function classifyBooleanRpcReply(
+  data: unknown,
+  error: unknown,
+): UserAdminError | null {
+  if (error) return classifyDbError(error);
+  if (data === true) return null;
+  return data === false ? "NOT_FOUND" : "DB_ERROR";
+}
+
+/**
+ * Whether an RPC error proves Postgres/PostgREST answered the request.
+ *
+ * A five-character SQLSTATE (`23505`, `22023`, `P0001`, …) or a PostgREST
+ * `PGRST<n>` code is an answered database failure, so its transaction did not
+ * commit. supabase-js may also return fetch/proxy/gateway failures through the
+ * same `{ error }` slot; those often have no code or a vendor-specific one and
+ * cannot prove whether the server committed before the reply was lost.
+ */
+function hasDefinitiveDatabaseErrorCode(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const code = (error as { code?: unknown }).code;
+  return typeof code === "string" && /^(?:[0-9A-Z]{5}|PGRST\d+)$/.test(code);
+}
+
+/**
+ * A 4xx GoTrue response proves the create request was rejected. A missing
+ * response, status 0, 5xx, or an impossible success shape does not prove that:
+ * the user may have committed before the reply disappeared. This decides only
+ * whether to emit an operator check — it never deletes an account by email.
+ */
+function hasDefinitiveAuthRejection(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const status = (error as { status?: unknown }).status;
+  return (
+    typeof status === "number" &&
+    Number.isInteger(status) &&
+    status >= 400 &&
+    status < 500
+  );
+}
 
 /**
  * One rollback step, whose own failure can never become the caller's.
@@ -186,11 +247,11 @@ async function cleanUp(what: string, step: () => Promise<void>): Promise<void> {
 }
 
 /**
- * Create the auth user, then the row that gives it a role — and undo both if the
- * second half fails.
+ * Create the auth user, then ask the caller-authenticated RPC to create the
+ * public role row — and remove the auth user if that second half fails.
  *
- * The two halves live in different systems (GoTrue's `auth.users` and our
- * `public` tables) with no transaction spanning them, so a failed insert leaves
+ * GoTrue's `auth.users` and the public schema have no transaction spanning them,
+ * so a failed provisioning RPC leaves
  * an auth user that can log in and match nothing: no `portal_users` row means no
  * company, and `requireCompanyUser` would bounce them to `?error=inactive`
  * forever while the address stays taken. The rollback is the only thing standing
@@ -200,9 +261,14 @@ async function cleanUp(what: string, step: () => Promise<void>): Promise<void> {
  * A FAILED rollback is worse than the original failure, so — exactly as
  * `scripts/create-user.ts` does — the orphan is NAMED in the server log rather
  * than left to a cleanup that failed quietly.
+ *
+ * The customer RPC owns company + portal-user creation in ONE database
+ * transaction. There is therefore no separately-created company to compensate;
+ * only the cross-system auth user can become an orphan.
  */
 async function provisionAccount(
   admin: AdminClient,
+  supabase: StaffRpcClient,
   request: ProvisionRequest,
 ): Promise<UserAdminError | null> {
   const { email, password, displayName } = request.input;
@@ -218,55 +284,64 @@ async function provisionAccount(
     console.error(
       `createAccount(${request.kind}) auth: ${describeDbError(authError) || "no user returned"}`,
     );
+    if (!hasDefinitiveAuthRejection(authError)) {
+      console.error(
+        `MANUAL CLEANUP CHECK NEEDED: verify whether GoTrue created an auth user for ${email} before its response was lost`,
+      );
+    }
     return classifyCreateUserError(authError);
   }
 
   const userId = created.user.id;
-  /** Only a company THIS call inserted is ours to delete again. */
-  let createdCompanyId: string | null = null;
 
   try {
     if (request.kind === "staff") {
-      const { error } = await admin.from("staff_users").insert({
-        id: userId,
-        role: request.input.role,
-        display_name: displayName,
+      const { data, error } = await supabase.rpc("staff_provision_staff", {
+        p_user_id: userId,
+        p_display_name: displayName,
+        p_role: request.input.role,
       });
-      if (error) {
+      const failure = classifyBooleanRpcReply(data, error);
+      if (failure) {
         throw new ProvisionFailure(
-          classifyDbError(error),
-          `staff_users insert failed: ${describeDbError(error)}`,
+          failure,
+          error
+            ? `staff provisioning RPC failed: ${describeDbError(error)}`
+            : `staff provisioning RPC returned ${String(data)}`,
         );
       }
     } else {
       const choice = request.input.company;
-      let companyId = choice.kind === "existing" ? choice.companyId : "";
-
-      if (choice.kind === "new") {
-        const { data: company, error } = await admin
-          .from("companies")
-          .insert(choice.company)
-          .select("id")
-          .single();
-        if (error) {
-          throw new ProvisionFailure(
-            classifyDbError(error),
-            `companies insert failed: ${describeDbError(error)}`,
-          );
-        }
-        createdCompanyId = company.id;
-        companyId = company.id;
-      }
-
-      const { error } = await admin.from("portal_users").insert({
-        id: userId,
-        company_id: companyId,
-        display_name: displayName,
-      });
+      // The function is unique and its unused branch defaults to NULL. Build
+      // one exact branch instead of sending undefined values (which JSON would
+      // silently drop) or lying to generated types about explicit nulls.
+      const args =
+        choice.kind === "existing"
+          ? {
+              p_user_id: userId,
+              p_display_name: displayName,
+              p_company_id: choice.companyId,
+            }
+          : {
+              p_user_id: userId,
+              p_display_name: displayName,
+              p_company_name: choice.company.name,
+              p_codcli: choice.company.codcli,
+              p_tarcli: choice.company.tarcli,
+            };
+      const { data, error } = await supabase.rpc("staff_provision_customer", args);
       if (error) {
         throw new ProvisionFailure(
           classifyDbError(error),
-          `portal_users insert failed: ${describeDbError(error)}`,
+          `customer provisioning RPC failed: ${describeDbError(error)}`,
+          !hasDefinitiveDatabaseErrorCode(error),
+        );
+      }
+      if (!isUuid(data)) {
+        throw new ProvisionFailure(
+          "DB_ERROR",
+          "customer provisioning RPC returned no valid company uuid",
+          true,
         );
       }
     }
@@ -277,21 +352,28 @@ async function provisionAccount(
       cause instanceof Error ? cause.message : String(cause),
     );
 
-    // Two cleanups, two try/catch blocks, deliberately. `deleteUser` REJECTS on
-    // a network failure rather than returning `{ error }`, and one throw shared
-    // between them would skip the second orphan's log line — leaving the company
-    // row unnamed and the action answering the staff member with a 500 instead
-    // of the code that explains what happened.
+    // An answered database error rolls the RPC's public transaction back. A
+    // thrown network error (or an invalid success payload) is different: the
+    // transaction may have committed before its answer was lost. We still undo
+    // the auth half; deleteUser may itself REJECT, and the cleanup wrapper turns
+    // that into an explicit MANUAL CLEANUP NEEDED record.
     await cleanUp(`auth user ${userId} (${email})`, async () => {
       const { error } = await admin.auth.admin.deleteUser(userId);
       if (error) throw error;
     });
-    if (createdCompanyId) {
-      const companyId = createdCompanyId;
-      await cleanUp(`company ${companyId}`, async () => {
-        const { error } = await admin.from("companies").delete().eq("id", companyId);
-        if (error) throw new Error(describeDbError(error));
-      });
+
+    // A successful auth cleanup removes the profile through its FK, but a new
+    // company created by an ambiguously-completed RPC has no parent FK to remove
+    // it. We deliberately do not guess and delete by submitted codcli/name; the
+    // log tells an operator to verify this one rare cross-system outcome.
+    if (
+      request.kind === "customer" &&
+      request.input.company.kind === "new" &&
+      (!(cause instanceof ProvisionFailure) || cause.outcomeAmbiguous)
+    ) {
+      console.error(
+        `MANUAL CLEANUP CHECK NEEDED: verify no orphan company remains for auth user ${userId} (${email})`,
+      );
     }
 
     return cause instanceof ProvisionFailure ? cause.code : "DB_ERROR";
@@ -314,7 +396,7 @@ export async function createCustomerAccount(
   formData: FormData,
 ): Promise<CreateAccountState> {
   const locale = safeLocale(formData.get("locale"));
-  const { staffUser } = await requireStaff(locale);
+  const { staffUser, supabase } = await requireRpcStaff(locale);
   // Fails CLOSED with a throw, not a redirect: a caller without the role never
   // rendered this page, so there is no banner to send them back to.
   if (!canManageUsers(staffUser.role)) throw new Error("FORBIDDEN");
@@ -336,7 +418,7 @@ export async function createCustomerAccount(
   if (!validated.ok) return rejected(validated.error, formData);
 
   const admin = createAdminClient();
-  const failure = await provisionAccount(admin, {
+  const failure = await provisionAccount(admin, supabase, {
     kind: "customer",
     input: validated.value,
   });
@@ -359,7 +441,7 @@ export async function createStaffAccount(
   formData: FormData,
 ): Promise<CreateAccountState> {
   const locale = safeLocale(formData.get("locale"));
-  const { staffUser } = await requireStaff(locale);
+  const { staffUser, supabase } = await requireRpcStaff(locale);
   if (!canManageStaff(staffUser.role)) throw new Error("FORBIDDEN");
 
   const validated = validateNewStaff({
@@ -371,7 +453,7 @@ export async function createStaffAccount(
   if (!validated.ok) return rejected(validated.error, formData);
 
   const admin = createAdminClient();
-  const failure = await provisionAccount(admin, {
+  const failure = await provisionAccount(admin, supabase, {
     kind: "staff",
     input: validated.value,
   });
@@ -387,7 +469,7 @@ export async function createStaffAccount(
  */
 export async function setStaffRole(formData: FormData): Promise<void> {
   const locale = safeLocale(formData.get("locale"));
-  const { user, staffUser } = await requireStaff(locale);
+  const { user, staffUser, supabase } = await requireRpcStaff(locale);
   if (!canManageStaff(staffUser.role)) throw new Error("FORBIDDEN");
 
   const target = assertNotSelf(user.id, formData.get("user_id"));
@@ -396,20 +478,26 @@ export async function setStaffRole(formData: FormData): Promise<void> {
   const role = parseStaffRole(formData.get("role"));
   if (!role.ok) return finish(locale, role.error);
 
-  const admin = createAdminClient();
-  const { data, error } = await admin
-    .from("staff_users")
-    .update({ role: role.value })
-    .eq("id", target.value)
-    // Without `select`, an update that matched NOTHING is indistinguishable
-    // from one that worked — and the page would redraw showing the old role
-    // with a success banner over it.
-    .select("id");
+  let reply;
+  try {
+    reply = await supabase.rpc("staff_set_staff_role", {
+      p_user_id: target.value,
+      p_role: role.value,
+    });
+  } catch (cause) {
+    console.error("setStaffRole:", describeDbError(cause));
+    return finish(locale, "DB_ERROR");
+  }
+  const { data, error } = reply;
   if (error) {
     console.error("setStaffRole:", describeDbError(error));
     return finish(locale, classifyDbError(error));
   }
-  return finish(locale, data.length > 0 ? "ok" : "NOT_FOUND");
+  const failure = classifyBooleanRpcReply(data, null);
+  if (failure === "DB_ERROR") {
+    console.error("setStaffRole: RPC returned a non-boolean payload");
+  }
+  return finish(locale, failure ?? "ok");
 }
 
 /**
@@ -423,7 +511,7 @@ export async function setStaffRole(formData: FormData): Promise<void> {
  */
 export async function setUserActive(formData: FormData): Promise<void> {
   const locale = safeLocale(formData.get("locale"));
-  const { user, staffUser } = await requireStaff(locale);
+  const { user, staffUser, supabase } = await requireRpcStaff(locale);
 
   // The FLOOR first: a plain staff member may not touch either table, so they
   // are turned away before the request is even parsed. Without this line a
@@ -458,22 +546,30 @@ export async function setUserActive(formData: FormData): Promise<void> {
     targetId = String(rawTarget).trim();
   }
 
-  const admin = createAdminClient();
-  const { data, error } =
-    kind.value === "staff"
-      ? await admin
-          .from("staff_users")
-          .update({ is_active: active.value })
-          .eq("id", targetId)
-          .select("id")
-      : await admin
-          .from("portal_users")
-          .update({ is_active: active.value })
-          .eq("id", targetId)
-          .select("id");
+  let reply;
+  try {
+    reply =
+      kind.value === "staff"
+        ? await supabase.rpc("staff_set_staff_active", {
+            p_user_id: targetId,
+            p_active: active.value,
+          })
+        : await supabase.rpc("staff_set_customer_active", {
+            p_user_id: targetId,
+            p_active: active.value,
+          });
+  } catch (cause) {
+    console.error("setUserActive:", describeDbError(cause));
+    return finish(locale, "DB_ERROR");
+  }
+  const { data, error } = reply;
   if (error) {
     console.error("setUserActive:", describeDbError(error));
     return finish(locale, classifyDbError(error));
   }
-  return finish(locale, data.length > 0 ? "ok" : "NOT_FOUND");
+  const failure = classifyBooleanRpcReply(data, null);
+  if (failure === "DB_ERROR") {
+    console.error("setUserActive: RPC returned a non-boolean payload");
+  }
+  return finish(locale, failure ?? "ok");
 }

@@ -1,17 +1,23 @@
 import type { Locale } from "next-intl";
 import { getTranslations, setRequestLocale } from "next-intl/server";
 import Link from "next/link";
-import { cancelOrder, confirmOrder } from "@/app/actions/staff-orders";
+import {
+  cancelOrder,
+  confirmOrder,
+  requeueOrder,
+} from "@/app/actions/staff-orders";
 import { OrderStatusBadge } from "@/components/order-status-badge";
 import { StaffShell } from "@/components/staff-shell";
 import { FIELD_SM, GLASS_CARD } from "@/components/ui";
 import { beginStaff, finishStaff } from "@/lib/auth/guards";
 import { localizedName, unitLabel } from "@/lib/catalog/display";
 import { formatEuros } from "@/lib/money";
-import type { QueueTab } from "@/lib/orders";
+import { formatMadridTime } from "@/lib/bridge-status";
+import type { OrderBridgeFailure, QueueTab } from "@/lib/orders";
 import {
   formatOrderDate,
   isLineEditResult,
+  parseOrderBridgeFailures,
   QUEUE_TABS,
   safeQueueTab,
 } from "@/lib/orders";
@@ -157,6 +163,31 @@ export default async function StaffOrdersPage({
     if (itemError) console.error("staff order items query:", itemError);
     items = itemData ?? [];
   }
+  // Failure diagnostics are deliberately NOT columns in the ordinary orders
+  // query. `authenticated` includes customers too, so granting those columns
+  // would let a restaurant read raw ERP/SQL errors from its own order. This
+  // bounded RPC re-checks active staff and returns only the ids on this page.
+  const failedOrderIds = orders
+    .filter((order) => order.status === "bridge_failed")
+    .map((order) => order.id);
+  const failuresByOrder = new Map<string, OrderBridgeFailure>();
+  if (failedOrderIds.length > 0) {
+    const { data: failureData, error: failureError } = await perf.step(
+      "bridgeFailures",
+      supabase.rpc("staff_get_order_bridge_failures", {
+        p_order_ids: failedOrderIds,
+      }),
+    );
+    if (failureError) console.error("staff bridge failures query:", failureError);
+    for (const failure of parseOrderBridgeFailures(failureData)) {
+      // The status comes from the same RPC snapshot as the sensitive fields.
+      // A concurrent requeue may have moved the row since the orders query; in
+      // that case do not present its historical error as a current terminal one.
+      if (failure.status === "bridge_failed") {
+        failuresByOrder.set(failure.orderId, failure);
+      }
+    }
+  }
   perf.end();
 
   const linesByOrder = new Map<string, QueueItem[]>();
@@ -174,6 +205,7 @@ export default async function StaffOrdersPage({
   const tabLabel: Record<QueueTab, string> = {
     submitted: t("tabSubmitted"),
     confirmed: t("tabConfirmed"),
+    bridge_failed: t("tabBridgeFailed"),
     all: t("tabAll"),
   };
 
@@ -250,16 +282,22 @@ export default async function StaffOrdersPage({
         <ul className={`${GLASS_CARD} mt-4 divide-y divide-border px-4 sm:px-5`}>
           {orders.map((order) => {
             const lines = linesByOrder.get(order.id) ?? [];
-            // Both RPCs update `where status = 'submitted'`, so on any other
-            // state these buttons could only ever come back false. The queue
-            // shows the order and leaves out the controls that cannot work.
-            const actionable = order.status === "submitted";
+            const bridgeFailure = failuresByOrder.get(order.id);
+            // `staff_confirm_order` updates `where status = 'submitted'`, so on
+            // any other state its button could only ever come back false. The
+            // queue shows the order and leaves out the control that cannot work.
+            const confirmable = order.status === "submitted";
+            // `staff_cancel_order` also accepts `bridge_failed`: an order the
+            // ERP will never take is a dead end otherwise, since requeue only
+            // sends it back to the same refusal.
+            const cancellable =
+              confirmable || order.status === "bridge_failed";
             // The quantity boxes belong to the 待确认 view and nowhere else. A
             // submitted order is reachable from 全部 too, and an editable field
             // there would be an invitation to change a pedido somebody opened
             // the tab to READ. `staff_update_order_line` would accept it; this
             // page does not offer it.
-            const editable = actionable && tab === "submitted";
+            const editable = confirmable && tab === "submitted";
             return (
               // The queue is read by scanning down it, so the row answers the
               // pointer the way an admin table does. `-mx-2 px-2` is what lets
@@ -312,6 +350,43 @@ export default async function StaffOrdersPage({
                   <p className="mt-1 text-sm">
                     {t("customerNote")}: {order.customer_note}
                   </p>
+                )}
+
+                {order.status === "bridge_failed" && (
+                  <div className="mt-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-900">
+                    {bridgeFailure ? (
+                      <>
+                        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                          <span className="font-medium">
+                            {t("bridgeFailure.attempts", {
+                              n: bridgeFailure.attemptCount,
+                            })}
+                          </span>
+                          {bridgeFailure.lastErrorCode && (
+                            <code className="rounded bg-red-100 px-1.5 py-0.5 text-xs">
+                              {bridgeFailure.lastErrorCode}
+                            </code>
+                          )}
+                          {bridgeFailure.failedAt && (
+                            <span className="text-xs text-red-700">
+                              {t("bridgeFailure.failedAt", {
+                                time:
+                                  formatMadridTime(bridgeFailure.failedAt, locale) ||
+                                  "—",
+                              })}
+                            </span>
+                          )}
+                        </div>
+                        {bridgeFailure.lastErrorMessage && (
+                          <p className="mt-1 break-words font-mono text-xs">
+                            {bridgeFailure.lastErrorMessage}
+                          </p>
+                        )}
+                      </>
+                    ) : (
+                      <p>{t("bridgeFailure.detailsUnavailable")}</p>
+                    )}
+                  </div>
                 )}
 
                 {/* Lines fold away so a screen of orders stays a screen; no
@@ -402,37 +477,39 @@ export default async function StaffOrdersPage({
                   </ul>
                 </details>
 
-                {actionable && (
+                {cancellable && (
                   <div className="mt-3 flex flex-wrap items-start gap-x-4 gap-y-2">
-                    <form
-                      action={confirmOrder}
-                      className="flex flex-wrap items-center gap-1"
-                    >
-                      <input type="hidden" name="order_id" value={order.id} />
-                      <input type="hidden" name="locale" value={locale} />
-                      {/* So the redirect comes back to the tab in front of the
-                          staff member, not to the default one. */}
-                      <input type="hidden" name="estado" value={tab} />
-                      <input
-                        name="note"
-                        // staff_confirm_order rejects anything longer.
-                        maxLength={2000}
-                        placeholder={t("staffNote")}
-                        // One "Nota interna" per row would tell a screen reader
-                        // nothing about which order it belongs to.
-                        aria-label={t("staffNoteFor", {
-                          n: order.order_number,
-                        })}
-                        className={`w-48 ${FIELD_SM}`}
-                      />
-                      <button
-                        type="submit"
-                        aria-label={t("confirmFor", { n: order.order_number })}
-                        className="rounded-lg bg-brand px-3 py-1 text-sm text-white transition-colors hover:bg-brand/90"
+                    {confirmable && (
+                      <form
+                        action={confirmOrder}
+                        className="flex flex-wrap items-center gap-1"
                       >
-                        {t("confirm")}
-                      </button>
-                    </form>
+                        <input type="hidden" name="order_id" value={order.id} />
+                        <input type="hidden" name="locale" value={locale} />
+                        {/* So the redirect comes back to the tab in front of
+                            the staff member, not to the default one. */}
+                        <input type="hidden" name="estado" value={tab} />
+                        <input
+                          name="note"
+                          // staff_confirm_order rejects anything longer.
+                          maxLength={2000}
+                          placeholder={t("staffNote")}
+                          // One "Nota interna" per row would tell a screen
+                          // reader nothing about which order it belongs to.
+                          aria-label={t("staffNoteFor", {
+                            n: order.order_number,
+                          })}
+                          className={`w-48 ${FIELD_SM}`}
+                        />
+                        <button
+                          type="submit"
+                          aria-label={t("confirmFor", { n: order.order_number })}
+                          className="rounded-lg bg-brand px-3 py-1 text-sm text-white transition-colors hover:bg-brand/90"
+                        >
+                          {t("confirm")}
+                        </button>
+                      </form>
+                    )}
 
                     <form
                       action={cancelOrder}
@@ -461,6 +538,21 @@ export default async function StaffOrdersPage({
                       </button>
                     </form>
                   </div>
+                )}
+
+                {order.status === "bridge_failed" && (
+                  <form action={requeueOrder} className="mt-3">
+                    <input type="hidden" name="order_id" value={order.id} />
+                    <input type="hidden" name="locale" value={locale} />
+                    <input type="hidden" name="estado" value={tab} />
+                    <button
+                      type="submit"
+                      aria-label={t("requeueFor", { n: order.order_number })}
+                      className="rounded-lg border border-amber-400 bg-amber-50 px-3 py-1 text-sm font-medium text-amber-900 transition-colors hover:bg-amber-100"
+                    >
+                      {t("requeue")}
+                    </button>
+                  </form>
                 )}
               </li>
             );

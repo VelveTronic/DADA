@@ -147,4 +147,37 @@ describe("translations", () => {
       );
     }
   });
+
+  it("labels every bridge-card state, including completed runs with business failures", () => {
+    const states = [
+      "ok",
+      "busy",
+      "degraded",
+      "businessFailed",
+      "failed",
+      "stale",
+      "missing",
+    ] as const;
+    for (const key of states) {
+      expect(zh.staff.bridge.state[key]).toBeTypeOf("string");
+      expect(es.staff.bridge.state[key]).toBeTypeOf("string");
+      if (key !== "ok") {
+        expect(zh.staff.bridge.hint[key]).toBeTypeOf("string");
+        expect(es.staff.bridge.hint[key]).toBeTypeOf("string");
+      }
+    }
+  });
+
+  it("labels the persistent order-backlog counters in both languages", () => {
+    const counters = [
+      "manualRequired",
+      "retryPending",
+      "processingPending",
+      "backlogCountError",
+    ] as const;
+    for (const key of counters) {
+      expect(zh.staff.bridge.counts.orders[key]).toBeTypeOf("string");
+      expect(es.staff.bridge.counts.orders[key]).toBeTypeOf("string");
+    }
+  });
 });

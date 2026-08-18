@@ -166,6 +166,32 @@ describe("splitLines", () => {
   it("reports an empty order as zero included lines", () => {
     expect(splitLines([]).included).toHaveLength(0);
   });
+
+  it("treats an absent flag as included, the way the column defaults", () => {
+    const bare = { ...item() };
+    delete (bare as { is_erp_excluded?: boolean }).is_erp_excluded;
+    const { included, excluded } = splitLines([bare]);
+    expect(included).toHaveLength(1);
+    expect(excluded).toHaveLength(0);
+  });
+
+  it("refuses a non-boolean flag instead of reading it as truthy", () => {
+    // "false" is truthy in JavaScript: guessing here would drop a paid line.
+    const bad = item({ is_erp_excluded: "false" as unknown as boolean });
+    expect(() => splitLines([bad])).toThrowError(PayloadError);
+    expect(() => splitLines([bad])).toThrowError(/is_erp_excluded/);
+    try {
+      splitLines([bad]);
+    } catch (error) {
+      expect((error as PayloadError).code).toBe("BAD_ERP_EXCLUDED");
+    }
+  });
+
+  it("accepts both booleans without complaint", () => {
+    expect(() =>
+      splitLines([item({ is_erp_excluded: true }), item({ is_erp_excluded: false })]),
+    ).not.toThrow();
+  });
 });
 
 /**

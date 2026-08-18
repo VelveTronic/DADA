@@ -42,6 +42,10 @@ export interface BridgeConfig {
   can: string;
   /** Fiscal year short form, e.g. 26. */
   eje: number;
+  /** Explicit escape hatch for a deliberate historical-year orders run. */
+  allowHistoricalEje: boolean;
+  /** The sole portal order an explicitly supervised historical run may claim. */
+  historicalOrderId: string | null;
   /** Warehouse code used for lot picking and the line's CODALM. */
   alm: string;
   serfac: number;
@@ -53,6 +57,7 @@ const DEFAULTS = {
   BRIDGE_ERP_USER: "SFY",
   BRIDGE_CAN: "B",
   BRIDGE_EJE: 26,
+  BRIDGE_ALLOW_HISTORICAL_EJE: false,
   BRIDGE_ALM: "00001",
   BRIDGE_SERFAC: 1,
   CLAIM_LIMIT: 20,
@@ -69,6 +74,10 @@ const LEASE_SECONDS_RANGE = { min: 30, max: 3600 } as const;
 
 /** char(30) in `pedclica`; `portalRef` also asserts the built value fits. */
 export const NUMPEDCLI_MAX_LENGTH = 30;
+
+/** This bridge carries a service-role secret, so its destination is immutable. */
+export const BRIDGE_SUPABASE_ORIGIN =
+  "https://gudiykhngonoqsjoigza.supabase.co";
 
 /**
  * KEY=VALUE lines. Deliberately minimal: no interpolation, no multi-line values,
@@ -181,6 +190,61 @@ function optionalInteger(
   return value;
 }
 
+/** Only the two literal boolean tokens are accepted — no truthy coercion. */
+function optionalBoolean(
+  env: Record<string, string | undefined>,
+  key: string,
+  fallback: boolean,
+): boolean {
+  const raw = env[key]?.trim();
+  if (!raw) return fallback;
+  if (raw === "true") return true;
+  if (raw === "false") return false;
+  throw new BridgeConfigError(
+    `BAD_${key}`,
+    `${key} must be exactly "true" or "false"; got "${raw}"`,
+  );
+}
+
+const CANONICAL_UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+
+export function isCanonicalUuid(value: unknown): value is string {
+  return typeof value === "string" && CANONICAL_UUID_PATTERN.test(value);
+}
+
+/** Canonical RFC UUID, or null when the optional setting is absent. */
+function optionalUuid(
+  env: Record<string, string | undefined>,
+  key: string,
+): string | null {
+  const raw = env[key]?.trim();
+  if (!raw) return null;
+  const canonical = raw.toLowerCase();
+  if (!isCanonicalUuid(canonical)) {
+    throw new BridgeConfigError(
+      `BAD_${key}`,
+      `${key} must be a standard hyphenated UUID; got "${raw}"`,
+    );
+  }
+  return canonical;
+}
+
+/** Wingest CAN is a one- or two-character ASCII alphanumeric identifier. */
+function bridgeCan(env: Record<string, string | undefined>): string {
+  const raw = env.BRIDGE_CAN?.trim() || DEFAULTS.BRIDGE_CAN;
+  const canonical = raw.toUpperCase();
+  // Check the source as ASCII too: Unicode case folding can expand or map a
+  // non-ASCII token into an apparently valid identifier (for example ß → SS).
+  if (!/^[A-Za-z0-9]{1,2}$/.test(raw) || !/^[A-Z0-9]{1,2}$/.test(canonical)) {
+    throw new BridgeConfigError(
+      "BAD_BRIDGE_CAN",
+      `BRIDGE_CAN must be 1-2 ASCII letters or digits; got "${raw}"`,
+    );
+  }
+  return canonical;
+}
+
 /**
  * Pure: takes an environment map (from `bridge.env`, `process.env`, or a test)
  * and returns the validated config or throws. Nothing here reads a file or a
@@ -193,16 +257,25 @@ export function loadBridgeConfig(
   let supabaseUrl: string;
   try {
     const parsed = new URL(supabaseUrlRaw);
-    if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
-      throw new Error("not http(s)");
+    if (
+      parsed.origin !== BRIDGE_SUPABASE_ORIGIN ||
+      parsed.protocol !== "https:" ||
+      parsed.username !== "" ||
+      parsed.password !== "" ||
+      parsed.port !== "" ||
+      (parsed.pathname !== "" && parsed.pathname !== "/") ||
+      parsed.search !== "" ||
+      parsed.hash !== ""
+    ) {
+      throw new Error("not the pinned project origin");
     }
-    // Store it without the trailing slash so `${url}/rest/v1/...` never doubles
-    // up — PostgREST answers 404 on a doubled slash and the cause is invisible.
-    supabaseUrl = parsed.origin + parsed.pathname.replace(/\/+$/, "");
+    // Keep only the pinned origin. No path, credentials, custom port, query or
+    // fragment can influence where the service-role Authorization header goes.
+    supabaseUrl = BRIDGE_SUPABASE_ORIGIN;
   } catch {
     throw new BridgeConfigError(
       "BAD_SUPABASE_URL",
-      `SUPABASE_URL must be an http(s) URL; got "${supabaseUrlRaw}"`,
+      `SUPABASE_URL must be exactly ${BRIDGE_SUPABASE_ORIGIN}`,
     );
   }
 
@@ -219,6 +292,24 @@ export function loadBridgeConfig(
   }
 
   const { server, port } = parseServerAddress(requireValue(env, "WINGEST_SERVER"));
+  const allowHistoricalEje = optionalBoolean(
+    env,
+    "BRIDGE_ALLOW_HISTORICAL_EJE",
+    DEFAULTS.BRIDGE_ALLOW_HISTORICAL_EJE,
+  );
+  const historicalOrderId = optionalUuid(env, "BRIDGE_HISTORICAL_ORDER_ID");
+  if (allowHistoricalEje && historicalOrderId === null) {
+    throw new BridgeConfigError(
+      "MISSING_BRIDGE_HISTORICAL_ORDER_ID",
+      "BRIDGE_HISTORICAL_ORDER_ID is required when BRIDGE_ALLOW_HISTORICAL_EJE=true",
+    );
+  }
+  if (!allowHistoricalEje && historicalOrderId !== null) {
+    throw new BridgeConfigError(
+      "UNEXPECTED_BRIDGE_HISTORICAL_ORDER_ID",
+      "BRIDGE_HISTORICAL_ORDER_ID requires BRIDGE_ALLOW_HISTORICAL_EJE=true",
+    );
+  }
 
   return {
     supabaseUrl,
@@ -230,8 +321,11 @@ export function loadBridgeConfig(
     wingestPassword: requireValue(env, "WINGEST_PASSWORD"),
     // 4 chars is the `susuario.CODUSU` width; the sandbox default SFY is 3.
     erpUser: optionalText(env, "BRIDGE_ERP_USER", DEFAULTS.BRIDGE_ERP_USER, 4),
-    can: optionalText(env, "BRIDGE_CAN", DEFAULTS.BRIDGE_CAN, 2),
+    // One canonical spelling makes the portal's (CAN,EJE,NUMPED) key dependable.
+    can: bridgeCan(env),
     eje: optionalInteger(env, "BRIDGE_EJE", DEFAULTS.BRIDGE_EJE, 1, 9999),
+    allowHistoricalEje,
+    historicalOrderId,
     alm: optionalText(env, "BRIDGE_ALM", DEFAULTS.BRIDGE_ALM, 5),
     serfac: optionalInteger(env, "BRIDGE_SERFAC", DEFAULTS.BRIDGE_SERFAC, 0, 999),
     claimLimit: optionalInteger(
@@ -289,6 +383,8 @@ const KNOWN_KEYS = [
   "BRIDGE_ERP_USER",
   "BRIDGE_CAN",
   "BRIDGE_EJE",
+  "BRIDGE_ALLOW_HISTORICAL_EJE",
+  "BRIDGE_HISTORICAL_ORDER_ID",
   "BRIDGE_ALM",
   "BRIDGE_SERFAC",
   "CLAIM_LIMIT",
@@ -296,10 +392,9 @@ const KNOWN_KEYS = [
 ] as const;
 
 /**
- * The mssql pool configuration. `encrypt: false` + `trustServerCertificate` mirror
- * the sandbox-validated connection string (`Encrypt=False;TrustServerCertificate=True`)
- * — the bridge talks to SQL Server over loopback on the same box, so there is no
- * network to eavesdrop on and the ERP instance has no certificate to validate.
+ * The mssql pool configuration. TLS is mandatory. The current Wingest server
+ * uses an internal/self-signed certificate, so certificate-chain trust remains
+ * explicit until operations installs the enterprise CA.
  *
  * `useUTC: true` is tedious's default, pinned here because the injector depends
  * on it: a `datetime` read out of `stolot.FECCAD` and written straight back into
@@ -317,7 +412,7 @@ export function wingestPoolConfig(cfg: BridgeConfig): MssqlConfig {
     connectionTimeout: 15_000,
     requestTimeout: 60_000,
     options: {
-      encrypt: false,
+      encrypt: true,
       trustServerCertificate: true,
       useUTC: true,
     },
@@ -338,7 +433,9 @@ export function bridgeSecrets(cfg: BridgeConfig): string[] {
  * lives here; the two secrets are structurally absent rather than masked, so a
  * future field cannot be added to the log by accident.
  */
-export function describeConfig(cfg: BridgeConfig): Record<string, string | number> {
+export function describeConfig(
+  cfg: BridgeConfig,
+): Record<string, string | number | boolean | null> {
   return {
     supabaseUrl: cfg.supabaseUrl,
     wingestServer: cfg.wingestPort
@@ -349,6 +446,8 @@ export function describeConfig(cfg: BridgeConfig): Record<string, string | numbe
     erpUser: cfg.erpUser,
     can: cfg.can,
     eje: cfg.eje,
+    allowHistoricalEje: cfg.allowHistoricalEje === true,
+    historicalOrderId: cfg.historicalOrderId,
     alm: cfg.alm,
     serfac: cfg.serfac,
     claimLimit: cfg.claimLimit,

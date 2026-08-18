@@ -93,6 +93,7 @@
       "submitted": "Enviado",
       "confirmed": "Confirmado",
       "processing": "En proceso",
+      "bridge_failed": "Revisión manual",
       "injected": "En ERP",
       "albaran": "Albarán",
       "cancelled": "Cancelado"
@@ -154,6 +155,7 @@
     "ordersQueue": "Cola de confirmación de pedidos",
     "tabSubmitted": "Pendientes",
     "tabConfirmed": "Confirmados",
+    "tabBridgeFailed": "Error de inyección",
     "tabAll": "Todos",
     "noOrders": "No hay pedidos en esta vista",
     "orderLines": "Líneas ({n})",
@@ -162,6 +164,8 @@
     "confirmFor": "Confirmar el pedido {n}",
     "cancel": "Cancelar",
     "cancelFor": "Cancelar el pedido {n}",
+    "requeue": "Reintentar tras corregir",
+    "requeueFor": "Volver a poner en cola el pedido {n}",
     "staffNote": "Nota interna (opcional)",
     "staffNoteFor": "Nota interna: pedido {n}",
     "cancelReason": "Motivo de la cancelación (opcional)",
@@ -169,6 +173,11 @@
     "rpcOk": "Operación realizada",
     "rpcWrongState": "El pedido ya no estaba en ese estado. No se ha cambiado nada; actualice la página.",
     "rpcFailed": "No se ha podido completar la operación. Inténtelo de nuevo.",
+    "bridgeFailure": {
+      "attempts": "{n} intentos en este ciclo",
+      "failedAt": "Falló el {time} (hora de Madrid)",
+      "detailsUnavailable": "No se pueden leer los detalles del fallo. Revise el registro del servidor antes de reintentarlo."
+    },
     "kg": "KG",
     "saveQty": "Guardar",
     "saveQtyFor": "Guardar cantidad: {name}",
@@ -286,12 +295,16 @@
       "state": {
         "ok": "Correcto",
         "busy": "Ejecución anterior en curso",
+        "degraded": "Pedidos en reintento",
+        "businessFailed": "Pedidos requieren revisión",
         "failed": "Con error",
         "stale": "Sin señal reciente",
         "missing": "Nunca ha ejecutado"
       },
       "hint": {
         "busy": "La ejecución anterior seguía en marcha y el bloqueo ha parado esta. Se recupera sola en la vuelta siguiente; no es un fallo.",
+        "degraded": "La ejecución ha terminado, pero hay pedidos fallidos programados para reintento automático.",
+        "businessFailed": "La ejecución ha terminado, pero hay pedidos que requieren intervención, siguen en proceso o cuya cola no se pudo verificar.",
         "failed": "Esta ejecución no ha terminado. El detalle está en bridge.log, en el servidor.",
         "stale": "Ha pasado más tiempo del que permite su frecuencia; puede que la tarea programada esté desactivada.",
         "missing": "No ha llegado ninguna señal: la tarea programada no existe o bridge.env está mal configurado (en ese caso no se escribe señal alguna)."
@@ -301,13 +314,21 @@
           "claimed": "Tomados",
           "injected": "Inyectados",
           "recovered": "Recuperados",
+          "requeued": "Programados de nuevo",
+          "terminal": "Intervención manual",
           "markFailed": "Sin confirmar",
-          "failed": "Fallidos"
+          "failed": "Fallidos",
+          "failureMarkFailed": "Fallo sin anotar",
+          "manualRequired": "Pendientes de intervención",
+          "retryPending": "Reintentos pendientes",
+          "processingPending": "Pendientes en proceso",
+          "backlogCountError": "Recuentos no disponibles"
         },
         "albaran-sync": {
           "injected": "Pendientes de albarán",
           "matched": "Emparejados",
-          "marked": "Anotados"
+          "marked": "Anotados",
+          "failed": "Identidad o anotación fallida"
         },
         "price-sync": {
           "articles": "Artículos ERP",

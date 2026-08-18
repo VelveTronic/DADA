@@ -37,6 +37,7 @@
 import * as sql from "mssql";
 import { wingestPoolConfig, type BridgeConfig } from "./config";
 import {
+  PayloadError,
   centsToEuros,
   lineParams,
   portalRef,
@@ -55,6 +56,21 @@ import {
  */
 export class InjectError extends Error {
   readonly code: string;
+  /**
+   * Whether another unattended attempt can reasonably succeed.
+   *
+   * The database owns the attempt ceiling and backoff. This flag only tells it
+   * whether to schedule another attempt at all: payload/business-contract
+   * failures are permanent until a person changes data and explicitly requeues
+   * the order; connection, timeout and unknown infrastructure failures remain
+   * retryable (but still stop automatically at that database ceiling).
+   */
+  readonly retryable: boolean;
+  /**
+   * The transaction outcome left the current SQL connection unsafe to reuse.
+   * The orders job must stop this claimed batch after it records the failure.
+   */
+  readonly abortBatch: boolean;
   readonly orderId: string;
   readonly orderNumber: number;
   readonly ref: string;
@@ -63,7 +79,7 @@ export class InjectError extends Error {
     code: string,
     message: string,
     context: { orderId: string; orderNumber: number; ref: string },
-    options?: ErrorOptions,
+    options?: ErrorOptions & { retryable?: boolean; abortBatch?: boolean },
   ) {
     super(
       `order ${context.orderNumber} (${context.ref}): ${message}`,
@@ -71,16 +87,80 @@ export class InjectError extends Error {
     );
     this.name = "InjectError";
     this.code = code;
+    this.retryable = options?.retryable ?? true;
+    this.abortBatch = options?.abortBatch ?? false;
     this.orderId = context.orderId;
     this.orderNumber = context.orderNumber;
     this.ref = context.ref;
   }
 }
 
+/** Stable retryable failures whose outcome makes the SQL pool unsafe to reuse. */
+export const ERP_COMMIT_OUTCOME_UNKNOWN = "ERP_COMMIT_OUTCOME_UNKNOWN";
+export const ERP_ROLLBACK_FAILED = "ERP_ROLLBACK_FAILED";
+
+type TransactionControl = Pick<sql.Transaction, "commit" | "rollback">;
+type InjectErrorContext = {
+  orderId: string;
+  orderNumber: number;
+  ref: string;
+};
+
+function causeMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * A rejected COMMIT cannot tell us whether SQL Server persisted the pedido.
+ * Never attempt to reinterpret that ambiguity by rolling back or reusing the
+ * connection; the next run's validated dedup is the only safe recovery path.
+ */
+export async function commitTransactionOrAbort(
+  transaction: Pick<TransactionControl, "commit">,
+  context: InjectErrorContext,
+): Promise<void> {
+  try {
+    await transaction.commit();
+  } catch (error) {
+    throw new InjectError(
+      ERP_COMMIT_OUTCOME_UNKNOWN,
+      `ERP commit outcome is unknown: ${causeMessage(error)}`,
+      context,
+      { cause: error, retryable: true, abortBatch: true },
+    );
+  }
+}
+
+/**
+ * Preserve both the injection failure and the rollback failure. Once rollback
+ * itself is uncertain, this transaction's connection must not serve another
+ * order from the same claim.
+ */
+export async function rollbackTransactionOrAbort(
+  transaction: Pick<TransactionControl, "rollback">,
+  context: InjectErrorContext,
+  originalError: unknown,
+): Promise<void> {
+  try {
+    await transaction.rollback();
+  } catch (rollbackError) {
+    const causes = new AggregateError(
+      [originalError, rollbackError],
+      "ERP injection and rollback both failed",
+    );
+    throw new InjectError(
+      ERP_ROLLBACK_FAILED,
+      `ERP rollback failed after ${causeMessage(originalError)}: ${causeMessage(rollbackError)}`,
+      context,
+      { cause: causes, retryable: true, abortBatch: true },
+    );
+  }
+}
+
 /**
  * Every line on the order is `is_erp_excluded`, so there is no pedido to write.
- * Its own class because the job layer treats it differently from a failure: the
- * order is left `processing`, the lease expires, and staff pick it up by hand.
+ * Its own permanent class because retrying unchanged data can never create a
+ * pedido; the job reports it immediately to the staff failure queue.
  */
 export class AllLinesExcludedError extends InjectError {
   constructor(context: { orderId: string; orderNumber: number; ref: string }) {
@@ -88,12 +168,49 @@ export class AllLinesExcludedError extends InjectError {
       ALL_LINES_EXCLUDED,
       "every line is is_erp_excluded — nothing to inject",
       context,
+      { retryable: false },
     );
     this.name = "AllLinesExcludedError";
   }
 }
 
 export const ALL_LINES_EXCLUDED = "ALL_LINES_EXCLUDED";
+
+/** The complete Wingest primary-key identity of one pedido header. */
+export interface ErpPedidoIdentity {
+  can: string;
+  eje: number;
+  numped: number;
+}
+
+export const ERP_PEDIDO_IDENTITY_INVALID = "ERP_PEDIDO_IDENTITY_INVALID";
+export const ERP_PEDIDO_RECOVERY_MISMATCH = "ERP_PEDIDO_RECOVERY_MISMATCH";
+export const ERP_NUMPED_COUNTER_INVALID = "ERP_NUMPED_COUNTER_INVALID";
+
+/** Portal facts an existing ERP header must reproduce before it is recovered. */
+export interface ErpPedidoRecoveryExpectation {
+  ref: string;
+  codcli: number;
+  includedLineCount: number;
+  includedNetoCents: number;
+}
+
+const ERP_EJE_MAX = 9_999;
+const POSTGRES_INTEGER_MAX = 2_147_483_647;
+
+/**
+ * A deterministic ERP/business-data failure discovered below the order-aware
+ * layer. `injectOrder` wraps it in an `InjectError`, preserving both the stable
+ * machine code and the permanent disposition while adding portal order context.
+ */
+class PermanentInjectCauseError extends Error {
+  readonly retryable = false;
+
+  constructor(readonly code: string, message: string) {
+    super(message);
+    this.name = "PermanentInjectCauseError";
+  }
+}
 
 // ---------------------------------------------------------------------------
 // SQL fragments and the two INSERT statements
@@ -113,8 +230,8 @@ export type ColumnValue = readonly [column: string, value: string];
  * `pedclica`, the pedido header. Column order and value expressions are v3.2's,
  * with Plan-04 delta 1 applied to the five date expressions:
  *
- * - FECPED, FECPREVTO, fecalt: `CAST(GETDATE() AS date)` → `MADRID_TODAY_SQL`
- * - SEMANA: `DATEPART(week,GETDATE())` → the same week, of the Madrid date
+ * - FECPED, FECPREVTO, fecalt: `CAST(GETDATE() AS date)` → `@FECPED`
+ * - SEMANA: `DATEPART(week,GETDATE())` → the same week, of `@FECPED`
  *   (SEMANA is the business week of FECPED; leaving it on the China clock would
  *   put a Sunday-evening Madrid order into next week)
  * - FECENT: `CAST(GETDATE() AS date)` → `@FECENT`, resolved by `resolveFecent`
@@ -125,7 +242,7 @@ export const PEDCLICA_COLUMNS: readonly ColumnValue[] = [
   ["CAN", "@CAN"],
   ["EJE", "@EJE"],
   ["NUMPED", "@NUMPED"],
-  ["FECPED", MADRID_TODAY_SQL],
+  ["FECPED", "@FECPED"],
   ["FECENT", "@FECENT"],
   ["NUMPEDCLI", "@EXT"],
   ["CODCLI", "@CODCLI"],
@@ -173,11 +290,11 @@ export const PEDCLICA_COLUMNS: readonly ColumnValue[] = [
   ["idventa", "@IDVENTA"],
   ["USUCREPED", "@USU"],
   ["CODUSU", "@USU"],
-  ["FECPREVTO", MADRID_TODAY_SQL],
+  ["FECPREVTO", "@FECPED"],
   ["TSENVSRV", "GETDATE()"],
   ["TS", "GETDATE()"],
-  ["fecalt", MADRID_TODAY_SQL],
-  ["SEMANA", `DATEPART(week,${MADRID_TODAY_SQL})`],
+  ["fecalt", "@FECPED"],
+  ["SEMANA", "DATEPART(week,@FECPED)"],
 ];
 
 /**
@@ -510,7 +627,8 @@ export function computeTaxes(
       // header column reads: the line stays on the pedido while its base
       // silently vanishes from NETO. Refuse instead — a header whose totals do
       // not match its lines is exactly what the contract checks exist to stop.
-      throw new Error(
+      throw new PermanentInjectCauseError(
+        "ERP_TAX_SLOT_INVALID",
         `tipivaar.POSMAT for TIPIVAART "${line.tipivaart}" is ${slot}; only 1..5 have header columns`,
       );
     }
@@ -649,6 +767,8 @@ export interface HeaderInput {
   numped: number;
   ref: string;
   codcli: number;
+  /** One SQL Server-sampled Madrid date shared by all business-date columns. */
+  fecped: Date;
   fecent: Date;
   taxes: TaxTotals;
   totcosEuros: number;
@@ -665,6 +785,7 @@ export function buildHeaderParams(input: HeaderInput): ParamMap {
     CAN: P.text(input.can),
     EJE: P.int(input.eje),
     NUMPED: P.int(input.numped),
+    FECPED: P.date(input.fecped),
     FECENT: P.date(input.fecent),
     EXT: P.text(input.ref),
     CODCLI: P.int(input.codcli),
@@ -814,27 +935,128 @@ export async function readMadridToday(parent: SqlParent): Promise<string> {
  * Delta 2: has this portal order already been injected? Both the live header
  * table and its history are checked, and a hit RECOVERS rather than fails —
  * that is what closes the crash-after-inject-before-mark window, where the
- * order was re-claimed after its NUMPED was already written.
+ * order was re-claimed after its pedido identity was already written.
  *
  * Filtered on CAN only, as v3.2 was: `PORTAL-<order_number>` is unique for all
- * time, so a hit under a previous EJE is still the same pedido. Newest EJE wins.
+ * time, so a hit under a previous EJE is still the same pedido. Newest EJE wins,
+ * but the stored CAN/EJE/NUMPED are returned intact rather than being rebuilt
+ * from today's configuration.
+ *
+ * A hit is only recovered once it reproduces the portal order: the same ref, the
+ * same CODCLI, the same NETO to the cent, and — counted in the lines table that
+ * matches the header table it came from — the same number of included lines.
+ * Adopting a pedido that fails any of those would write a NUMPED onto an order
+ * whose goods it does not describe.
  */
 export async function dedupCheck(
   parent: SqlParent,
   cfg: BridgeConfig,
-  ref: string,
-): Promise<number | null> {
+  expected: ErpPedidoRecoveryExpectation,
+): Promise<ErpPedidoIdentity | null> {
   const result = await runQuery<Record<string, unknown>>(
     parent,
-    "SELECT TOP 1 z.NUMPED FROM (" +
-      "SELECT EJE, NUMPED FROM pedclica WHERE CAN=@can AND RTRIM(NUMPEDCLI)=@ext" +
+    "SELECT TOP 1 z.SRC, z.CAN, z.EJE, z.NUMPED, z.NUMPEDCLI, z.CODCLI, z.NETO FROM (" +
+      "SELECT 'pedclica' AS SRC, CAN, EJE, NUMPED, RTRIM(NUMPEDCLI) AS NUMPEDCLI, CODCLI, NETO" +
+      " FROM pedclica WHERE CAN=@can AND RTRIM(NUMPEDCLI)=@ext" +
       " UNION ALL " +
-      "SELECT EJE, NUMPED FROM pedclicah WHERE CAN=@can AND RTRIM(NUMPEDCLI)=@ext" +
+      "SELECT 'pedclicah' AS SRC, CAN, EJE, NUMPED, RTRIM(NUMPEDCLI) AS NUMPEDCLI, CODCLI, NETO" +
+      " FROM pedclicah WHERE CAN=@can AND RTRIM(NUMPEDCLI)=@ext" +
       ") z ORDER BY z.EJE DESC, z.NUMPED DESC",
-    { can: P.text(cfg.can), ext: P.text(ref) },
+    { can: P.text(cfg.can), ext: P.text(expected.ref) },
   );
-  const numped = toNumber(firstScalar(result));
-  return numped !== null && numped > 0 ? numped : null;
+  const row = result.recordset?.[0];
+  if (!row) return null;
+
+  // Which half of the UNION produced the hit decides which lines table holds
+  // its lines: an archived header's lines live in `pedclilih`, and counting
+  // `pedclili` for one would return 0 and reject a perfectly good recovery.
+  const source = toText(row.SRC);
+  const linesTable =
+    source === "pedclica" ? "pedclili" : source === "pedclicah" ? "pedclilih" : null;
+  if (linesTable === null) {
+    throw new PermanentInjectCauseError(
+      ERP_PEDIDO_IDENTITY_INVALID,
+      `dedup returned an unknown header source ${JSON.stringify(source)}`,
+    );
+  }
+
+  // SQL Server commonly compares this key case-insensitively, while the
+  // portal identity index does not. Persist one canonical representation.
+  const can = toText(row.CAN).toUpperCase();
+  const eje = toNumber(row.EJE);
+  const numped = toNumber(row.NUMPED);
+  if (
+    can.length === 0 ||
+    can.length > 2 ||
+    eje === null ||
+    !Number.isSafeInteger(eje) ||
+    eje <= 0 ||
+    eje > ERP_EJE_MAX ||
+    numped === null ||
+    !Number.isSafeInteger(numped) ||
+    numped <= 0 ||
+    numped > POSTGRES_INTEGER_MAX
+  ) {
+    throw new PermanentInjectCauseError(
+      ERP_PEDIDO_IDENTITY_INVALID,
+      "dedup returned an invalid ERP pedido identity " +
+        `(CAN=${JSON.stringify(can)}, EJE=${String(row.EJE)}, NUMPED=${String(row.NUMPED)})`,
+    );
+  }
+
+  const actualRef = toText(row.NUMPEDCLI);
+  const actualCodcli = toNumber(row.CODCLI);
+  const actualNeto = toNumber(row.NETO);
+  const actualNetoCents =
+    actualNeto !== null && Number.isFinite(actualNeto)
+      ? Math.round(actualNeto * 100)
+      : null;
+  if (
+    actualRef !== expected.ref ||
+    actualCodcli === null ||
+    !Number.isSafeInteger(actualCodcli) ||
+    actualCodcli !== expected.codcli ||
+    actualNetoCents === null ||
+    !Number.isSafeInteger(actualNetoCents) ||
+    actualNetoCents !== expected.includedNetoCents
+  ) {
+    throw new PermanentInjectCauseError(
+      ERP_PEDIDO_RECOVERY_MISMATCH,
+      "dedup candidate does not match the portal order " +
+        `(ref expected=${JSON.stringify(expected.ref)} actual=${JSON.stringify(actualRef)}, ` +
+        `CODCLI expected=${expected.codcli} actual=${String(row.CODCLI)}, ` +
+        `NETO cents expected=${expected.includedNetoCents} actual=${String(actualNetoCents)})`,
+    );
+  }
+
+  // The line count is COUNTED, not inferred from ULTLIN. ULTLIN is the last
+  // NUMLIN this bridge wrote — a header field a partial write, a Wingest edit or
+  // a deleted line leaves untouched — so reading it as "five times the number of
+  // lines" would accept a pedido that lost half the order. The table name is one
+  // of two literals chosen above, never a value from the row.
+  const actualLineCount = toNumber(
+    firstScalar(
+      await runQuery(
+        parent,
+        `SELECT COUNT(*) FROM ${linesTable} WHERE CAN=@can AND EJE=@eje AND NUMPED=@numped`,
+        { can: P.text(can), eje: P.int(eje), numped: P.int(numped) },
+      ),
+    ),
+  );
+  if (
+    actualLineCount === null ||
+    !Number.isSafeInteger(actualLineCount) ||
+    actualLineCount !== expected.includedLineCount
+  ) {
+    throw new PermanentInjectCauseError(
+      ERP_PEDIDO_RECOVERY_MISMATCH,
+      "dedup candidate does not carry the portal order's lines " +
+        `(${linesTable} rows expected=${expected.includedLineCount} ` +
+        `actual=${String(actualLineCount)} for CAN=${can} EJE=${eje} NUMPED=${numped})`,
+    );
+  }
+
+  return { can, eje, numped };
 }
 
 export async function loadCustomer(
@@ -850,7 +1072,12 @@ export async function loadCustomer(
     { codcli: P.int(codcli) },
   );
   const row = result.recordset?.[0];
-  if (!row) throw new Error(`clientes has no CODCLI ${codcli}`);
+  if (!row) {
+    throw new PermanentInjectCauseError(
+      "ERP_CUSTOMER_NOT_FOUND",
+      `clientes has no CODCLI ${codcli}`,
+    );
+  }
   return applyCustomerDefaults(row);
 }
 
@@ -907,7 +1134,12 @@ export async function loadArticle(
   // for a hand-run sandbox script and unsafe here: the customer confirmed and
   // was charged for this line, and a pedido quietly short one line would ship
   // short. Only `is_erp_excluded` (delta 4) removes a line from a pedido.
-  if (!row) throw new Error(`articulo has no CODART "${codart}"`);
+  if (!row) {
+    throw new PermanentInjectCauseError(
+      "ERP_ARTICLE_NOT_FOUND",
+      `articulo has no CODART "${codart}"`,
+    );
+  }
   return {
     des: toText(row.DES),
     precos: toNumber(row.PRECOS) ?? 0,
@@ -1090,8 +1322,14 @@ export async function reserveCounters(
   // v3.2's `[int]$null` would have made this 0 and written a pedido numbered
   // zero. A missing counter row means the CAN/EJE in bridge.env does not exist
   // in this database, which is a configuration error, not a document number.
-  if (numped === null || !Number.isSafeInteger(numped) || numped <= 0) {
-    throw new Error(
+  if (
+    numped === null ||
+    !Number.isSafeInteger(numped) ||
+    numped <= 0 ||
+    numped > POSTGRES_INTEGER_MAX
+  ) {
+    throw new PermanentInjectCauseError(
+      ERP_NUMPED_COUNTER_INVALID,
       `newcontador has no usable NUMPEDCLI counter for CAN=${cfg.can} EJE=${cfg.eje}`,
     );
   }
@@ -1232,7 +1470,8 @@ export async function contractChecks(
   // `units_per_case`, whose factor `lineParams` defaulted to 1.
   for (const line of lines) {
     if (line.lineTotalCents !== line.portalLineTotalCents) {
-      throw new Error(
+      throw new PermanentInjectCauseError(
+        "ORDER_TOTAL_MISMATCH",
         `CONTRATO: SUBTOT de ${line.codart} — ${line.qtyBase} x ` +
           `${line.unitPriceCents} = ${line.lineTotalCents} céntimos, ` +
           `el portal cobró ${line.portalLineTotalCents}`,
@@ -1253,7 +1492,8 @@ export async function contractChecks(
     ),
   );
   if (header !== 1) {
-    throw new Error(
+    throw new PermanentInjectCauseError(
+      "ERP_HEADER_CONTRACT_FAILED",
       `CONTRATO: cabecera no cumple (fecha medianoche/estado) — matched ${header}`,
     );
   }
@@ -1269,7 +1509,10 @@ export async function contractChecks(
     ),
   );
   if (servible !== lineCount) {
-    throw new Error(`CONTRATO: lineas servibles ${servible} de ${lineCount}`);
+    throw new PermanentInjectCauseError(
+      "ERP_LINES_CONTRACT_FAILED",
+      `CONTRATO: lineas servibles ${servible} de ${lineCount}`,
+    );
   }
 
   const user = toNumber(
@@ -1280,7 +1523,10 @@ export async function contractChecks(
     ),
   );
   if (user !== 1) {
-    throw new Error(`CONTRATO: usuario ${cfg.erpUser} no existe`);
+    throw new PermanentInjectCauseError(
+      "ERP_USER_NOT_FOUND",
+      `CONTRATO: usuario ${cfg.erpUser} no existe`,
+    );
   }
 
   const adi = toNumber(
@@ -1293,7 +1539,10 @@ export async function contractChecks(
     ),
   );
   if (adi !== 1) {
-    throw new Error("CONTRATO: pedclica_adi <> 1 fila");
+    throw new PermanentInjectCauseError(
+      "ERP_ADI_CONTRACT_FAILED",
+      "CONTRATO: pedclica_adi <> 1 fila",
+    );
   }
 }
 
@@ -1301,9 +1550,8 @@ export async function contractChecks(
 // injectOrder
 // ---------------------------------------------------------------------------
 
-export interface InjectResult {
-  numped: number;
-  /** True when the pedido already existed and we recovered its NUMPED. */
+export interface InjectResult extends ErpPedidoIdentity {
+  /** True when the pedido already existed and we recovered its full ERP identity. */
   recovered: boolean;
   /**
    * Lines THIS run wrote — so it is 0 on the recovery path, where the pedido
@@ -1320,6 +1568,8 @@ export interface InjectResult {
 export interface PreparedOrder {
   ref: string;
   codcli: number;
+  /** Madrid business day sampled from SQL Server before any ERP write. */
+  fecped: Date;
   fecent: Date;
   customer: CustomerDefaults;
   taxes: TaxTotals;
@@ -1334,6 +1584,70 @@ export function orderContext(order: ClaimedOrder, ref: string): {
   ref: string;
 } {
   return { orderId: order.id, orderNumber: order.order_number, ref };
+}
+
+function assertHistoricalOrderScope(
+  cfg: BridgeConfig,
+  order: ClaimedOrder,
+  ref: string,
+): boolean {
+  const historicalTarget =
+    cfg.allowHistoricalEje === true && cfg.historicalOrderId === order.id;
+  if (cfg.allowHistoricalEje === true && !historicalTarget) {
+    throw new InjectError(
+      "HISTORICAL_ORDER_SCOPE_VIOLATION",
+      `historical override targets ${String(cfg.historicalOrderId)}, not ${order.id}`,
+      orderContext(order, ref),
+      { retryable: false },
+    );
+  }
+  return historicalTarget;
+}
+
+function checkedIncludedNetoCents(values: readonly number[]): number {
+  const total = values.reduce((sum, value) => sum + value, 0);
+  if (!Number.isSafeInteger(total) || total < 0) {
+    throw new PayloadError(
+      "BAD_INCLUDED_SUBTOTAL",
+      `included order subtotal is outside the safe integer range: ${total}`,
+    );
+  }
+  return total;
+}
+
+function recoveryProbe(order: ClaimedOrder, ref: string): {
+  expected: ErpPedidoRecoveryExpectation;
+  excludedCodarts: string[];
+} {
+  const { included, excluded } = splitLines(order.items);
+  if (included.length === 0) {
+    throw new AllLinesExcludedError(orderContext(order, ref));
+  }
+  const payloadLines = included.map(lineParams);
+  return {
+    expected: {
+      ref,
+      codcli: order.codcli,
+      includedLineCount: payloadLines.length,
+      includedNetoCents: checkedIncludedNetoCents(
+        payloadLines.map((line) => line.lineTotalCents),
+      ),
+    },
+    excludedCodarts: excluded.map((item) => item.codart),
+  };
+}
+
+function recoveryExpectationFromPrepared(
+  prepared: PreparedOrder,
+): ErpPedidoRecoveryExpectation {
+  return {
+    ref: prepared.ref,
+    codcli: prepared.codcli,
+    includedLineCount: prepared.lines.length,
+    includedNetoCents: checkedIncludedNetoCents(
+      prepared.lines.map((line) => line.portalLineTotalCents),
+    ),
+  };
 }
 
 /**
@@ -1362,6 +1676,21 @@ export async function prepareOrder(
   const payloadLines = included.map(lineParams);
 
   const madridToday = await readMadridToday(parent);
+  const madridYear = Number(madridToday.slice(0, 4));
+  const madridEje = madridYear % 100;
+  const historicalTarget = assertHistoricalOrderScope(cfg, order, ref);
+  if (!historicalTarget && cfg.eje !== madridEje) {
+    throw new InjectError(
+      "EJE_YEAR_MISMATCH",
+      `BRIDGE_EJE=${cfg.eje}, SQL Server Madrid business-date EJE=${madridEje}`,
+      orderContext(order, ref),
+      { retryable: true },
+    );
+  }
+  // Use the same sampled value in FECPED, FECPREVTO, fecalt and SEMANA. That
+  // removes the last midnight race: the EJE check and the inserted business
+  // date can no longer observe opposite sides of New Year.
+  const fecped = sqlDateFromIso(madridToday);
   const fecent = sqlDateFromIso(resolveFecent(order.delivery_date, madridToday));
   const customer = await loadCustomer(parent, order.codcli);
   const taxTables = await loadTaxTables(parent, cfg);
@@ -1404,6 +1733,7 @@ export async function prepareOrder(
   return {
     ref,
     codcli: order.codcli,
+    fecped,
     fecent,
     customer,
     taxes: computeTaxes(lines, customer.tipivacli, taxTables),
@@ -1417,18 +1747,59 @@ export async function prepareOrder(
   };
 }
 
+export type OrderPreflight =
+  | {
+      kind: "recovered";
+      identity: ErpPedidoIdentity;
+      excludedCodarts: string[];
+    }
+  | { kind: "prepared"; prepared: PreparedOrder };
+
+/**
+ * Check the database identity, then look for an already-committed pedido before
+ * touching mutable ERP master data. Recovery needs only immutable portal facts
+ * and the ERP header contract; a product/customer/lot changed after the first
+ * commit must not make that real pedido undiscoverable.
+ */
+export async function preflightOrder(
+  parent: SqlParent,
+  cfg: BridgeConfig,
+  order: ClaimedOrder,
+): Promise<OrderPreflight> {
+  await assertDatabase(parent, cfg);
+  const ref = portalRef(order.order_number);
+  assertHistoricalOrderScope(cfg, order, ref);
+  const probe = recoveryProbe(order, ref);
+  const existing = await dedupCheck(parent, cfg, probe.expected);
+  if (existing !== null) {
+    return {
+      kind: "recovered",
+      identity: existing,
+      excludedCodarts: probe.excludedCodarts,
+    };
+  }
+  return { kind: "prepared", prepared: await prepareOrder(parent, cfg, order) };
+}
+
 /**
  * WRITE phase, in the caller's transaction: dedup, counters, header, adi, lines,
  * contract checks. Returns `recovered` when the dedup key was already there and
- * nothing was written.
+ * nothing was written; either path returns the flat CAN/EJE/NUMPED identity.
  */
 export async function runInjectSteps(
   parent: SqlParent,
   cfg: BridgeConfig,
   prepared: PreparedOrder,
-): Promise<{ numped: number; recovered: boolean }> {
-  const existing = await dedupCheck(parent, cfg, prepared.ref);
-  if (existing !== null) return { numped: existing, recovered: true };
+): Promise<ErpPedidoIdentity & { recovered: boolean }> {
+  // The pool-level probe closes the crash-recovery path cheaply. This second,
+  // SERIALIZABLE probe closes the race where another injector commits the same
+  // portal ref while this run is resolving customer/article/lot master data.
+  const existing = await dedupCheck(
+    parent,
+    cfg,
+    recoveryExpectationFromPrepared(prepared),
+  );
+  if (existing !== null) return { ...existing, recovered: true };
 
   const counters = await reserveCounters(parent, cfg, prepared.lines.length);
   await insertHeader(parent, {
@@ -1437,6 +1808,7 @@ export async function runInjectSteps(
     numped: counters.numped,
     ref: prepared.ref,
     codcli: prepared.codcli,
+    fecped: prepared.fecped,
     fecent: prepared.fecent,
     taxes: prepared.taxes,
     totcosEuros: prepared.totcosEuros,
@@ -1459,12 +1831,17 @@ export async function runInjectSteps(
     prepared.lines,
   );
   await contractChecks(parent, cfg, counters.numped, prepared.codcli, prepared.lines);
-  return { numped: counters.numped, recovered: false };
+  return {
+    can: cfg.can,
+    eje: cfg.eje,
+    numped: counters.numped,
+    recovered: false,
+  };
 }
 
 /**
- * One claimed order → one pedido, or a clean rollback and a thrown
- * `InjectError` naming the order.
+ * One claimed order → one pedido, or a thrown `InjectError` naming the order.
+ * A failed rollback/commit also tells the caller to abandon the SQL pool.
  */
 export async function injectOrder(
   pool: sql.ConnectionPool,
@@ -1477,19 +1854,35 @@ export async function injectOrder(
     error instanceof InjectError
       ? error
       : new InjectError(
-          code,
+          error instanceof PayloadError || error instanceof PermanentInjectCauseError
+            ? error.code
+            : code,
           error instanceof Error ? error.message : String(error),
           context,
-          { cause: error },
+          {
+            cause: error,
+            retryable: !(
+              error instanceof PayloadError || error instanceof PermanentInjectCauseError
+            ),
+          },
         );
 
-  let prepared: PreparedOrder;
+  let preflight: OrderPreflight;
   try {
-    await assertDatabase(pool, cfg);
-    prepared = await prepareOrder(pool, cfg, order);
+    preflight = await preflightOrder(pool, cfg, order);
   } catch (error) {
     throw fail("PREFLIGHT_FAILED", error);
   }
+
+  if (preflight.kind === "recovered") {
+    return {
+      ...preflight.identity,
+      recovered: true,
+      lineCount: 0,
+      excludedCodarts: preflight.excludedCodarts,
+    };
+  }
+  const { prepared } = preflight;
 
   const transaction = new sql.Transaction(pool);
   try {
@@ -1498,33 +1891,27 @@ export async function injectOrder(
     throw fail("BEGIN_FAILED", error);
   }
 
-  let committed = false;
+  let result: Awaited<ReturnType<typeof runInjectSteps>>;
   try {
-    const result = await runInjectSteps(transaction, cfg, prepared);
-    // The recovery path wrote nothing, so this commit only releases the read
-    // locks — and the NUMPED still goes back as a SUCCESS, because the pedido
-    // does exist and recording it against the order is exactly what was missed.
-    await transaction.commit();
-    committed = true;
-    return {
-      numped: result.numped,
-      recovered: result.recovered,
-      lineCount: result.recovered ? 0 : prepared.lines.length,
-      excludedCodarts: prepared.excludedCodarts,
-    };
+    result = await runInjectSteps(transaction, cfg, prepared);
   } catch (error) {
-    if (!committed) {
-      // v3.2's `try{$tx.Rollback()}catch{}`: SQL Server may already have killed
-      // the transaction, and a rollback that fails must not replace the real
-      // cause with a message about rolling back.
-      try {
-        await transaction.rollback();
-      } catch {
-        /* already rolled back, or the connection is gone */
-      }
-    }
+    await rollbackTransactionOrAbort(transaction, context, error);
     throw fail("INJECT_FAILED", error);
   }
+
+  // The recovery path wrote nothing, so this commit only releases the read
+  // locks — and the full ERP identity still goes back as a SUCCESS, because the
+  // pedido does exist and recording it against the order is exactly what was
+  // missed. A rejected commit is nevertheless outcome-unknown for both paths.
+  await commitTransactionOrAbort(transaction, context);
+  return {
+    can: result.can,
+    eje: result.eje,
+    numped: result.numped,
+    recovered: result.recovered,
+    lineCount: result.recovered ? 0 : prepared.lines.length,
+    excludedCodarts: prepared.excludedCodarts,
+  };
 }
 
 /** The pool the jobs hand to `injectOrder`. Kept here so Task 2 has one door. */

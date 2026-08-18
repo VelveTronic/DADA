@@ -577,6 +577,21 @@ describe("classifyDbError", () => {
       code: "BAD_COMPANY",
     },
     {
+      name: "the database repeats a form invariant with its stable RPC token",
+      error: { message: "BAD_COMPANY", code: "22023" },
+      code: "BAD_COMPANY",
+    },
+    {
+      name: "the database self-lockout guard keeps its actionable result",
+      error: { message: "SELF_FORBIDDEN", code: "42501" },
+      code: "SELF_FORBIDDEN",
+    },
+    {
+      name: "an unknown invalid-parameter message is not guessed into a field",
+      error: { message: "BAD_ACTIVE", code: "22023" },
+      code: "DB_ERROR",
+    },
+    {
       name: "a revoked grant is nobody's form field",
       error: { message: "permission denied for table staff_users", code: "42501" },
       code: "DB_ERROR",

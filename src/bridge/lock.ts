@@ -18,12 +18,40 @@
  * far longer than any healthy run (the orders job is seconds; price-sync is a
  * few minutes over ~3k articles) and far shorter than a working day.
  */
-import { closeSync, openSync, readFileSync, statSync, unlinkSync, writeSync } from "node:fs";
+import { createHash, randomUUID } from "node:crypto";
+import {
+  closeSync,
+  fstatSync,
+  openSync,
+  readFileSync,
+  renameSync,
+  unlinkSync,
+  writeSync,
+} from "node:fs";
+import { hostname as systemHostname } from "node:os";
 import { join } from "node:path";
 import type { Logger } from "./log";
 
 /** Older than this and the holder is presumed dead. */
 export const LOCK_STALE_MS = 30 * 60 * 1000;
+
+/**
+ * The mutation sidecar's own staleness bound.
+ *
+ * A sidecar is held across a re-read and an `unlink` — microseconds of work, and
+ * nothing in between waits on a network or a database. Giving it the LOCK's
+ * thirty minutes meant a takeover that died mid-unlink froze every later run for
+ * half an hour, for a reservation whose honest lifetime is milliseconds. A
+ * minute is still thousands of times longer than the work it covers.
+ *
+ * A caller that shortens `staleMs` for a test is shortening this too: the
+ * sidecar can never outlive the lock generation it belongs to.
+ */
+export const MUTATION_STALE_MS = 60 * 1000;
+
+function mutationStaleMs(staleMs: number): number {
+  return Math.min(staleMs, MUTATION_STALE_MS);
+}
 
 /** Named failure so main can report the reason without inspecting a message. */
 export class LockError extends Error {
@@ -43,6 +71,8 @@ export interface LockBody {
   job: string;
   pid: number;
   startedAt: string;
+  hostname: string;
+  ownerToken: string;
 }
 
 /** A held lock. `release` is idempotent and never throws. */
@@ -57,6 +87,9 @@ export interface LockOptions {
   /** Told when a stale lock is taken over — an event worth seeing in the log. */
   log?: Pick<Logger, "warn">;
   pid?: number;
+  hostname?: string;
+  /** Test seam; null means the platform could not safely determine liveness. */
+  pidIsAlive?: (pid: number) => boolean | null;
 }
 
 /**
@@ -70,6 +103,8 @@ export interface LockOptions {
 export interface LockObservation {
   body: LockBody | null;
   mtimeMs: number;
+  /** Identity fallback for legacy or truncated bodies that have no token. */
+  fingerprint?: string;
 }
 
 export function formatLockBody(body: LockBody): string {
@@ -91,8 +126,18 @@ export function parseLockBody(text: string): LockBody | null {
   if (!parsed || typeof parsed !== "object") return null;
   const body = parsed as Partial<LockBody>;
   if (typeof body.job !== "string" || typeof body.startedAt !== "string") return null;
-  if (typeof body.pid !== "number") return null;
-  return { job: body.job, pid: body.pid, startedAt: body.startedAt };
+  if (typeof body.pid !== "number" || !Number.isSafeInteger(body.pid) || body.pid <= 0) {
+    return null;
+  }
+  if (typeof body.hostname !== "string" || body.hostname.length === 0) return null;
+  if (typeof body.ownerToken !== "string" || body.ownerToken.length < 16) return null;
+  return {
+    job: body.job,
+    pid: body.pid,
+    startedAt: body.startedAt,
+    hostname: body.hostname,
+    ownerToken: body.ownerToken,
+  };
 }
 
 /**
@@ -131,15 +176,26 @@ export function isStaleLock(
 
 /** Read a lock file, or null if it is not there any more. */
 export function observeLock(lockPath: string): LockObservation | null {
-  let text: string;
-  let mtimeMs: number;
+  let fd: number;
   try {
-    text = readFileSync(lockPath, "utf8");
-    mtimeMs = statSync(lockPath).mtimeMs;
+    fd = openSync(lockPath, "r");
   } catch {
     return null;
   }
-  return { body: parseLockBody(text), mtimeMs };
+
+  try {
+    const text = readFileSync(fd, "utf8");
+    const stat = fstatSync(fd);
+    const fingerprint = createHash("sha256")
+      .update(`${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeMs}:`)
+      .update(text)
+      .digest("hex");
+    return { body: parseLockBody(text), mtimeMs: stat.mtimeMs, fingerprint };
+  } catch {
+    return null;
+  } finally {
+    closeSync(fd);
+  }
 }
 
 function isErrnoCode(error: unknown, code: string): boolean {
@@ -150,18 +206,184 @@ function describe(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+interface MutationClaim {
+  path: string;
+  ownerToken: string;
+}
+
+function sameLockGeneration(
+  first: LockObservation,
+  second: LockObservation,
+): boolean {
+  const firstToken = first.body?.ownerToken;
+  const secondToken = second.body?.ownerToken;
+  if (firstToken || secondToken) return firstToken === secondToken;
+  return Boolean(first.fingerprint && first.fingerprint === second.fingerprint);
+}
+
+function mutationPath(lockPath: string, observed: LockObservation): string | null {
+  const identity = observed.body?.ownerToken ?? observed.fingerprint;
+  if (!identity) return null;
+  const generation = createHash("sha256").update(identity).digest("hex");
+  return `${lockPath}.mutation-${generation}`;
+}
+
+/**
+ * Atomically reserve the right to remove one exact lock generation.
+ *
+ * Release and stale takeover use the same deterministic sidecar name. Only one
+ * of them can create it with `wx`; the winner then re-reads the main file before
+ * unlinking. A sidecar left by a hard crash is reclaimed after
+ * `MUTATION_STALE_MS` — its own short TTL, not the lock's — and affects only
+ * that old generation, never a later lock with a different ownership token.
+ */
+function acquireMutationClaim(
+  lockPath: string,
+  job: string,
+  observed: LockObservation,
+  pid: number,
+  hostname: string,
+  now: () => Date,
+  staleMs: number,
+): MutationClaim | null {
+  const claimPath = mutationPath(lockPath, observed);
+  if (!claimPath) return null;
+
+  const ownerToken = randomUUID();
+  let fd: number | null = null;
+  for (;;) {
+    try {
+      fd = openSync(claimPath, "wx");
+      break;
+    } catch (error) {
+      if (!isErrnoCode(error, "EEXIST")) {
+        throw new LockError(
+          "LOCK_UNWRITABLE",
+          lockPath,
+          `cannot reserve lock-file mutation: ${describe(error)}`,
+        );
+      }
+
+      const existing = observeLock(claimPath);
+      if (!existing) continue;
+      if (!isStaleLock(existing, now().getTime(), mutationStaleMs(staleMs))) {
+        return null;
+      }
+
+      // Rename is the conditional removal primitive here: only one contender
+      // can move the exact old sidecar away, so a new sidecar created after
+      // that move cannot be deleted by the losing contender.
+      const quarantinePath = `${claimPath}.reclaim-${randomUUID()}`;
+      try {
+        renameSync(claimPath, quarantinePath);
+      } catch (reclaimError) {
+        if (isErrnoCode(reclaimError, "ENOENT")) continue;
+        throw new LockError(
+          "LOCK_UNWRITABLE",
+          lockPath,
+          `cannot reclaim expired lock-file mutation: ${describe(reclaimError)}`,
+        );
+      }
+      try {
+        unlinkSync(quarantinePath);
+      } catch {
+        /* A quarantined sidecar cannot block this generation anymore. */
+      }
+    }
+  }
+
+  let writeError: unknown;
+  try {
+    if (fd === null) throw new Error("mutation claim was not created");
+    writeSync(
+      fd,
+      formatLockBody({
+        job: `${job}:mutation`,
+        pid,
+        startedAt: now().toISOString(),
+        hostname,
+        ownerToken,
+      }),
+    );
+  } catch (error) {
+    writeError = error;
+  } finally {
+    closeSync(fd);
+  }
+
+  if (writeError) {
+    try {
+      unlinkSync(claimPath);
+    } catch {
+      /* fail closed: a partial claim blocks deletion of this generation */
+    }
+    throw new LockError(
+      "LOCK_UNWRITABLE",
+      lockPath,
+      `cannot write lock-file mutation claim: ${describe(writeError)}`,
+    );
+  }
+
+  return { path: claimPath, ownerToken };
+}
+
+function releaseMutationClaim(claim: MutationClaim): void {
+  const observed = observeLock(claim.path);
+  if (observed?.body?.ownerToken !== claim.ownerToken) return;
+  try {
+    unlinkSync(claim.path);
+  } catch {
+    /* fail closed: a later attempt will not delete through an uncertain claim */
+  }
+}
+
+function defaultPidIsAlive(pid: number): boolean | null {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    if (isErrnoCode(error, "ESRCH")) return false;
+    if (isErrnoCode(error, "EPERM")) return true;
+    return null;
+  }
+}
+
+function holderMayStillBeAlive(
+  observed: LockObservation,
+  hostname: string,
+  pidIsAlive: (pid: number) => boolean | null,
+): boolean {
+  const holder = observed.body;
+  if (!holder || holder.hostname !== hostname) return false;
+  try {
+    // Unknown (permissions/platform) is deliberately fail-closed. Only a
+    // definite "no such PID" permits a same-host stale takeover.
+    return pidIsAlive(holder.pid) !== false;
+  } catch {
+    return true;
+  }
+}
+
+function heldError(job: string, lockPath: string, observed: LockObservation | null): LockError {
+  const holder = observed?.body;
+  return new LockError(
+    "LOCK_HELD",
+    lockPath,
+    `${job} is already running` +
+      (holder ? ` (pid ${holder.pid}, since ${holder.startedAt})` : ""),
+  );
+}
+
 /**
  * Take `<dir>/<job>.lock` or throw.
  *
  * `wx` is the whole mechanism: an exclusive create is atomic in the filesystem,
  * so two processes racing for the same lock cannot both win it.
  *
- * The known gap is the stale takeover: between unlinking a dead lock and
- * creating ours, another run could do the same. Closing that needs a rename
- * dance for a case that requires two runs to start within milliseconds of each
- * other AFTER a crash left a 30-minute-old file — a race we would never observe
- * and could never test. The second create is still exclusive, so the loser gets
- * LOCK_HELD rather than a shared lock.
+ * Every body carries a random ownership token. Release and stale takeover first
+ * reserve mutation of that exact generation with their own `wx` sidecar, then
+ * re-read the main file before unlinking it. The exclusive main-file create
+ * still decides who owns the lock after a stale generation is removed.
  */
 export function acquireLock(dir: string, job: string, options: LockOptions = {}): Lock {
   const {
@@ -169,8 +391,12 @@ export function acquireLock(dir: string, job: string, options: LockOptions = {})
     now = () => new Date(),
     log,
     pid = process.pid,
+    hostname = systemHostname(),
+    pidIsAlive = defaultPidIsAlive,
   } = options;
   const lockPath = join(dir, `${job}.lock`);
+  const ownerToken = randomUUID();
+  let takeoverLog: { observed: LockObservation; observedAt: number } | null = null;
 
   const create = (): number | null => {
     try {
@@ -188,62 +414,151 @@ export function acquireLock(dir: string, job: string, options: LockOptions = {})
   let fd = create();
   if (fd === null) {
     const observed = observeLock(lockPath);
-    if (!isStaleLock(observed, now().getTime(), staleMs)) {
-      const holder = observed?.body;
-      throw new LockError(
-        "LOCK_HELD",
+
+    // The file may have disappeared between EEXIST and observation. Retrying
+    // the atomic create is safe and avoids treating a completed run as stale.
+    if (!observed) {
+      fd = create();
+      if (fd === null) throw heldError(job, lockPath, observeLock(lockPath));
+    } else {
+      const observedAt = now().getTime();
+      if (
+        !isStaleLock(observed, observedAt, staleMs) ||
+        holderMayStillBeAlive(observed, hostname, pidIsAlive)
+      ) {
+        throw heldError(job, lockPath, observed);
+      }
+
+      const claim = acquireMutationClaim(
         lockPath,
-        `${job} is already running` +
-          (holder ? ` (pid ${holder.pid}, since ${holder.startedAt})` : ""),
+        job,
+        observed,
+        pid,
+        hostname,
+        now,
+        staleMs,
       );
-    }
-    log?.warn("stale lock taken over", {
-      job,
-      path: lockPath,
-      heldSince: observed?.body?.startedAt,
-      heldByPid: observed?.body?.pid,
-      ageMs: observed ? lockAgeMs(observed, now().getTime()) : null,
-    });
-    try {
-      unlinkSync(lockPath);
-    } catch (error) {
-      if (!isErrnoCode(error, "ENOENT")) {
+      if (!claim) {
         throw new LockError(
-          "LOCK_UNWRITABLE",
+          "LOCK_HELD",
           lockPath,
-          `cannot remove the stale lock file: ${describe(error)}`,
+          `${job} lock takeover is already in progress`,
         );
       }
-    }
-    fd = create();
-    if (fd === null) {
-      throw new LockError(
-        "LOCK_HELD",
-        lockPath,
-        `${job} was taken by another run while the stale lock was being cleared`,
-      );
+
+      try {
+        const current = observeLock(lockPath);
+        if (current) {
+          const currentAt = now().getTime();
+          if (
+            !sameLockGeneration(observed, current) ||
+            !isStaleLock(current, currentAt, staleMs) ||
+            holderMayStillBeAlive(current, hostname, pidIsAlive)
+          ) {
+            throw heldError(job, lockPath, current);
+          }
+
+          try {
+            unlinkSync(lockPath);
+          } catch (error) {
+            if (!isErrnoCode(error, "ENOENT")) {
+              throw new LockError(
+                "LOCK_UNWRITABLE",
+                lockPath,
+                `cannot remove the stale lock file: ${describe(error)}`,
+              );
+            }
+          }
+        }
+
+        fd = create();
+        if (fd === null) {
+          throw new LockError(
+            "LOCK_HELD",
+            lockPath,
+            `${job} was taken by another run while the stale lock was being cleared`,
+          );
+        }
+      } finally {
+        releaseMutationClaim(claim);
+      }
+
+      takeoverLog = { observed, observedAt };
     }
   }
 
   try {
-    writeSync(fd, formatLockBody({ job, pid, startedAt: now().toISOString() }));
+    writeSync(
+      fd,
+      formatLockBody({
+        job,
+        pid,
+        startedAt: now().toISOString(),
+        hostname,
+        ownerToken,
+      }),
+    );
   } finally {
     closeSync(fd);
+  }
+
+  if (takeoverLog && log) {
+    try {
+      log.warn("stale lock taken over", {
+        job,
+        path: lockPath,
+        heldSince: takeoverLog.observed.body?.startedAt,
+        heldByPid: takeoverLog.observed.body?.pid,
+        ageMs: lockAgeMs(takeoverLog.observed, takeoverLog.observedAt),
+      });
+    } catch {
+      /* lock ownership must not be lost because diagnostic logging failed */
+    }
   }
 
   let released = false;
   return {
     path: lockPath,
     release() {
-      // Idempotent and silent: release runs in a `finally`, and a lock file that
-      // is already gone (an operator deleted it mid-run) is not a reason to turn
-      // a completed run into a failed one.
+      // Idempotent and silent: release runs in a `finally`. It deletes only the
+      // generation whose unpredictable token this Lock object owns.
       if (released) return;
       released = true;
+
+      const observed = observeLock(lockPath);
+      if (observed?.body?.ownerToken !== ownerToken) return;
+
+      let claim: MutationClaim | null;
       try {
-        unlinkSync(lockPath);
+        claim = acquireMutationClaim(
+          lockPath,
+          job,
+          observed,
+          pid,
+          hostname,
+          now,
+          staleMs,
+        );
       } catch {
-        /* already gone */
+        return;
+      }
+      if (!claim) return;
+
+      try {
+        const current = observeLock(lockPath);
+        if (
+          current?.body?.ownerToken !== ownerToken ||
+          !sameLockGeneration(observed, current)
+        ) {
+          return;
+        }
+        try {
+          unlinkSync(lockPath);
+        } catch {
+          /* already gone or externally protected; never delete by assumption */
+        }
+      } finally {
+        releaseMutationClaim(claim);
       }
     },
   };

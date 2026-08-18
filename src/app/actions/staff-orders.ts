@@ -66,12 +66,11 @@ type RpcReply = { data: boolean | null; error: { message: string } | null };
 type ServerSupabase = Awaited<ReturnType<typeof createServerSupabase>>;
 
 /**
- * The shared body of both transitions.
+ * The shared body of all order-state transitions.
  *
- * `false` is NOT success. Both RPCs update `where status = 'submitted'` and
- * return whether that matched, so a false means someone else confirmed or
- * cancelled this order first — the queue says so instead of redrawing as if the
- * click had worked (the plan's RPC contract: alertable, never assume).
+ * `false` is NOT success. Every RPC constrains the state it may leave, so false
+ * means somebody else moved the order first — the queue says so instead of
+ * redrawing as if the click had worked (alertable, never assume).
  *
  * The RPC runs on the AUTHENTICATED client, never the service-role one: it
  * gates on `private.is_staff()` itself, and the `order_events` row it writes
@@ -139,6 +138,23 @@ export async function cancelOrder(formData: FormData) {
     const { data, error } = await supabase.rpc("staff_cancel_order", {
       p_order_id: orderId,
       p_reason: reason,
+    });
+    return { data, error };
+  });
+}
+
+/**
+ * bridge_failed → confirmed, clearing this failure cycle so the bridge may
+ * claim it again.
+ *
+ * The RPC is the authority on the transition and records the staff actor. This
+ * action repeats the active-staff gate because a Server Action is an independent
+ * POST endpoint, even when its button only renders on the protected queue.
+ */
+export async function requeueOrder(formData: FormData) {
+  await runTransition(formData, async (supabase, orderId) => {
+    const { data, error } = await supabase.rpc("staff_requeue_order", {
+      p_order_id: orderId,
     });
     return { data, error };
   });

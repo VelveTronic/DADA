@@ -45,6 +45,7 @@ export type OrderStatus =
   | "submitted"
   | "confirmed"
   | "processing"
+  | "bridge_failed"
   | "injected"
   | "albaran"
   | "cancelled";
@@ -53,6 +54,7 @@ export const ORDER_STATUSES: readonly OrderStatus[] = [
   "submitted",
   "confirmed",
   "processing",
+  "bridge_failed",
   "injected",
   "albaran",
   "cancelled",
@@ -67,8 +69,13 @@ export function isOrderStatus(value: string): value is OrderStatus {
   return ORDER_STATUSES.some((status) => status === value);
 }
 
-/** The three views the staff queue offers; `all` means "no status filter". */
-export const QUEUE_TABS = ["submitted", "confirmed", "all"] as const;
+/** The four views the staff queue offers; `all` means "no status filter". */
+export const QUEUE_TABS = [
+  "submitted",
+  "confirmed",
+  "bridge_failed",
+  "all",
+] as const;
 
 export type QueueTab = (typeof QUEUE_TABS)[number];
 
@@ -253,6 +260,78 @@ export type LineEditResult = (typeof LINE_EDIT_RESULTS)[number];
 /** Guards `?lineResult=` on the way back in: the query string is user-editable. */
 export function isLineEditResult(value: string): value is LineEditResult {
   return LINE_EDIT_RESULTS.some((result) => result === value);
+}
+
+/** The staff-only projection returned by `staff_get_order_bridge_failures`. */
+export interface OrderBridgeFailure {
+  orderId: string;
+  status: OrderStatus;
+  attemptCount: number;
+  lastErrorCode: string | null;
+  lastErrorMessage: string | null;
+  failedAt: string | null;
+  nextAttemptAt: string | null;
+}
+
+function nullableString(value: unknown): string | null | undefined {
+  return value === null
+    ? null
+    : typeof value === "string"
+      ? value
+      : undefined;
+}
+
+/**
+ * Runtime boundary for the JSONB returned by the staff-only failure RPC.
+ *
+ * Generated Supabase types can only call a JSONB result `Json`; they cannot
+ * prove its object keys. A malformed/old row is omitted rather than letting one
+ * unexpected value throw the whole queue. The RPC itself is still the security
+ * boundary: customers have no EXECUTE grant and the sensitive columns remain
+ * revoked from `authenticated` table reads.
+ */
+export function parseOrderBridgeFailures(value: unknown): OrderBridgeFailure[] {
+  if (!Array.isArray(value)) return [];
+
+  const parsed: OrderBridgeFailure[] = [];
+  for (const item of value) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+    const row = item as Record<string, unknown>;
+    const orderId = row.order_id;
+    const status = row.status;
+    const attemptCount = row.attempt_count;
+    const lastErrorCode = nullableString(row.last_error_code);
+    const lastErrorMessage = nullableString(row.last_error_message);
+    const failedAt = nullableString(row.failed_at);
+    const nextAttemptAt = nullableString(row.next_attempt_at);
+
+    if (
+      typeof orderId !== "string" ||
+      !isUuid(orderId) ||
+      typeof status !== "string" ||
+      !isOrderStatus(status) ||
+      typeof attemptCount !== "number" ||
+      !Number.isSafeInteger(attemptCount) ||
+      attemptCount < 0 ||
+      lastErrorCode === undefined ||
+      lastErrorMessage === undefined ||
+      failedAt === undefined ||
+      nextAttemptAt === undefined
+    ) {
+      continue;
+    }
+
+    parsed.push({
+      orderId,
+      status,
+      attemptCount,
+      lastErrorCode,
+      lastErrorMessage,
+      failedAt,
+      nextAttemptAt,
+    });
+  }
+  return parsed;
 }
 
 /**

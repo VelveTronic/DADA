@@ -25,6 +25,8 @@ const cfg: BridgeConfig = {
   erpUser: "SFY",
   can: "B",
   eje: 26,
+  allowHistoricalEje: false,
+  historicalOrderId: null,
   alm: "00001",
   serfac: 1,
   claimLimit: 20,

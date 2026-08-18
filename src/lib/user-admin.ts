@@ -2,12 +2,13 @@
  * The rules behind the staff back office's user management, with nothing in them
  * that can touch a database.
  *
- * Creating an account is the one operation in this app that cannot be done with
- * the caller's own credentials: `auth.admin.createUser` needs the service-role
- * key, which bypasses RLS entirely. Every check that would normally be a policy
- * therefore has to happen in application code BEFORE that client is reached —
- * so it lives here, where it is a pure function with a test, rather than inside
- * a server action where it could only be exercised by creating real accounts.
+ * Creating an Auth account is the one operation in this app that cannot be done
+ * with the caller's own credentials: `auth.admin.createUser` needs the
+ * service-role key. The public profile half is deliberately different: it is
+ * written through role-checking database RPCs under the caller's own session.
+ * These predicates remain the early application gate and the source of the UI's
+ * capability model; the database repeats the same decision before any public
+ * company, customer or staff row is changed.
  *
  * Three consequences shape this file:
  *
@@ -405,9 +406,9 @@ export function validateNewStaff(raw: RawStaffInput): Validated<NewStaffInput> {
  *
  * There is exactly one owner in this deployment. A demotion or a deactivation
  * applied to their own row removes the only account that could undo it, and no
- * amount of RLS can see the intent — the service-role client would apply it
- * happily. So the comparison happens here, against the ACTOR's `auth.uid()`,
- * before any client is created.
+ * amount of UI hiding can recover the account. The comparison happens here,
+ * against the ACTOR's `auth.uid()`, before the RPC is called; the database RPC
+ * repeats the same self-lockout check so a direct Data API call cannot bypass it.
  *
  * The comparison is case- and space-insensitive because Postgres compares
  * `uuid` values, not their spelling: a crafted POST spelling the same id in
@@ -471,13 +472,16 @@ export function describeDbError(error: unknown): string {
 }
 
 /**
- * The two database failures a staff member can act on, told apart from the rest.
+ * Database failures a staff member can act on, told apart from the rest.
  *
  * Order matters: the role-exclusivity trigger
  * (`private.enforce_exclusive_user_role`) raises USER_ROLE_CONFLICT with
  * errcode **23505**, the same code a duplicate codcli produces, so it is
- * recognised first. Everything else stays `DB_ERROR` — a wrong guess sends a
- * staff member to change a field that was never the problem.
+ * recognised first. The role-checked RPCs also repeat the form invariants and
+ * raise their stable validation token with SQLSTATE 22023; those tokens are safe
+ * to map back to the same field error after a render/submit race. Everything
+ * else stays `DB_ERROR` — a wrong guess sends a staff member to change a field
+ * that was never the problem.
  */
 export function classifyDbError(error: unknown): UserAdminError {
   const source = record(error);
@@ -486,6 +490,22 @@ export function classifyDbError(error: unknown): UserAdminError {
 
   if (/USER_ROLE_CONFLICT|auth_user_role_exclusive/i.test(haystack)) return "ROLE_CONFLICT";
   if (code === "23505" && /codcli/i.test(haystack)) return "CODCLI_TAKEN";
+  if (code === "22023") {
+    const rpcValidation = field(source, "message");
+    if (
+      rpcValidation === "BAD_NAME" ||
+      rpcValidation === "BAD_COMPANY" ||
+      rpcValidation === "BAD_CODCLI" ||
+      rpcValidation === "BAD_TARCLI" ||
+      rpcValidation === "BAD_ROLE" ||
+      rpcValidation === "BAD_TARGET"
+    ) {
+      return rpcValidation;
+    }
+  }
+  if (code === "42501" && field(source, "message") === "SELF_FORBIDDEN") {
+    return "SELF_FORBIDDEN";
+  }
   // The only foreign key these writes touch is `portal_users.company_id`: the
   // chosen company was deleted between the page render and the submit.
   if (code === "23503") return "BAD_COMPANY";

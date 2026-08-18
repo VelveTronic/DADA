@@ -264,14 +264,23 @@ export type Database = {
       orders: {
         Row: {
           albaran_at: string | null
+          albaran_can: string | null
+          albaran_eje: number | null
+          bridge_attempt_count: number
           bridge_claim_token: string | null
           bridge_claimed_at: string | null
+          bridge_failed_at: string | null
+          bridge_last_error_code: string | null
+          bridge_last_error_message: string | null
+          bridge_next_attempt_at: string | null
           client_token: string | null
           company_id: string
           confirmed_at: string | null
           created_at: string
           customer_note: string | null
           delivery_date: string | null
+          erp_can: string | null
+          erp_eje: number | null
           id: string
           injected_at: string | null
           numalb: number | null
@@ -286,14 +295,23 @@ export type Database = {
         }
         Insert: {
           albaran_at?: string | null
+          albaran_can?: string | null
+          albaran_eje?: number | null
+          bridge_attempt_count?: number
           bridge_claim_token?: string | null
           bridge_claimed_at?: string | null
+          bridge_failed_at?: string | null
+          bridge_last_error_code?: string | null
+          bridge_last_error_message?: string | null
+          bridge_next_attempt_at?: string | null
           client_token?: string | null
           company_id: string
           confirmed_at?: string | null
           created_at?: string
           customer_note?: string | null
           delivery_date?: string | null
+          erp_can?: string | null
+          erp_eje?: number | null
           id?: string
           injected_at?: string | null
           numalb?: number | null
@@ -308,14 +326,23 @@ export type Database = {
         }
         Update: {
           albaran_at?: string | null
+          albaran_can?: string | null
+          albaran_eje?: number | null
+          bridge_attempt_count?: number
           bridge_claim_token?: string | null
           bridge_claimed_at?: string | null
+          bridge_failed_at?: string | null
+          bridge_last_error_code?: string | null
+          bridge_last_error_message?: string | null
+          bridge_next_attempt_at?: string | null
           client_token?: string | null
           company_id?: string
           confirmed_at?: string | null
           created_at?: string
           customer_note?: string | null
           delivery_date?: string | null
+          erp_can?: string | null
+          erp_eje?: number | null
           id?: string
           injected_at?: string | null
           numalb?: number | null
@@ -560,15 +587,46 @@ export type Database = {
           p_claim_token: string
           p_lease_seconds?: number
           p_limit?: number
+          p_order_id?: string
         }
         Returns: Json
       }
       bridge_mark_albaran: {
-        Args: { p_numalb: number; p_order_id: string }
+        Args: {
+          p_can: string
+          p_eje: number
+          p_numalb: number
+          p_order_id: string
+        }
         Returns: boolean
       }
+      bridge_backfill_order_identity: {
+        Args: {
+          p_can: string
+          p_eje: number
+          p_numped: number
+          p_order_id: string
+        }
+        Returns: boolean
+      }
+      bridge_mark_order_failed: {
+        Args: {
+          p_claim_token: string
+          p_error_code: string
+          p_error_message: string
+          p_order_id: string
+          p_retryable: boolean
+        }
+        Returns: Json
+      }
       bridge_mark_injected: {
-        Args: { p_claim_token: string; p_numped: number; p_order_id: string }
+        Args: {
+          p_can: string
+          p_claim_token: string
+          p_eje: number
+          p_numped: number
+          p_order_id: string
+        }
         Returns: boolean
       }
       create_order: {
@@ -595,6 +653,41 @@ export type Database = {
         Args: { p_order_id: string; p_staff_note?: string }
         Returns: boolean
       }
+      staff_get_order_bridge_failures: {
+        Args: { p_order_ids: string[] }
+        Returns: Json
+      }
+      staff_provision_customer: {
+        Args: {
+          p_codcli?: number
+          p_company_id?: string
+          p_company_name?: string
+          p_display_name: string
+          p_tarcli?: number
+          p_user_id: string
+        }
+        Returns: string
+      }
+      staff_provision_staff: {
+        Args: { p_display_name: string; p_role: string; p_user_id: string }
+        Returns: boolean
+      }
+      staff_requeue_order: {
+        Args: { p_order_id: string }
+        Returns: boolean
+      }
+      staff_set_customer_active: {
+        Args: { p_active: boolean; p_user_id: string }
+        Returns: boolean
+      }
+      staff_set_staff_active: {
+        Args: { p_active: boolean; p_user_id: string }
+        Returns: boolean
+      }
+      staff_set_staff_role: {
+        Args: { p_role: string; p_user_id: string }
+        Returns: boolean
+      }
       staff_update_order_line: {
         Args: {
           p_item_id: number
@@ -602,6 +695,10 @@ export type Database = {
           p_order_id: string
           p_qty: number
         }
+        Returns: boolean
+      }
+      update_own_display_name: {
+        Args: { p_display_name: string }
         Returns: boolean
       }
     }

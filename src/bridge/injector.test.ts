@@ -3,6 +3,11 @@ import type { BridgeConfig } from "./config";
 import { AllLinesExcludedError, InjectError } from "./injector";
 import {
   DEFAULT_TAX_SLOT,
+  ERP_COMMIT_OUTCOME_UNKNOWN,
+  ERP_NUMPED_COUNTER_INVALID,
+  ERP_PEDIDO_IDENTITY_INVALID,
+  ERP_PEDIDO_RECOVERY_MISMATCH,
+  ERP_ROLLBACK_FAILED,
   LOT_AVAILABLE_SQL,
   LOT_COVERING_SQL,
   LOT_FALLBACK_SQL,
@@ -19,14 +24,17 @@ import {
   buildLineParams,
   buildTaxTables,
   computeTaxes,
+  commitTransactionOrAbort,
   contractChecks,
   dedupCheck,
   isoDateFromSql,
   lineSubtotalCents,
   numlinFor,
   pickLot,
+  preflightOrder,
   prepareOrder,
   reserveCounters,
+  rollbackTransactionOrAbort,
   roundEuros,
   roundHalfToEven,
   runInjectSteps,
@@ -36,6 +44,7 @@ import {
   ultlinFor,
   type PreparedLine,
   type PreparedOrder,
+  type ErpPedidoRecoveryExpectation,
   type SqlParent,
 } from "./injector";
 import type { ClaimedOrder } from "./payload";
@@ -142,11 +151,11 @@ const EXPECTED_LOT_FALLBACK_SQL =
 
 /** Plan 04 delta 1: the only header expressions allowed to differ from v3.2. */
 const DELTA_1_HEADER: Record<string, string> = {
-  FECPED: MADRID_TODAY_SQL,
+  FECPED: "@FECPED",
   FECENT: "@FECENT",
-  FECPREVTO: MADRID_TODAY_SQL,
-  fecalt: MADRID_TODAY_SQL,
-  SEMANA: `DATEPART(week,${MADRID_TODAY_SQL})`,
+  FECPREVTO: "@FECPED",
+  fecalt: "@FECPED",
+  SEMANA: "DATEPART(week,@FECPED)",
 };
 
 // ---------------------------------------------------------------------------
@@ -164,6 +173,8 @@ const cfg: BridgeConfig = {
   erpUser: "SFY",
   can: "B",
   eje: 26,
+  allowHistoricalEje: false,
+  historicalOrderId: null,
   alm: "00001",
   serfac: 1,
   claimLimit: 20,
@@ -246,6 +257,7 @@ function preparedOrder(overrides: Partial<PreparedOrder> = {}): PreparedOrder {
   return {
     ref: "PORTAL-4242",
     codcli: 3,
+    fecped: new Date(Date.UTC(2026, 7, 16)),
     fecent: new Date(Date.UTC(2026, 7, 20)),
     customer,
     taxes: computeTaxes(lines, customer.tipivacli, taxTables),
@@ -324,6 +336,101 @@ function claimedOrder(overrides: Partial<ClaimedOrder> = {}): ClaimedOrder {
   };
 }
 
+describe("uncertain ERP transaction outcomes", () => {
+  const context = {
+    orderId: "11111111-1111-4111-8111-111111111111",
+    orderNumber: 4242,
+    ref: "PORTAL-4242",
+  };
+
+  it("makes every rejected commit retryable, batch-aborting and outcome-unknown", async () => {
+    const commitCause = new Error("socket closed during COMMIT");
+    let rollbackCalls = 0;
+    const transaction = {
+      commit: () => Promise.reject(commitCause),
+      rollback: () => {
+        rollbackCalls++;
+        return Promise.resolve();
+      },
+    };
+
+    let error: unknown;
+    try {
+      await commitTransactionOrAbort(transaction, context);
+    } catch (caught) {
+      error = caught;
+    }
+
+    expect(error).toMatchObject({
+      code: ERP_COMMIT_OUTCOME_UNKNOWN,
+      retryable: true,
+      abortBatch: true,
+      cause: commitCause,
+    });
+    // Once COMMIT was sent, rollback cannot resolve whether it persisted.
+    expect(rollbackCalls).toBe(0);
+  });
+
+  it("makes a rejected rollback batch-aborting and preserves both causes", async () => {
+    const injectionCause = new Error("contract query timed out");
+    const rollbackCause = new Error("connection was terminated");
+
+    let error: unknown;
+    try {
+      await rollbackTransactionOrAbort(
+        { rollback: () => Promise.reject(rollbackCause) },
+        context,
+        injectionCause,
+      );
+    } catch (caught) {
+      error = caught;
+    }
+
+    expect(error).toMatchObject({
+      code: ERP_ROLLBACK_FAILED,
+      retryable: true,
+      abortBatch: true,
+    });
+    expect(error).toBeInstanceOf(InjectError);
+    const aggregate = (error as InjectError).cause;
+    expect(aggregate).toBeInstanceOf(AggregateError);
+    expect((aggregate as AggregateError).errors).toEqual([
+      injectionCause,
+      rollbackCause,
+    ]);
+  });
+});
+
+function recoveryExpectation(
+  overrides: Partial<ErpPedidoRecoveryExpectation> = {},
+): ErpPedidoRecoveryExpectation {
+  return {
+    ref: "PORTAL-4242",
+    codcli: 3,
+    includedLineCount: 1,
+    includedNetoCents: 9995,
+    ...overrides,
+  };
+}
+
+function recoveredHeader(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    SRC: "pedclica",
+    CAN: "B",
+    EJE: 25,
+    NUMPED: 501,
+    NUMPEDCLI: "PORTAL-4242",
+    CODCLI: 3,
+    NETO: 99.95,
+    ...overrides,
+  };
+}
+
+/** The `SELECT COUNT(*)` recordset the recovery line check reads. */
+function lineCountRow(count: number): Record<string, unknown>[] {
+  return [{ "": count }];
+}
+
 // ---------------------------------------------------------------------------
 // Traceability: the two INSERTs against v3.2
 // ---------------------------------------------------------------------------
@@ -358,14 +465,9 @@ describe("pedclica INSERT vs the v3.2 reference", () => {
 
   it("carries only the two v3.2 literals — no interpolated data", () => {
     const literals = PEDCLICA_INSERT_SQL.match(/'[^']*'/g) ?? [];
-    const timezone = literals.filter((value) => value === "'Romance Standard Time'");
-    // One per date column delta 1 moved onto the Madrid clock: FECPED,
-    // FECPREVTO, fecalt and SEMANA (FECENT became a parameter instead).
-    expect(timezone).toHaveLength(4);
-    expect(literals.filter((value) => value !== "'Romance Standard Time'")).toEqual([
-      "'0'",
-      "'Abierto'",
-    ]);
+    // Business dates are parameters sampled once from SQL Server. The only
+    // remaining literals are the two fixed Wingest status values.
+    expect(literals).toEqual(["'0'", "'Abierto'"]);
   });
 });
 
@@ -740,6 +842,7 @@ describe("buildHeaderParams", () => {
     numped: 501,
     ref: "PORTAL-4242",
     codcli: 3,
+    fecped: new Date(Date.UTC(2026, 7, 16)),
     fecent: new Date(Date.UTC(2026, 7, 20)),
     taxes,
     totcosEuros: 61.73,
@@ -1157,10 +1260,20 @@ describe("date conversion across the SQL boundary", () => {
 // ---------------------------------------------------------------------------
 
 describe("dedupCheck", () => {
-  it("looks in both pedclica and pedclicah, with the ref as a parameter", async () => {
-    const { parent, calls } = fakeParent([[{ NUMPED: 501 }]]);
-    expect(await dedupCheck(parent, cfg, "PORTAL-4242")).toBe(501);
-    expect(calls).toHaveLength(1);
+  it("returns the stored CAN/EJE/NUMPED from either header table", async () => {
+    const { parent, calls } = fakeParent([
+      [recoveredHeader({ CAN: "b " })],
+      lineCountRow(1),
+    ]);
+    expect(await dedupCheck(parent, cfg, recoveryExpectation())).toEqual({
+      can: "B",
+      eje: 25,
+      numped: 501,
+    });
+    expect(calls).toHaveLength(2);
+    expect(calls[0].text).toContain(
+      "SELECT TOP 1 z.SRC, z.CAN, z.EJE, z.NUMPED, z.NUMPEDCLI, z.CODCLI, z.NETO",
+    );
     expect(calls[0].text).toContain("FROM pedclica ");
     expect(calls[0].text).toContain("FROM pedclicah ");
     expect(calls[0].text).not.toContain("PORTAL-4242");
@@ -1168,9 +1281,142 @@ describe("dedupCheck", () => {
     expect(calls[0].params.can.value).toBe("B");
   });
 
+  it("counts the real lines rather than trusting the header's ULTLIN", async () => {
+    const { parent, calls } = fakeParent([[recoveredHeader()], lineCountRow(1)]);
+    await dedupCheck(parent, cfg, recoveryExpectation());
+    expect(calls[0].text).not.toContain("ULTLIN");
+    expect(calls[1].text).toBe(
+      "SELECT COUNT(*) FROM pedclili WHERE CAN=@can AND EJE=@eje AND NUMPED=@numped",
+    );
+    // The identity the HEADER carried, not today's configuration.
+    expect(calls[1].params.can.value).toBe("B");
+    expect(calls[1].params.eje.value).toBe(25);
+    expect(calls[1].params.numped.value).toBe(501);
+  });
+
+  it("counts the history lines table when the hit came from history", async () => {
+    const { parent, calls } = fakeParent([
+      [recoveredHeader({ SRC: "pedclicah", EJE: 24 })],
+      lineCountRow(1),
+    ]);
+    expect(await dedupCheck(parent, cfg, recoveryExpectation())).toEqual({
+      can: "B",
+      eje: 24,
+      numped: 501,
+    });
+    expect(calls[1].text).toContain("FROM pedclilih WHERE");
+  });
+
+  it("rejects a recovery whose lines are missing from the ERP", async () => {
+    const { parent } = fakeParent([[recoveredHeader()], lineCountRow(0)]);
+    await expect(dedupCheck(parent, cfg, recoveryExpectation())).rejects.toMatchObject({
+      code: ERP_PEDIDO_RECOVERY_MISMATCH,
+      retryable: false,
+    });
+  });
+
+  it("rejects a recovery carrying more lines than the portal order", async () => {
+    const { parent } = fakeParent([[recoveredHeader()], lineCountRow(2)]);
+    await expect(dedupCheck(parent, cfg, recoveryExpectation())).rejects.toMatchObject({
+      code: ERP_PEDIDO_RECOVERY_MISMATCH,
+      retryable: false,
+    });
+  });
+
+  it("fails closed on a header source it does not know", async () => {
+    const { parent } = fakeParent([[recoveredHeader({ SRC: "somewhere" })]]);
+    await expect(dedupCheck(parent, cfg, recoveryExpectation())).rejects.toMatchObject({
+      code: ERP_PEDIDO_IDENTITY_INVALID,
+      retryable: false,
+    });
+  });
+
   it("is null when the portal ref has never been injected", async () => {
     const { parent } = fakeParent([[]]);
-    expect(await dedupCheck(parent, cfg, "PORTAL-4242")).toBeNull();
+    expect(await dedupCheck(parent, cfg, recoveryExpectation())).toBeNull();
+  });
+
+  it.each([
+    { CAN: "", EJE: 25, NUMPED: 501 },
+    { CAN: "ABC", EJE: 25, NUMPED: 501 },
+    { CAN: "B", EJE: 0, NUMPED: 501 },
+    { CAN: "B", EJE: 25.5, NUMPED: 501 },
+    { CAN: "B", EJE: 10_000, NUMPED: 501 },
+    { CAN: "B", EJE: 25, NUMPED: 0 },
+    { CAN: "B", EJE: 25, NUMPED: 501.5 },
+    { CAN: "B", EJE: 25, NUMPED: 2_147_483_648 },
+    { CAN: "B", EJE: null, NUMPED: 501 },
+    { CAN: "B", EJE: 25, NUMPED: null },
+  ])("fails closed on an invalid stored identity: %o", async (row) => {
+    const { parent } = fakeParent([[recoveredHeader(row)]]);
+    await expect(dedupCheck(parent, cfg, recoveryExpectation())).rejects.toMatchObject({
+      code: ERP_PEDIDO_IDENTITY_INVALID,
+      retryable: false,
+    });
+  });
+
+  it.each([
+    ["PORTAL ref", { NUMPEDCLI: "PORTAL-9999" }],
+    ["CODCLI", { CODCLI: 4 }],
+    ["included NETO", { NETO: 99.94 }],
+  ])("rejects a fake recovery whose %s differs", async (_field, override) => {
+    const { parent } = fakeParent([[recoveredHeader(override)]]);
+    await expect(dedupCheck(parent, cfg, recoveryExpectation())).rejects.toMatchObject({
+      code: ERP_PEDIDO_RECOVERY_MISMATCH,
+      retryable: false,
+    });
+  });
+});
+
+describe("preflightOrder", () => {
+  it("recovers before mutable customer/article/tax/lot master data is read", async () => {
+    const { parent, calls } = fakeParent([
+      [{ "": "wg_test" }],
+      [recoveredHeader({ EJE: 25, NUMPED: 777 })],
+      lineCountRow(1),
+      // Deliberately no customer/article/tax/lot responses. If recovery moved
+      // behind prepareOrder again, the missing customer row would fail here.
+    ]);
+
+    const order = claimedOrder({
+      subtotal_cents: 19_995,
+      items: [
+        ...claimedOrder().items,
+        {
+          codart: "SERVICIO-1",
+          qty: 1,
+          unit_price_cents: 10_000,
+          line_total_cents: 10_000,
+          is_weighed: false,
+          is_erp_excluded: true,
+        },
+      ],
+    });
+    await expect(preflightOrder(parent, cfg, order)).resolves.toEqual({
+      kind: "recovered",
+      identity: { can: "B", eje: 25, numped: 777 },
+      excludedCodarts: ["SERVICIO-1"],
+    });
+    expect(calls).toHaveLength(3);
+    expect(calls[0].text).toBe("SELECT DB_NAME()");
+    expect(calls[1].text).toContain("FROM pedclica");
+    expect(calls[2].text).toContain("SELECT COUNT(*) FROM pedclili");
+    expect(calls.some((call) => call.text.includes("FROM clientes"))).toBe(false);
+    expect(calls.some((call) => call.text.includes("FROM articulo"))).toBe(false);
+    expect(calls.some((call) => call.text.includes("FROM stolot"))).toBe(false);
+  });
+
+  it("fails permanently instead of accepting a matching ref with a wrong header", async () => {
+    const { parent, calls } = fakeParent([
+      [{ "": "wg_test" }],
+      [recoveredHeader({ CODCLI: 999 })],
+    ]);
+
+    await expect(preflightOrder(parent, cfg, claimedOrder())).rejects.toMatchObject({
+      code: ERP_PEDIDO_RECOVERY_MISMATCH,
+      retryable: false,
+    });
+    expect(calls).toHaveLength(2);
   });
 });
 
@@ -1215,6 +1461,14 @@ describe("reserveCounters", () => {
   it("refuses to build a pedido numbered zero when the counter row is missing", async () => {
     const { parent } = fakeParent([[]]);
     await expect(reserveCounters(parent, cfg, 1)).rejects.toThrow(/NUMPEDCLI counter/);
+  });
+
+  it("permanently rejects a NUMPED that cannot be stored in the portal", async () => {
+    const { parent } = fakeParent([[{ NUMERO: 2_147_483_648 }]]);
+    await expect(reserveCounters(parent, cfg, 1)).rejects.toMatchObject({
+      code: ERP_NUMPED_COUNTER_INVALID,
+      retryable: false,
+    });
   });
 });
 
@@ -1281,13 +1535,18 @@ describe("contractChecks", () => {
 });
 
 describe("runInjectSteps", () => {
-  it("recovers the existing NUMPED without writing anything", async () => {
-    const { parent, calls } = fakeParent([[{ NUMPED: 777 }]]);
+  it("recovers the existing cross-year identity without writing anything", async () => {
+    const { parent, calls } = fakeParent([
+      [recoveredHeader({ NUMPED: 777 })],
+      lineCountRow(1),
+    ]);
     expect(await runInjectSteps(parent, cfg, preparedOrder())).toEqual({
+      can: "B",
+      eje: 25,
       numped: 777,
       recovered: true,
     });
-    expect(calls).toHaveLength(1);
+    expect(calls).toHaveLength(2);
     expect(calls.some((call) => call.text.startsWith("INSERT"))).toBe(false);
   });
 
@@ -1313,6 +1572,8 @@ describe("runInjectSteps", () => {
     ]);
 
     expect(await runInjectSteps(parent, cfg, preparedOrder({ lines }))).toEqual({
+      can: cfg.can,
+      eje: cfg.eje,
       numped: 501,
       recovered: false,
     });
@@ -1413,6 +1674,67 @@ describe("prepareOrder", () => {
     expect(injectError.message).toContain("PORTAL-4242");
   });
 
+  it("rechecks EJE against SQL Server's Madrid date before master-data preflight", async () => {
+    const { parent, calls } = fakeParent([
+      [{ "": new Date(Date.UTC(2027, 0, 1)) }],
+    ]);
+
+    const error = await prepareOrder(parent, cfg, claimedOrder()).catch(
+      (cause: unknown) => cause,
+    );
+
+    expect(error).toMatchObject({
+      code: "EJE_YEAR_MISMATCH",
+      retryable: true,
+      orderId: "11111111-1111-4111-8111-111111111111",
+    });
+    // The date check is the only ERP query: no customer/article preflight ran.
+    expect(calls).toHaveLength(1);
+  });
+
+  it("never lets a historical override escape its exact portal order", async () => {
+    const { parent, calls } = fakeParent([
+      [{ "": new Date(Date.UTC(2027, 0, 1)) }],
+    ]);
+    const historicalCfg: BridgeConfig = {
+      ...cfg,
+      eje: 26,
+      allowHistoricalEje: true,
+      historicalOrderId: "33333333-3333-4333-8333-333333333333",
+    };
+
+    const error = await prepareOrder(parent, historicalCfg, claimedOrder()).catch(
+      (cause: unknown) => cause,
+    );
+
+    expect(error).toMatchObject({
+      code: "HISTORICAL_ORDER_SCOPE_VIOLATION",
+      retryable: false,
+    });
+    expect(calls).toHaveLength(1);
+  });
+
+  it("allows the exact supervised historical target to keep its configured EJE", async () => {
+    const order = claimedOrder();
+    const { parent } = fakeParent([
+      [{ "": new Date(Date.UTC(2027, 0, 1)) }],
+      [{ TARCLI: 1, TIPIVACLI: "N", regiva: "", FORPAG: "", PRIPAG: 1, NUMPAG: 1, CALENV: "", CAL2: "", CODPOSENV: "", TIPPOR: "" }],
+      [{ T: "G", POSMAT: 1 }],
+      [{ C: "N", A: "G", TPCIVA: 10 }],
+      [{ DES: "ARROZ", PRECOS: 1, T: "G", UNILOT: 1, UNI: "UNIDAD" }],
+      [{ LOT: "L1", FECCAD: new Date(Date.UTC(2028, 0, 1)) }],
+    ]);
+    const historicalCfg: BridgeConfig = {
+      ...cfg,
+      allowHistoricalEje: true,
+      historicalOrderId: order.id,
+    };
+
+    const prepared = await prepareOrder(parent, historicalCfg, order);
+
+    expect(prepared.fecped.toISOString()).toBe("2027-01-01T00:00:00.000Z");
+  });
+
   it("resolves dates, customer, taxes and lots into one prepared order", async () => {
     const { parent, calls } = fakeParent([
       [{ "": new Date(Date.UTC(2026, 7, 16)) }], // Madrid today
@@ -1439,6 +1761,7 @@ describe("prepareOrder", () => {
     const prepared = await prepareOrder(parent, cfg, claimedOrder());
 
     expect(prepared.ref).toBe("PORTAL-4242");
+    expect(prepared.fecped.toISOString()).toBe("2026-08-16T00:00:00.000Z");
     expect(prepared.fecent.toISOString()).toBe("2026-08-20T00:00:00.000Z");
     expect(prepared.customer.tippor).toBe("Portes Debidos");
     expect(prepared.taxes.netoCents).toBe(9995);

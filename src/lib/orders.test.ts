@@ -13,6 +13,7 @@ import {
   mapOrderError,
   MAX_LINE_QTY,
   ORDER_STATUSES,
+  parseOrderBridgeFailures,
   parseOrderNumber,
   QUEUE_TABS,
   safeQueueTab,
@@ -148,11 +149,12 @@ describe("ORDER_STATUSES", () => {
   it("is exactly what orders_status_check allows, in lifecycle order", () => {
     // `processing` is the bridge's claim state (bridge_claim_confirmed sets it,
     // bridge_mark_injected clears it). It is in the live constraint, so it can
-    // reach a customer's screen and needs a label like the other five.
+    // reach a customer's screen and needs a label like every other state.
     expect(ORDER_STATUSES).toEqual([
       "submitted",
       "confirmed",
       "processing",
+      "bridge_failed",
       "injected",
       "albaran",
       "cancelled",
@@ -173,8 +175,13 @@ describe("isOrderStatus", () => {
 });
 
 describe("safeQueueTab", () => {
-  it("keeps `?estado=` to the three views the queue offers", () => {
-    expect(QUEUE_TABS).toEqual(["submitted", "confirmed", "all"]);
+  it("keeps `?estado=` to the four views the queue offers", () => {
+    expect(QUEUE_TABS).toEqual([
+      "submitted",
+      "confirmed",
+      "bridge_failed",
+      "all",
+    ]);
     for (const tab of QUEUE_TABS) expect(safeQueueTab(tab)).toBe(tab);
   });
 
@@ -187,6 +194,56 @@ describe("safeQueueTab", () => {
     expect(safeQueueTab("toString")).toBe("submitted");
     expect(safeQueueTab(undefined)).toBe("submitted");
     expect(safeQueueTab(null)).toBe("submitted");
+  });
+});
+
+describe("parseOrderBridgeFailures", () => {
+  const ORDER_ID = "11111111-1111-4111-8111-111111111111";
+
+  it("maps the staff-only RPC JSON into the UI shape", () => {
+    expect(
+      parseOrderBridgeFailures([
+        {
+          order_id: ORDER_ID,
+          status: "bridge_failed",
+          attempt_count: 3,
+          last_error_code: "BAD_QTY_STEP",
+          last_error_message: "BAD_QTY_STEP:ART-1",
+          failed_at: "2026-08-17T00:00:00Z",
+          next_attempt_at: null,
+        },
+      ]),
+    ).toEqual([
+      {
+        orderId: ORDER_ID,
+        status: "bridge_failed",
+        attemptCount: 3,
+        lastErrorCode: "BAD_QTY_STEP",
+        lastErrorMessage: "BAD_QTY_STEP:ART-1",
+        failedAt: "2026-08-17T00:00:00Z",
+        nextAttemptAt: null,
+      },
+    ]);
+  });
+
+  it("omits malformed rows instead of throwing away the queue", () => {
+    expect(
+      parseOrderBridgeFailures([
+        null,
+        "bad",
+        { order_id: "not-a-uuid", status: "bridge_failed", attempt_count: 1 },
+        {
+          order_id: ORDER_ID,
+          status: "bridge_failed",
+          attempt_count: -1,
+          last_error_code: null,
+          last_error_message: null,
+          failed_at: null,
+          next_attempt_at: null,
+        },
+      ]),
+    ).toEqual([]);
+    expect(parseOrderBridgeFailures({ rows: [] })).toEqual([]);
   });
 });
 

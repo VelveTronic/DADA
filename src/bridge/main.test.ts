@@ -2,6 +2,7 @@ import { dirname, join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { BridgeConfig } from "./config";
 import type { JobResult } from "./jobs/shared";
+import { EjeYearMismatchError } from "./jobs/orders";
 import { LockError, type Lock } from "./lock";
 import type { LogFields, Logger, LoggerOptions } from "./log";
 import type { BridgeSupabase, HeartbeatRow } from "./supabase";
@@ -100,6 +101,8 @@ const cfg: BridgeConfig = {
   erpUser: "SFY",
   can: "B",
   eje: 26,
+  allowHistoricalEje: false,
+  historicalOrderId: null,
   alm: "00001",
   serfac: 1,
   claimLimit: 20,
@@ -122,6 +125,7 @@ interface Harness {
   stdout: string[];
   stderr: string[];
   jobRuns: number;
+  jobNow: Date | null;
 }
 
 /**
@@ -147,7 +151,7 @@ function harness(
   const loggers: LoggerOptions[] = [];
   const stdout: string[] = [];
   const stderr: string[] = [];
-  const state = { jobRuns: 0 };
+  const state = { jobRuns: 0, jobNow: null as Date | null };
 
   const at =
     (level: string) =>
@@ -199,8 +203,9 @@ function harness(
     },
     createApi: () => api,
     acquireLock: overrides.acquire ?? (() => lock),
-    runJob: async () => {
+    runJob: async (_job, _cfg, _api, _log, now) => {
       state.jobRuns++;
+      state.jobNow = now();
       return overrides.run
         ? overrides.run()
         : { ok: true, counts: { claimed: 1, injected: 1 } };
@@ -220,6 +225,9 @@ function harness(
     stderr,
     get jobRuns() {
       return state.jobRuns;
+    },
+    get jobNow() {
+      return state.jobNow;
     },
   };
 }
@@ -341,6 +349,7 @@ describe("runMain — the run", () => {
   it("heartbeats the counts and exits 0 when the job completes", async () => {
     const h = harness();
     expect(await runMain(h.deps)).toBe(0);
+    expect(h.jobNow).toEqual(NOW);
 
     expect(h.beats).toEqual([
       {
@@ -371,6 +380,18 @@ describe("runMain — the run", () => {
     expect(h.beats[0]).toMatchObject({ ok: false, detail: { code: "RUN_FAILED" } });
     expect(Object.keys(h.beats[0].detail as object)).toEqual(["code"]);
     expect(h.lines.some((line) => line.fields.stage === "run")).toBe(true);
+  });
+
+  it("preserves EJE_YEAR_MISMATCH in the failure heartbeat", async () => {
+    const h = harness({
+      run: () => Promise.reject(new EjeYearMismatchError(25, 26)),
+    });
+
+    expect(await runMain(h.deps)).toBe(1);
+    expect(h.beats[0]).toMatchObject({
+      ok: false,
+      detail: { code: "EJE_YEAR_MISMATCH" },
+    });
   });
 
   it("summarises, THEN heartbeats, THEN releases the lock — in that order", async () => {

@@ -36,7 +36,7 @@ select ok(
 select ok(
   not has_function_privilege(
     'authenticated',
-    'public.bridge_claim_confirmed(uuid,integer,integer)',
+    'public.bridge_claim_confirmed(uuid,integer,integer,uuid)',
     'EXECUTE'
   ),
   'authenticated cannot claim bridge work'
@@ -44,7 +44,7 @@ select ok(
 select ok(
   has_function_privilege(
     'service_role',
-    'public.bridge_claim_confirmed(uuid,integer,integer)',
+    'public.bridge_claim_confirmed(uuid,integer,integer,uuid)',
     'EXECUTE'
   ),
   'service role can claim bridge work'
@@ -338,6 +338,8 @@ select is(
       where company_id = '00000000-0000-0000-0000-000000000003'
     ),
     '00000000-0000-0000-0000-000000000008',
+    'B',
+    26,
     12345
   ),
   false,
@@ -350,6 +352,8 @@ select is(
       where company_id = '00000000-0000-0000-0000-000000000003'
     ),
     null,
+    'B',
+    26,
     12345
   ),
   false,
@@ -362,6 +366,8 @@ select is(
       where company_id = '00000000-0000-0000-0000-000000000003'
     ),
     '00000000-0000-0000-0000-000000000006',
+    'B',
+    26,
     12345
   ),
   true,
@@ -373,6 +379,8 @@ select is(
       select id from public.orders
       where company_id = '00000000-0000-0000-0000-000000000003'
     ),
+    'B',
+    27,
     54321
   ),
   true,

@@ -30,7 +30,7 @@ import {
 } from "./config";
 import { connectWingest, injectOrder } from "./injector";
 import { runAlbaranSync } from "./jobs/albaran-sync";
-import { runOrders } from "./jobs/orders";
+import { EjeYearMismatchError, runOrders } from "./jobs/orders";
 import { runPriceSync } from "./jobs/price-sync";
 import type { JobCounts, JobResult } from "./jobs/shared";
 import { LockError, acquireLock, type Lock } from "./lock";
@@ -104,6 +104,7 @@ export async function runJob(
   cfg: BridgeConfig,
   api: BridgeSupabase,
   log: Logger,
+  now: () => Date = () => new Date(),
 ): Promise<JobResult> {
   switch (job) {
     case "orders":
@@ -114,6 +115,7 @@ export async function runJob(
         connect: connectWingest,
         inject: injectOrder,
         newToken: () => randomUUID(),
+        now,
       });
     case "albaran-sync":
       return runAlbaranSync({ cfg, api, log, connect: connectWingest });
@@ -146,6 +148,7 @@ export interface MainDeps {
     cfg: BridgeConfig,
     api: BridgeSupabase,
     log: Logger,
+    now: () => Date,
   ) => Promise<JobResult>;
   /** The heartbeat's `last_run_at`. */
   now: () => Date;
@@ -253,10 +256,15 @@ export async function runMain(deps: MainDeps): Promise<number> {
 
   let result: JobResult = { ok: false, counts: {} };
   try {
-    result = await deps.runJob(job, cfg, api, log);
+    result = await deps.runJob(job, cfg, api, log, deps.now);
   } catch (error) {
     log.logError(error, { job, stage: "run" });
-    result = { ok: false, counts: { code: "RUN_FAILED" } };
+    result = {
+      ok: false,
+      counts: {
+        code: error instanceof EjeYearMismatchError ? error.code : "RUN_FAILED",
+      },
+    };
   } finally {
     // The summary first: it is the line the operator reads and pastes, and it
     // must survive anything the heartbeat does next.

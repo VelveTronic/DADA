@@ -13,7 +13,14 @@
  * note the company has ever issued.
  */
 import type { BridgeConfig } from "../config";
-import { P, applyParams, toNumber, type ParamMap, type SqlParent } from "../injector";
+import {
+  P,
+  applyParams,
+  toNumber,
+  toText,
+  type ParamMap,
+  type SqlParent,
+} from "../injector";
 import type { Logger } from "../log";
 import type { BridgeSupabase, InjectedOrderRef } from "../supabase";
 import type { JobCounts, JobResult } from "./shared";
@@ -27,17 +34,21 @@ export const ALBARAN_CHUNK_SIZE = 200;
 
 export interface AlbaranDeps {
   cfg: BridgeConfig;
-  api: Pick<BridgeSupabase, "listInjected" | "markAlbaran">;
+  api: Pick<
+    BridgeSupabase,
+    "listInjected" | "backfillOrderIdentity" | "markAlbaran"
+  >;
   log: Logger;
   connect: (cfg: BridgeConfig) => Promise<SqlParent & { close(): Promise<unknown> }>;
 }
 
 /**
- * `injected` counts DISTINCT NUMPEDs, not portal orders — it is the size of the
- * set this run asked `albfacca` about. `matched` counts the NUMPEDs that came
- * back with a usable albarán, and can never exceed `injected`: a pedido is
- * removed from the waiting set the moment it matches, so the several albfacca
- * rows one pedido produces across partial deliveries count once.
+ * `injected` counts DISTINCT (CAN,EJE,NUMPED) identities, not portal orders — it
+ * is the size of the set this run asked `albfacca` about. `matched` counts the
+ * complete identities that came back with a usable albarán, and can never exceed
+ * `injected`: a pedido is removed from its scoped waiting set the moment it
+ * matches, so partial deliveries count once while equal NUMPEDs in two years do
+ * not collide.
  *
  * `marked` counts ORDER rows confirmed by `bridge_mark_albaran`, and moves in
  * BOTH directions away from `matched`:
@@ -58,10 +69,12 @@ export interface AlbaranTally {
   injected: number;
   matched: number;
   marked: number;
+  /** Injected portal rows missing any part of their persisted ERP identity. */
+  failed: number;
 }
 
 export function emptyAlbaranTally(): AlbaranTally {
-  return { injected: 0, matched: 0, marked: 0 };
+  return { injected: 0, matched: 0, marked: 0, failed: 0 };
 }
 
 /** The summary line's fields, in the order the plan names them. */
@@ -70,6 +83,7 @@ export function albaranCounts(tally: AlbaranTally): JobCounts {
     injected: tally.injected,
     matched: tally.matched,
     marked: tally.marked,
+    failed: tally.failed,
   };
 }
 
@@ -98,65 +112,250 @@ export function buildAlbaranQuery(numpedCount: number): string {
   }
   const placeholders = Array.from({ length: numpedCount }, (_, i) => `@p${i}`).join(", ");
   return (
-    "SELECT NUMPED, NUMALB FROM albfacca " +
-    `WHERE CAN=@can AND EJEALB=@eje AND NUMPED IN (${placeholders}) ` +
+    // ASSUMPTION, deliberate: the albarán is issued under the SAME canal as the
+    // pedido. DADA operates one canal ('B'), and every albarán in the sandbox
+    // matched its pedido's CAN — so pinning it keeps NUMPED unambiguous, which
+    // is the whole point of a CAN/EJE/NUMPED namespace.
+    //
+    // The failure mode if that ever stops being true: an albarán issued under a
+    // different canal never matches, this job reports the order as unmatched
+    // run after run, and the portal leaves it in `injected` forever. There is no
+    // wrong NUMALB and no data damage — just a stale status. `docs/
+    // bridge-runbook.md` §⑧ tells the operator to check `albfacca.CAN` first
+    // when an injected order never advances.
+    "SELECT CAN, EJEALB, NUMPED, NUMALB FROM albfacca " +
+    `WHERE CAN=@can AND EJEALB>=@eje AND EJEALB<=@nextEje AND NUMPED IN (${placeholders}) ` +
     // ORDER BY is what makes "the first row wins" mean "the LOWEST albarán
     // wins": one pedido delivered in two goes has two albfacca rows, and the
     // portal shows a single NUMALB. The first one issued is the one the customer
     // was told about, and an unordered recordset would pick whichever the query
     // plan happened to emit first — a number that could change between runs.
-    "ORDER BY NUMPED, NUMALB"
+    "ORDER BY NUMPED, EJEALB, NUMALB"
   );
 }
 
 export function buildAlbaranParams(
   numpeds: readonly number[],
-  cfg: Pick<BridgeConfig, "can" | "eje">,
+  identity: Pick<ErpIdentityGroup, "erpCan" | "erpEje">,
 ): ParamMap {
-  const params: ParamMap = { can: P.text(cfg.can), eje: P.int(cfg.eje) };
+  const params: ParamMap = {
+    can: P.text(identity.erpCan),
+    eje: P.int(identity.erpEje),
+    nextEje: P.int(identity.erpEje + 1),
+  };
   numpeds.forEach((numped, index) => {
     params[`p${index}`] = P.int(numped);
   });
   return params;
 }
 
+export function buildHistoricalPedidoQuery(): string {
+  return (
+    "SELECT TOP 1 CAN, EJE, NUMPED FROM (" +
+    "SELECT CAN, EJE, NUMPED, RTRIM(NUMPEDCLI) AS NUMPEDCLI FROM pedclica " +
+    "UNION ALL " +
+    "SELECT CAN, EJE, NUMPED, RTRIM(NUMPEDCLI) AS NUMPEDCLI FROM pedclicah" +
+    ") z WHERE z.NUMPED=@numped AND z.NUMPEDCLI=@ref " +
+    "ORDER BY z.EJE DESC, z.NUMPED DESC"
+  );
+}
+
+export function buildHistoricalPedidoParams(input: {
+  orderNumber: number;
+  numped: number;
+}): ParamMap {
+  return {
+    numped: P.int(input.numped),
+    ref: P.text(`PORTAL-${input.orderNumber}`),
+  };
+}
+
+export function readHistoricalPedidoRow(row: Record<string, unknown>): {
+  can: string | null;
+  eje: number | null;
+  numped: number | null;
+} {
+  const can = toText(row.CAN).trim().toUpperCase();
+  return {
+    can: can.length > 0 ? can : null,
+    eje: toNumber(row.EJE),
+    numped: toNumber(row.NUMPED),
+  };
+}
+
 /**
- * NUMPED → the orders waiting on it, and how many injected orders have no NUMPED
- * to wait on.
+ * One saved CAN/EJE scope and its NUMPED → portal-order index.
  *
  * An array of ids rather than one id because the map is built from data, and
  * data surprises: two portal orders should never carry the same NUMPED (the
  * injector's dedup key is per order_number), but if they ever did, marking only
  * one of them would leave the other silently stuck in `injected` forever.
  *
- * A row with a null numped is a portal bug — `bridge_mark_injected` writes the
- * status and the number together — so it is counted and reported, not skipped in
- * silence.
+ * A row missing CAN, EJE or NUMPED is a portal bug — `bridge_mark_injected`
+ * writes the status and the complete identity together — so it is counted and
+ * reported, not skipped in silence.
  */
-export function indexByNumped(orders: readonly InjectedOrderRef[]): {
+export interface ErpIdentityGroup {
+  erpCan: string;
+  erpEje: number;
   byNumped: Map<number, string[]>;
-  withoutNumped: string[];
+}
+
+export function indexByErpIdentity(orders: readonly InjectedOrderRef[]): {
+  groups: ErpIdentityGroup[];
+  withoutIdentity: string[];
 } {
-  const byNumped = new Map<number, string[]>();
-  const withoutNumped: string[] = [];
+  const byCan = new Map<string, Map<number, ErpIdentityGroup>>();
+  const withoutIdentity: string[] = [];
   for (const order of orders) {
-    if (typeof order.numped !== "number") {
-      withoutNumped.push(order.id);
+    if (
+      typeof order.erpCan !== "string" ||
+      order.erpCan.length < 1 ||
+      order.erpCan.length > 2 ||
+      order.erpCan !== order.erpCan.trim() ||
+      order.erpCan !== order.erpCan.toUpperCase() ||
+      !Number.isInteger(order.erpEje) ||
+      Number(order.erpEje) < 1 ||
+      !Number.isInteger(order.numped) ||
+      Number(order.numped) < 1
+    ) {
+      withoutIdentity.push(order.id);
       continue;
     }
-    const existing = byNumped.get(order.numped);
+
+    let byEje = byCan.get(order.erpCan);
+    if (!byEje) {
+      byEje = new Map();
+      byCan.set(order.erpCan, byEje);
+    }
+    const erpEje = order.erpEje as number;
+    const numped = order.numped as number;
+    let group = byEje.get(erpEje);
+    if (!group) {
+      group = { erpCan: order.erpCan, erpEje, byNumped: new Map() };
+      byEje.set(erpEje, group);
+    }
+    const existing = group.byNumped.get(numped);
     if (existing) existing.push(order.id);
-    else byNumped.set(order.numped, [order.id]);
+    else group.byNumped.set(numped, [order.id]);
   }
-  return { byNumped, withoutNumped };
+  return {
+    groups: [...byCan.values()].flatMap((byEje) => [...byEje.values()]),
+    withoutIdentity,
+  };
+}
+
+function hasCompleteErpIdentity(order: InjectedOrderRef): boolean {
+  return (
+    typeof order.erpCan === "string" &&
+    order.erpCan.length >= 1 &&
+    order.erpCan.length <= 2 &&
+    order.erpCan === order.erpCan.trim() &&
+    order.erpCan === order.erpCan.toUpperCase() &&
+    Number.isInteger(order.erpEje) &&
+    Number(order.erpEje) >= 1 &&
+    Number(order.erpEje) <= 9_999 &&
+    Number.isInteger(order.numped) &&
+    Number(order.numped) >= 1
+  );
+}
+
+async function hydrateHistoricalPedidoIdentity(
+  pool: SqlParent,
+  api: Pick<BridgeSupabase, "backfillOrderIdentity">,
+  order: InjectedOrderRef,
+  log: Logger,
+): Promise<void> {
+  if (hasCompleteErpIdentity(order) || order.numped === null) return;
+
+  try {
+    const request = pool.request();
+    applyParams(
+      request,
+      buildHistoricalPedidoParams({
+        orderNumber: order.orderNumber,
+        numped: order.numped,
+      }),
+    );
+    const result = await request.query<Record<string, unknown>>(
+      buildHistoricalPedidoQuery(),
+    );
+    const row = result.recordset?.[0];
+    if (!row) {
+      log.error("historical Pedido identity was not found in Wingest", {
+        orderId: order.id,
+        orderNumber: order.orderNumber,
+        numped: order.numped,
+        stage: "historical_identity",
+      });
+      return;
+    }
+
+    const identity = readHistoricalPedidoRow(row);
+    if (
+      identity.can === null ||
+      identity.can.length > 2 ||
+      identity.eje === null ||
+      identity.eje < 1 ||
+      identity.eje > 9_999 ||
+      identity.numped !== order.numped
+    ) {
+      log.error("historical Pedido identity was invalid", {
+        orderId: order.id,
+        orderNumber: order.orderNumber,
+        numped: order.numped,
+        can: identity.can,
+        eje: identity.eje,
+        returnedNumped: identity.numped,
+        stage: "historical_identity",
+      });
+      return;
+    }
+
+    const marked = await api.backfillOrderIdentity(
+      order.id,
+      identity.can,
+      identity.eje,
+      identity.numped,
+    );
+    if (!marked) {
+      log.error("historical Pedido identity backfill returned false", {
+        orderId: order.id,
+        orderNumber: order.orderNumber,
+        can: identity.can,
+        eje: identity.eje,
+        numped: identity.numped,
+        stage: "historical_identity_backfill",
+      });
+      return;
+    }
+
+    order.erpCan = identity.can;
+    order.erpEje = identity.eje;
+  } catch (error) {
+    log.logError(error, {
+      orderId: order.id,
+      orderNumber: order.orderNumber,
+      numped: order.numped,
+      stage: "historical_identity",
+    });
+  }
 }
 
 /** One `albfacca` row, coerced out of whatever the driver handed back. */
 export function readAlbaranRow(row: Record<string, unknown>): {
+  can: string | null;
+  eje: number | null;
   numped: number | null;
   numalb: number | null;
 } {
-  return { numped: toNumber(row.NUMPED), numalb: toNumber(row.NUMALB) };
+  const can = toText(row.CAN).trim().toUpperCase();
+  return {
+    can: can.length > 0 ? can : null,
+    eje: toNumber(row.EJEALB),
+    numped: toNumber(row.NUMPED),
+    numalb: toNumber(row.NUMALB),
+  };
 }
 
 export async function runAlbaranSync(deps: AlbaranDeps): Promise<JobResult> {
@@ -164,74 +363,104 @@ export async function runAlbaranSync(deps: AlbaranDeps): Promise<JobResult> {
   const tally = emptyAlbaranTally();
 
   const injected = await api.listInjected();
-  const { byNumped, withoutNumped } = indexByNumped(injected);
-  if (withoutNumped.length) {
-    log.error("injected orders without a numped — cannot match an albarán", {
-      count: withoutNumped.length,
-      orderIds: withoutNumped.slice(0, 10).join(","),
-    });
-  }
-  tally.injected = byNumped.size;
-
-  if (byNumped.size === 0) {
+  if (injected.length === 0) {
     log.info("nothing awaiting an albarán");
     return { ok: true, counts: albaranCounts(tally) };
   }
 
-  const numpeds = [...byNumped.keys()];
   const pool = await connect(cfg);
   try {
-    for (const batch of chunk(numpeds, ALBARAN_CHUNK_SIZE)) {
-      const request = pool.request();
-      applyParams(request, buildAlbaranParams(batch, cfg));
-      const result = await request.query<Record<string, unknown>>(
-        buildAlbaranQuery(batch.length),
-      );
+    for (const order of injected) {
+      await hydrateHistoricalPedidoIdentity(pool, api, order, log);
+    }
 
-      for (const raw of result.recordset ?? []) {
-        const { numped, numalb } = readAlbaranRow(raw);
-        if (numped === null) continue;
-        // Absent from the map means either "not a pedido this portal is waiting
-        // for" or "already handled by an earlier row of this same run" — a
-        // pedido delivered in parts has one albfacca row per delivery.
-        const orderIds = byNumped.get(numped);
-        if (!orderIds) continue;
-        if (numalb === null || numalb <= 0) {
-          // An albfacca row with no albarán number is not a conversion we can
-          // report; leave the order in `injected` and say so. The pedido stays
-          // in the waiting set, so a later row that DOES carry a number still
-          // gets its chance.
-          log.warn("albfacca row has no usable NUMALB", { numped, numalb });
-          continue;
-        }
-        tally.matched++;
-        // Claim the pedido before marking, not after: this is what keeps
-        // `matched` at one per pedido and stops a second delivery's row — in
-        // this chunk or a later one — from marking the same order twice. A mark
-        // that fails is not retried inside the run; the next run re-reads the
-        // same albfacca rows and tries again.
-        byNumped.delete(numped);
-        if (orderIds.length > 1) {
-          log.warn("several portal orders carry the same numped", {
+    const { groups, withoutIdentity } = indexByErpIdentity(injected);
+    tally.failed = withoutIdentity.length;
+    if (withoutIdentity.length) {
+      log.error("injected orders without a complete ERP identity", {
+        count: withoutIdentity.length,
+        orderIds: withoutIdentity.slice(0, 10).join(","),
+      });
+    }
+    tally.injected = groups.reduce((sum, group) => sum + group.byNumped.size, 0);
+
+    for (const group of groups) {
+      const numpeds = [...group.byNumped.keys()];
+      for (const batch of chunk(numpeds, ALBARAN_CHUNK_SIZE)) {
+        const request = pool.request();
+        applyParams(request, buildAlbaranParams(batch, group));
+        const result = await request.query<Record<string, unknown>>(
+          buildAlbaranQuery(batch.length),
+        );
+
+        for (const raw of result.recordset ?? []) {
+          const { can: albaranCan, eje: albaranEje, numped, numalb } =
+            readAlbaranRow(raw);
+          if (numped === null) continue;
+          // The query itself is scoped by this saved CAN/EJE. A NUMPED returned
+          // here can therefore only match this group's complete identity.
+          const orderIds = group.byNumped.get(numped);
+          if (!orderIds) continue;
+          const identityFields = {
+            can: group.erpCan,
+            eje: group.erpEje,
+            albaranCan,
+            albaranEje,
             numped,
-            orderIds: orderIds.join(","),
-          });
-        }
-        for (const orderId of orderIds) {
-          try {
-            const marked = await api.markAlbaran(orderId, numalb);
-            if (marked) {
-              tally.marked++;
-              log.info("albarán matched", { orderId, numped, numalb });
-            } else {
-              // The order was not `injected` any more: staff cancelled it, or a
-              // previous run already marked it and the portal list was stale.
-              log.error("mark_albaran returned false", { orderId, numped, numalb });
+          };
+          if (
+            albaranCan === null ||
+            albaranCan.length > 2 ||
+            albaranEje === null ||
+            albaranEje < 1 ||
+            albaranEje > 9_999 ||
+            numalb === null ||
+            numalb <= 0
+          ) {
+            log.warn("albfacca row has no usable NUMALB", {
+              ...identityFields,
+              numalb,
+            });
+            continue;
+          }
+          tally.matched++;
+          group.byNumped.delete(numped);
+          if (orderIds.length > 1) {
+            log.warn("several portal orders carry the same ERP identity", {
+              ...identityFields,
+              orderIds: orderIds.join(","),
+            });
+          }
+          for (const orderId of orderIds) {
+            try {
+              const marked = await api.markAlbaran(
+                orderId,
+                albaranCan,
+                albaranEje,
+                numalb,
+              );
+              if (marked) {
+                tally.marked++;
+                log.info("albarán matched", {
+                  orderId,
+                  ...identityFields,
+                  numalb,
+                });
+              } else {
+                log.error("mark_albaran returned false", {
+                  orderId,
+                  ...identityFields,
+                  numalb,
+                });
+              }
+            } catch (error) {
+              log.logError(error, {
+                orderId,
+                ...identityFields,
+                numalb,
+                stage: "mark_albaran",
+              });
             }
-          } catch (error) {
-            // Reported, not thrown: the remaining matches are independent and
-            // the next run re-reads the same albfacca rows.
-            log.logError(error, { orderId, numped, numalb, stage: "mark_albaran" });
           }
         }
       }

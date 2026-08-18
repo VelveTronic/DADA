@@ -30,6 +30,9 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test
       - run: pnpm build
+      # The on-prem bridge ships as its own bundle and is not part of `next
+      # build`; a bridge-only break would otherwise reach the operator's box.
+      - run: pnpm bridge:build
 
   database:
     runs-on: ubuntu-latest

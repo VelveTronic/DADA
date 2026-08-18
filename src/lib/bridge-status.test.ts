@@ -4,6 +4,7 @@ import {
   BRIDGE_STALE_MS,
   bridgeCountLabelKey,
   bridgeStateKey,
+  deriveBridgeBusinessHealth,
   deriveBridgeStatus,
   deriveBridgeStatuses,
   formatMadridTime,
@@ -138,6 +139,7 @@ describe("deriveBridgeStatus — outcome", () => {
   it("reads a successful run as ok", () => {
     const view = deriveBridgeStatus("orders", row("orders", MINUTE, true, { claimed: 0 }), NOW);
     expect(view.outcome).toBe("ok");
+    expect(view.businessHealth).toBe("healthy");
     expect(view.tone).toBe("good");
     expect(view.code).toBeNull();
   });
@@ -193,6 +195,185 @@ describe("deriveBridgeStatus — outcome", () => {
       NOW,
     );
     expect(staleFailed).toMatchObject({ freshness: "stale", outcome: "failed", tone: "bad" });
+  });
+});
+
+describe("deriveBridgeBusinessHealth — completed run contents", () => {
+  it("keeps `ok` as the program outcome while a retried order turns the card amber", () => {
+    const view = deriveBridgeStatus(
+      "orders",
+      row("orders", MINUTE, true, {
+        claimed: 3,
+        injected: 2,
+        recovered: 0,
+        failed: 1,
+        requeued: 1,
+        terminal: 0,
+        markFailed: 0,
+        failureMarkFailed: 0,
+      }),
+      NOW,
+    );
+
+    expect(view).toMatchObject({
+      outcome: "ok",
+      businessHealth: "degraded",
+      tone: "warn",
+    });
+    expect(bridgeStateKey(view)).toBe("degraded");
+  });
+
+  it("keeps the next empty run red while a manual backlog still exists", () => {
+    const view = deriveBridgeStatus(
+      "orders",
+      row("orders", MINUTE, true, {
+        claimed: 0,
+        injected: 0,
+        recovered: 0,
+        failed: 0,
+        requeued: 0,
+        terminal: 0,
+        markFailed: 0,
+        failureMarkFailed: 0,
+        manualRequired: 1,
+        retryPending: 0,
+        processingPending: 0,
+        backlogCountError: 0,
+      }),
+      NOW,
+    );
+
+    expect(view).toMatchObject({
+      outcome: "ok",
+      businessHealth: "failed",
+      tone: "bad",
+    });
+    expect(bridgeStateKey(view)).toBe("businessFailed");
+  });
+
+  it("keeps the next empty run amber while a retry backlog still exists", () => {
+    const view = deriveBridgeStatus(
+      "orders",
+      row("orders", MINUTE, true, {
+        claimed: 0,
+        failed: 0,
+        requeued: 0,
+        terminal: 0,
+        markFailed: 0,
+        failureMarkFailed: 0,
+        manualRequired: 0,
+        retryPending: 2,
+        processingPending: 0,
+        backlogCountError: 0,
+      }),
+      NOW,
+    );
+
+    expect(view).toMatchObject({
+      outcome: "ok",
+      businessHealth: "degraded",
+      tone: "warn",
+    });
+    expect(bridgeStateKey(view)).toBe("degraded");
+  });
+
+  it("keeps a fully requeued transient batch amber", () => {
+    const view = deriveBridgeStatus(
+      "orders",
+      row("orders", MINUTE, true, {
+        claimed: 2,
+        injected: 0,
+        recovered: 0,
+        failed: 2,
+        requeued: 2,
+        terminal: 0,
+        markFailed: 0,
+        failureMarkFailed: 0,
+        manualRequired: 0,
+        retryPending: 2,
+        processingPending: 0,
+        backlogCountError: 0,
+      }),
+      NOW,
+    );
+
+    expect(view).toMatchObject({
+      outcome: "ok",
+      businessHealth: "degraded",
+      tone: "warn",
+    });
+    expect(bridgeStateKey(view)).toBe("degraded");
+  });
+
+  it.each([
+    "terminal",
+    "markFailed",
+    "failureMarkFailed",
+    "manualRequired",
+    "processingPending",
+    "backlogCountError",
+  ])(
+    "treats %s as requiring human attention",
+    (key) => {
+      const view = deriveBridgeStatus(
+        "orders",
+        row("orders", MINUTE, true, {
+          claimed: 2,
+          injected: 1,
+          failed: 1,
+          [key]: 1,
+        }),
+        NOW,
+      );
+      expect(view.businessHealth).toBe("failed");
+      expect(view.tone).toBe("bad");
+      expect(bridgeStateKey(view)).toBe("businessFailed");
+    },
+  );
+
+  it("lets a persistent red condition outrank a retry backlog", () => {
+    expect(
+      deriveBridgeBusinessHealth("orders", [
+        { key: "manualRequired", value: 1 },
+        { key: "retryPending", value: 4 },
+      ]),
+    ).toBe("failed");
+  });
+
+  it("does not apply orders-only counters to the other jobs", () => {
+    expect(
+      deriveBridgeBusinessHealth("price-sync", [
+        { key: "failed", value: 10 },
+        { key: "terminal", value: 10 },
+      ]),
+    ).toBe("healthy");
+  });
+
+  it("treats Albarán identity or mark failures as failed business health", () => {
+    expect(
+      deriveBridgeBusinessHealth("albaran-sync", [{ key: "failed", value: 1 }]),
+    ).toBe("failed");
+    expect(
+      deriveBridgeStatus(
+        "albaran-sync",
+        row("albaran-sync", MINUTE, true, { injected: 2, failed: 1 }),
+        NOW,
+      ),
+    ).toMatchObject({
+      outcome: "ok",
+      businessHealth: "failed",
+      tone: "bad",
+    });
+  });
+
+  it("does not invent a failure from absent, null or non-positive counts", () => {
+    expect(
+      deriveBridgeBusinessHealth("orders", [
+        { key: "claimed", value: null },
+        { key: "failed", value: 0 },
+        { key: "terminal", value: -1 },
+      ]),
+    ).toBe("healthy");
   });
 });
 
@@ -310,6 +491,18 @@ describe("bridgeStateKey", () => {
     ["a stale success", row("orders", HOUR, true, { claimed: 0 }), "stale", "warn"],
     ["a stale lock", row("orders", HOUR, false, { code: "LOCK_HELD" }), "stale", "warn"],
     ["a stale failure", row("orders", HOUR, false, { code: "RUN_FAILED" }), "failed", "bad"],
+    [
+      "a completed run with a retry",
+      row("orders", MINUTE, true, { claimed: 2, injected: 1, failed: 1, requeued: 1 }),
+      "degraded",
+      "warn",
+    ],
+    [
+      "a completed run with a terminal order",
+      row("orders", MINUTE, true, { claimed: 2, injected: 1, failed: 1, terminal: 1 }),
+      "businessFailed",
+      "bad",
+    ],
     ["no row", null, "missing", "warn"],
   ];
 
@@ -376,8 +569,21 @@ describe("bridgeCountLabelKey", () => {
   it("labels every count each job actually emits", () => {
     const emitted: Record<BridgeJob, string[]> = {
       // ordersCounts / albaranCounts / priceSyncCounts, key for key.
-      orders: ["claimed", "injected", "recovered", "markFailed", "failed"],
-      "albaran-sync": ["injected", "matched", "marked"],
+      orders: [
+        "claimed",
+        "injected",
+        "recovered",
+        "failed",
+        "requeued",
+        "terminal",
+        "markFailed",
+        "failureMarkFailed",
+        "manualRequired",
+        "retryPending",
+        "processingPending",
+        "backlogCountError",
+      ],
+      "albaran-sync": ["injected", "matched", "marked", "failed"],
       "price-sync": [
         "articles",
         "matched",
