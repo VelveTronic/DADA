@@ -49,10 +49,20 @@
   --color-ink: #1c1917;
   /* Secondary wording — a row's second line, a quiet control's glyph. */
   --color-ink-soft: #57504a;
-  /* Tertiary: captions, hints, units. */
-  --color-muted: #79726b;
+  /* Tertiary: captions, hints, units.
+     The design's own tertiary grey is #79726B, and it is a shade darker here.
+     In the mockup this colour only ever sits on a white card, where it clears
+     AA; ours also has to survive the bare BEIGE ground, and an empty state's
+     copy is exactly that — muted text on #F1EEEB with no card under it, where
+     #79726B lands at 4.10:1 and misses. #6E6760 is the same warm hue a hair
+     darker: 4.81:1 on the beige, 5.57:1 on white. */
+  --color-muted: #6e6760;
   /* The lightest ink that is still ink: placeholders and inactive labels. It is
-     NOT for anything a customer has to read. */
+     NOT for anything a customer has to read — at 2.47:1 on a field it is below
+     AA on purpose, and that is only defensible because every input in this repo
+     carries a visible label or an aria-label, which makes a placeholder
+     SUPPLEMENTARY text that repeats what the label already said. Body copy, a
+     value, a hint the customer needs: never this token. */
   --color-faint: #a8a099;
   /* The sphere's own red. It is a FILL colour: white on it clears AA (4.75:1),
      but it as text on a light ground does not. */
