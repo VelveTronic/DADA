@@ -185,7 +185,12 @@ begin
       status = 'processing',
       bridge_claim_token = p_claim_token,
       bridge_claimed_at = pg_catalog.now(),
-      bridge_attempt_count = pg_catalog.least(target.bridge_attempt_count + 1, 5),
+      -- LEAST and GREATEST are SQL syntax, not functions: there is no
+      -- `pg_catalog.least` to resolve to, so qualifying them fails at RUN time
+      -- and never at CREATE (plpgsql only syntax-checks embedded SQL when it
+      -- compiles). Exactly the COALESCE mistake 20260815102119 exists to undo.
+      -- `set search_path = ''` does not reach them; they need no qualification.
+      bridge_attempt_count = least(target.bridge_attempt_count + 1, 5),
       bridge_next_attempt_at = null
     from picked
     where target.id = picked.id
@@ -308,24 +313,24 @@ begin
 
   update public.orders
   set
-    bridge_attempt_count = pg_catalog.greatest(bridge_attempt_count, 1),
+    bridge_attempt_count = greatest(bridge_attempt_count, 1),
     bridge_last_error_code = v_code,
     bridge_last_error_message = v_message,
     bridge_failed_at = pg_catalog.now(),
     status = case
       when coalesce(p_retryable, false)
-        and pg_catalog.greatest(bridge_attempt_count, 1) < 5
+        and greatest(bridge_attempt_count, 1) < 5
         then 'confirmed'
       else 'bridge_failed'
     end,
     bridge_next_attempt_at = case
       when coalesce(p_retryable, false)
-        and pg_catalog.greatest(bridge_attempt_count, 1) < 5
+        and greatest(bridge_attempt_count, 1) < 5
         then pg_catalog.now() + pg_catalog.make_interval(
           secs => (
             60 * pg_catalog.power(
               2::numeric,
-              pg_catalog.greatest(bridge_attempt_count, 1) - 1
+              greatest(bridge_attempt_count, 1) - 1
             )
           )::integer
         )

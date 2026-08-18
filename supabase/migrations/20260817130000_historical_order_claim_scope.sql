@@ -132,7 +132,10 @@ begin
       status = 'processing',
       bridge_claim_token = p_claim_token,
       bridge_claimed_at = pg_catalog.now(),
-      bridge_attempt_count = pg_catalog.least(target.bridge_attempt_count + 1, 5),
+      -- Unqualified on purpose: LEAST is SQL syntax with no pg_proc entry, so
+      -- `pg_catalog.least` resolves to nothing at run time. See the longer note
+      -- in 20260817100000 and the COALESCE precedent in 20260815102119.
+      bridge_attempt_count = least(target.bridge_attempt_count + 1, 5),
       bridge_next_attempt_at = null
     from picked
     where target.id = picked.id
