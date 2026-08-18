@@ -3,13 +3,13 @@ import { getTranslations, setRequestLocale } from "next-intl/server";
 import Link from "next/link";
 import { AppShell } from "@/components/app-shell";
 import { SearchIcon } from "@/components/icons";
-import { BTN_PRIMARY, CARD, FIELD } from "@/components/ui";
+import { ProductRow } from "@/components/product-row";
 import { beginCompanyUser, finishCompanyUser } from "@/lib/auth/guards";
-import { localizedName, sanitizeSearch } from "@/lib/catalog/display";
+import { localizedName } from "@/lib/catalog/display";
 import { perfRun } from "@/lib/perf";
 import { getSetting } from "@/lib/settings";
 import type { CustomerCatalogProduct } from "@/lib/supabase/public.types";
-import { ProductRow } from "./product-row";
+import { CategoryRail, type RailEntry } from "./category-rail";
 
 export const dynamic = "force-dynamic";
 
@@ -34,38 +34,25 @@ export default async function CatalogPage({
   searchParams,
 }: {
   params: Promise<{ locale: Locale }>;
+  // No `q`: searching is its own page now (`/buscar`), and the box at the top of
+  // this one is a LINK to it. A catalogue that also answered `?q=` would be a
+  // second search implementation to keep in step with that one — and the rail
+  // beside the list is this page's filter.
   searchParams: Promise<{
-    q?: string;
     tab?: string;
     page?: string;
     cat?: string;
-    focus?: string;
   }>;
 }) {
   const { locale } = await params;
-  const {
-    q: rawQ,
-    tab: rawTab,
-    page: rawPage,
-    cat: rawCat,
-    focus: rawFocus,
-  } = await searchParams;
+  const { tab: rawTab, page: rawPage, cat: rawCat } = await searchParams;
   setRequestLocale(locale);
   const perf = perfRun(`/${locale}/catalogo`);
   const { supabase, pendingUser } = await beginCompanyUser(locale);
   const t = await getTranslations("catalog");
 
-  const q = sanitizeSearch(rawQ ?? "");
   const tab = rawTab === "favoritos" ? "favoritos" : "all";
   const page = Math.max(1, Number.parseInt(rawPage ?? "1", 10) || 1);
-  // What the header's 搜索 icon links to (`?focus=search`). The whole feature is
-  // this boolean and the `autoFocus` below: React DOM renders the real
-  // `autofocus` attribute server-side, so the browser puts the caret in the box
-  // as it parses the page — no client component, no effect, no second search UI
-  // to keep in step with this one. Compared strictly, so nothing else in the
-  // parameter's value can turn it on, and it is deliberately NOT carried by
-  // `href()`: it belongs to the one navigation that asked for it.
-  const focusSearch = rawFocus === "search";
 
   // ROUND ONE. The restaurant's profile row is already in flight (see
   // `guards.ts`); the two reads that need nothing from it go out beside it
@@ -107,11 +94,6 @@ export default async function CatalogPage({
       .from("products_priced")
       .select("*", { count: "exact" })
       .eq("is_current_variant", true);
-    if (q) {
-      query = query.or(
-        `codart.ilike.%${q}%,name->>zh.ilike.%${q}%,name->>es.ilike.%${q}%`,
-      );
-    }
     if (favoriteFilter) {
       query = query.in("id", favoriteFilter.length ? favoriteFilter : [NO_MATCH_ID]);
     }
@@ -154,20 +136,16 @@ export default async function CatalogPage({
   const totalPages = Math.max(1, Math.ceil((count ?? 0) / PAGE_SIZE));
   perf.end();
 
-  const href = (p: {
-    q?: string;
-    tab?: string;
-    page?: number;
-    cat?: string;
-  }) => {
+  const href = (p: { tab?: string; page?: number; cat?: string }) => {
     const sp = new URLSearchParams();
-    const qq = p.q ?? q;
     const tt = p.tab ?? tab;
-    // A category survives a search or a tab switch; only the "all" chip clears
-    // it, by passing the empty string. Every caller that changes the filter
-    // passes page: 1, so a narrower result set never lands on a page past its end.
+    // Every rail entry passes BOTH halves of the filter, so picking one clears
+    // the other: the rail is a single-select list — 全部, 常购, one category —
+    // and two of its entries could not be lit at once without lying about what
+    // the pane beside it is showing. The pager is the only caller that passes
+    // neither and inherits both. Everything that changes the filter passes
+    // page: 1, so a narrower result set never lands on a page past its end.
     const cc = p.cat ?? activeCategory?.erp_code ?? "";
-    if (qq) sp.set("q", qq);
     if (tt !== "all") sp.set("tab", tt);
     if (cc) sp.set("cat", cc);
     if ((p.page ?? 1) > 1) sp.set("page", String(p.page));
@@ -199,25 +177,40 @@ export default async function CatalogPage({
     }
   }
 
-  // 44px tall, which is the whole reason for the inline-flex: an anchor is only
-  // as tall as its text, and these two are the page's main switch on a phone.
-  const tabClass = (active: boolean) =>
-    active
-      ? "-mb-px inline-flex h-11 items-center border-b-2 border-brand font-semibold"
-      : "-mb-px inline-flex h-11 items-center border-b-2 border-transparent text-muted transition-colors hover:text-ink";
+  // 全部 is the rail's own entry rather than the absence of one: a bare
+  // `/catalogo` is exactly it, which is what keeps every existing link into the
+  // catalogue landing on a lit rail.
+  const railEntries: RailEntry[] = [
+    {
+      id: "all",
+      label: t("railAll"),
+      href: href({ tab: "all", cat: "", page: 1 }),
+      active: tab === "all" && !activeCategory,
+    },
+    {
+      id: "favoritos",
+      label: t("railFavorites"),
+      href: href({ tab: "favoritos", cat: "", page: 1 }),
+      active: tab === "favoritos",
+      count: favoriteIds.size,
+    },
+    ...categories.map((c) => ({
+      id: c.id,
+      label: c.label,
+      href: href({ tab: "all", cat: c.erp_code, page: 1 }),
+      active: tab === "all" && activeCategory?.id === c.id,
+    })),
+  ];
 
-  // Chips, not a second row of underlined tabs: the categories are a FILTER over
-  // whatever the tabs above are showing, and they used to be drawn in the same
-  // vocabulary as the thing they filter. A pill also gives the touch target its
-  // own visible edges — 44px tall, wide enough for one Chinese category name.
-  const chipClass = (active: boolean) =>
-    active
-      ? "inline-flex h-11 shrink-0 items-center whitespace-nowrap rounded-full border border-brand/30 bg-brand-soft px-4 font-semibold text-brand-ink"
-      : "inline-flex h-11 shrink-0 items-center whitespace-nowrap rounded-full border border-border bg-white/70 px-4 text-muted transition-colors hover:border-brand hover:text-brand-ink";
+  // The pane says which rail entry it is answering, in the rail's own words.
+  const paneLabel =
+    tab === "favoritos"
+      ? t("paneFavorites")
+      : (activeCategory?.label ?? t("railAll"));
 
-  // Search, a category or the favourites tab: anything that can make the list
-  // come back empty, so the empty state can offer the way back out of it.
-  const filtered = Boolean(q) || activeCategory !== null || tab === "favoritos";
+  // A category or the favourites list: anything that can make the pane come back
+  // empty, so the empty state can offer the way back out of it.
+  const filtered = activeCategory !== null || tab === "favoritos";
 
   return (
     <AppShell
@@ -225,151 +218,140 @@ export default async function CatalogPage({
       user={{ name: portalUser.display_name ?? portalUser.companies.name }}
       cartPrices={cartPrices}
       showPrices={showPrices}
+      // The two panes below scroll on their own, so the shell must not let the
+      // document scroll behind them — see the layout note in `app-shell.tsx`.
+      layout="viewport"
     >
-      <h1 className="mt-8 text-2xl font-bold tracking-tight">{t("title")}</h1>
-
-      <form method="get" className="mt-4 flex items-center gap-2">
-        {tab === "favoritos" && (
-          <input type="hidden" name="tab" value="favoritos" />
-        )}
-        {/* A GET form submits only its own fields, so the chosen category has to
-            ride along or searching would silently widen the result set. */}
-        {activeCategory && (
-          <input type="hidden" name="cat" value={activeCategory.erp_code} />
-        )}
-        <input
-          name="q"
-          defaultValue={q}
-          // False on every ordinary catalogue load: focus is only stolen when
-          // the customer pressed 搜索 and asked for exactly this box.
-          autoFocus={focusSearch}
+      <div className="flex-none">
+        {/* A LINK dressed as a search field, not a field. Searching is its own
+            screen (`/buscar`): it has the keyboard, the history and the result
+            list, and it is reached from four places in the app — a real input
+            here would be a second search UI to keep in step with that one, and
+            it would put a keyboard over the catalogue every time a thumb landed
+            near the top of the screen. It is announced as what it does; the grey
+            wording inside is the same sentence, so the two cannot drift. */}
+        <Link
+          href={`/${locale}/buscar`}
           aria-label={t("searchPlaceholder")}
-          placeholder={t("searchPlaceholder")}
-          className={`h-11 w-full ${FIELD}`}
-        />
-        {/* The oversized red block on the owner's phone was this button losing a
-            fight with the input's `w-full`: both are flex items, the input asked
-            for 100% of the row, and the overflow was settled by SHRINKING the
-            button to its min-content — which for 搜索 is one character wide, so
-            the label wrapped onto two lines and the button grew a head taller
-            than the field beside it. `shrink-0` is the fix; the icon is the
-            improvement. On a phone it is a 44px square carrying the loupe (the
-            same glyph the header's 搜索 uses, so the two read as one action) and
-            the word appears from `sm` up, where there is room for it. */}
-        <button
-          type="submit"
-          aria-label={t("searchButton")}
-          className={`${BTN_PRIMARY} inline-flex h-11 shrink-0 items-center justify-center gap-2 whitespace-nowrap`}
+          className="mx-4 mt-2 flex h-10 items-center gap-2 rounded-[10px] bg-surface-dim px-3 text-sm text-faint transition-colors hover:text-muted"
         >
-          <SearchIcon />
-          <span className="hidden sm:inline">{t("searchButton")}</span>
-        </button>
-      </form>
-
-      <nav className="mt-6 flex gap-5 border-b border-border text-sm">
-        <Link
-          href={href({ tab: "all", page: 1 })}
-          className={tabClass(tab === "all")}
-        >
-          {t("tabAll")}
-        </Link>
-        <Link
-          href={href({ tab: "favoritos", page: 1 })}
-          className={tabClass(tab === "favoritos")}
-        >
-          {t("tabFavorites")} ({favoriteIds.size})
-        </Link>
-      </nav>
-
-      {categories.length > 0 && (
-        // Full-bleed on a phone: the row scrolls past the page gutter, so the
-        // last chip is visibly cut off rather than looking like the end of it.
-        <nav className="-mx-4 mt-3 flex gap-2 overflow-x-auto px-4 py-1 text-sm sm:mx-0 sm:px-0">
-          <Link
-            href={href({ cat: "", page: 1 })}
-            className={chipClass(!activeCategory)}
-          >
-            {t("catAll")}
-          </Link>
-          {categories.map((c) => (
-            <Link
-              key={c.id}
-              href={href({ cat: c.erp_code, page: 1 })}
-              className={chipClass(activeCategory?.id === c.id)}
-            >
-              {c.label}
-            </Link>
-          ))}
-        </nav>
-      )}
-
-      {products.length === 0 ? (
-        // The empty state says what happened AND offers the way out of it: a
-        // search that matched nothing, or a category with nothing in it, used to
-        // be a grey sentence in the middle of a card with no control on it — the
-        // customer's only move was to find the filter they set and undo it by
-        // hand. The link is only there when something IS filtering; on a truly
-        // empty catalogue it would be a link to the same empty page.
-        <div
-          className={`${CARD} mt-4 flex flex-col items-center gap-3 px-6 py-12 text-center`}
-        >
-          <span className="flex size-12 items-center justify-center rounded-full bg-border text-muted">
+          {/* The shared glyph is drawn at 24px for the 44px header buttons; in a
+              38px field it is the design's small loupe, and the box around it is
+              what resizes it — `icons.tsx` fixes the size on the SVG itself. */}
+          <span aria-hidden className="flex-none [&>svg]:size-4">
             <SearchIcon />
           </span>
-          <p className="text-muted">{t("noResults")}</p>
-          {filtered && (
-            <Link
-              href={href({ q: "", tab: "all", cat: "", page: 1 })}
-              // Same shape as the pager below — the two quiet navigations on
-              // this page, both 44px and both brand-ink on the card.
-              className="inline-flex h-11 items-center rounded-lg px-3 text-sm text-brand-ink underline underline-offset-4 transition-colors hover:bg-brand-soft"
-            >
-              {t("clearFilters")}
-            </Link>
-          )}
-        </div>
-      ) : (
-        <ul className={`${CARD} mt-4 divide-y divide-border px-3 sm:px-5`}>
-          {/* The row itself lives in `product-row.tsx`: it is where the layout
-              that this page's customers press lives, and it is the one piece of
-              the catalogue worth being able to mount on its own. */}
-          {products.map((p) => (
-            <ProductRow
-              key={p.id as string}
-              product={p}
-              locale={locale}
-              isFavorite={favoriteIds.has(p.id as string)}
-              showPrices={showPrices}
-            />
-          ))}
-        </ul>
-      )}
+          {t("searchPlaceholder")}
+        </Link>
 
-      {totalPages > 1 && (
-        <nav className="mt-6 flex items-center justify-center gap-2 text-sm">
-          {/* Two anchors at the bottom of a fifty-row list, thumbed on a phone:
-              44px tall and padded wide enough to hit without aiming. */}
-          {page > 1 && (
-            <Link
-              className="inline-flex h-11 items-center rounded-lg px-3 text-brand-ink transition-colors hover:bg-brand-soft"
-              href={href({ page: page - 1 })}
-            >
-              {t("prev")}
-            </Link>
+        {/* What this catalogue IS, said once at the top of it: a demand list,
+            not a checkout. The restaurant picks goods and submits; DADA prices
+            and schedules. Nobody is ever asked for a card, and the design puts
+            that sentence here because the alternative is a customer who reaches
+            the submit button still expecting one. */}
+        <p className="mt-3 flex items-center gap-2 border-y border-[#FBE4E2] bg-[#FFF6F5] px-4 py-2 text-xs text-brand-ink">
+          <span
+            aria-hidden
+            className="size-[5px] flex-none rounded-full bg-brand"
+          />
+          {t("notice")}
+        </p>
+      </div>
+
+      {/* The two panes. `min-h-0` is what makes them scroll rather than stretch:
+          a flex child's automatic minimum is its CONTENT, so without it a
+          fifty-row list would push this row taller than the shell and the whole
+          document would scroll again — with the rail scrolled off the top. */}
+      <div className="flex min-h-0 flex-1">
+        <CategoryRail entries={railEntries} />
+
+        <div className="min-w-0 flex-1 overflow-y-auto bg-surface">
+          {/* Sticky inside the pane, not the page: it names the filter the rail
+              set and counts what came back, and it has to keep saying so forty
+              rows down. The count is the query's own exact count, so it is the
+              size of the whole result, not of this page of it. */}
+          <div className="sticky top-0 z-10 flex items-baseline justify-between bg-surface px-4 py-3">
+            <h1 className="text-sm font-bold">{paneLabel}</h1>
+            <span className="font-num text-xs text-faint tabular-nums">
+              {t("paneCount", { n: count ?? 0 })}
+            </span>
+          </div>
+
+          {products.length === 0 ? (
+            // The empty state says what happened AND offers the way out of it: a
+            // category with nothing in it, or a restaurant that has starred
+            // nothing yet, used to be a grey sentence with no control on it —
+            // the customer's only move was to find the filter they set and undo
+            // it by hand. The link is only there when something IS filtering; on
+            // a truly empty catalogue it would be a link to the same empty page.
+            <div className="flex flex-col items-center gap-3 px-6 py-12 text-center">
+              <span className="flex size-12 items-center justify-center rounded-full bg-border text-muted">
+                <SearchIcon />
+              </span>
+              <p className="text-muted">{t("noResults")}</p>
+              {filtered && (
+                <Link
+                  href={href({ tab: "all", cat: "", page: 1 })}
+                  // Same shape as the pager below — the two quiet navigations in
+                  // this pane, both 44px.
+                  className="inline-flex h-11 items-center rounded-lg px-3 text-sm text-brand-ink underline underline-offset-4 transition-colors hover:bg-brand-soft"
+                >
+                  {t("clearFilters")}
+                </Link>
+              )}
+            </div>
+          ) : (
+            <ul>
+              {/* The row itself lives in `components/product-row.tsx`: it is
+                  where the layout that this page's customers press lives, it
+                  carries its own dividers and insets now that there is no card
+                  under it, and `/buscar` draws the same one. */}
+              {products.map((p) => (
+                <ProductRow
+                  key={p.id as string}
+                  product={p}
+                  locale={locale}
+                  isFavorite={favoriteIds.has(p.id as string)}
+                  showPrices={showPrices}
+                />
+              ))}
+            </ul>
           )}
-          <span className="px-2 text-muted tabular-nums">
-            {t("pageOf", { page, total: totalPages })}
-          </span>
-          {page < totalPages && (
-            <Link
-              className="inline-flex h-11 items-center rounded-lg px-3 text-brand-ink transition-colors hover:bg-brand-soft"
-              href={href({ page: page + 1 })}
-            >
-              {t("next")}
-            </Link>
+
+          {totalPages > 1 && (
+            <nav className="flex items-center justify-center gap-2 py-4 text-sm">
+              {/* Two anchors at the bottom of a fifty-row list, thumbed on a
+                  phone: 44px tall and padded wide enough to hit without aiming.
+                  Outlined now, because on a bare white pane the card edge that
+                  used to frame them as controls is gone. */}
+              {page > 1 && (
+                <Link
+                  className="inline-flex h-11 items-center rounded-lg border border-border-strong px-3 text-brand-ink transition-colors hover:bg-brand-soft"
+                  href={href({ page: page - 1 })}
+                >
+                  {t("prev")}
+                </Link>
+              )}
+              <span className="px-2 font-num text-muted tabular-nums">
+                {t("pageOf", { page, total: totalPages })}
+              </span>
+              {page < totalPages && (
+                <Link
+                  className="inline-flex h-11 items-center rounded-lg border border-border-strong px-3 text-brand-ink transition-colors hover:bg-brand-soft"
+                  href={href({ page: page + 1 })}
+                >
+                  {t("next")}
+                </Link>
+              )}
+            </nav>
           )}
-        </nav>
-      )}
+
+          {/* Scroll room under the last row for the bars that float over this
+              pane on a phone. Desktop keeps a small one so the list does not end
+              flush against the window. */}
+          <div aria-hidden className="h-28 lg:h-8" />
+        </div>
+      </div>
     </AppShell>
   );
 }

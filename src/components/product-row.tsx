@@ -9,7 +9,9 @@ import type { CustomerCatalogProduct } from "@/lib/supabase/public.types";
 
 /**
  * ONE catalogue line: photo, what the product is, and the two things a customer
- * can do to it.
+ * can do to it. Shared by every list of products a customer scrolls — the
+ * catalogue's right pane and the search results — which is why it lives here and
+ * not under one route.
  *
  * **The bug this shape exists to kill.** The row used to be a `flex-wrap` line
  * of four cells, and on a phone the name cell was `basis-full`: the name took
@@ -27,12 +29,12 @@ import type { CustomerCatalogProduct } from "@/lib/supabase/public.types";
  * the other two tracks left, and `line-clamp-2` caps what overflows vertically.
  *
  * ```text
- *   ┌──────┬──────────────────────────┬──────────────────────────┐
- *   │ 3rem │ minmax(0,1fr)            │ 8.75rem  (FIXED)         │
- *   │ thumb│ name (2 lines max)       │  [stepper slot] ␣ [★]    │
- *   │      │ codart · CAJA×24  (1 ln) │   6.25rem     4px 2.25rem│
- *   │      │ 12,00 €                  │                          │
- *   └──────┴──────────────────────────┴──────────────────────────┘
+ *   ┌───────┬─────────────────────────┬──────────────────────────┐
+ *   │2.75rem│ minmax(0,1fr)           │ 8.75rem  (FIXED)         │
+ *   │ thumb │ name (2 lines max)      │  [stepper slot] ␣ [★]    │
+ *   │       │ codart · CAJA×24 (1 ln) │   6.25rem     4px 2.25rem│
+ *   │       │ 12,00 €                 │                          │
+ *   └───────┴─────────────────────────┴──────────────────────────┘
  * ```
  *
  * **Why the action column is a FIXED track and not `auto`.** The stepper inside
@@ -52,13 +54,23 @@ import type { CustomerCatalogProduct } from "@/lib/supabase/public.types";
  * outcomes have nothing to do with each other need a miss margin between them,
  * and 4px of dead pixels is the cheapest one available on a 375px row.
  *
- * The star is 36px rather than the 44px this pass gave the search button and the
- * category chips: on that same 375px screen the extra 8px would come out of the
- * product name, which is the row's whole point, and 36px still clears WCAG 2.2
- * AA's 24px target minimum.
+ * The star is 36px rather than the 44px a full-width touch target would be: on a
+ * phone the extra 8px would come out of the product name, which is the row's
+ * whole point, and 36px still clears WCAG 2.2 AA's 24px target minimum.
+ *
+ * **The row owns its own insets and its own top rule** (`px-3 py-2.5 border-t`),
+ * where it used to inherit both from the card the list was drawn on. There is no
+ * card any more: the list is painted straight onto the white pane, so a row that
+ * did not pad itself would sit against the pane's edge and the hairline between
+ * two rows would stop short of it. Padding INSIDE the bordered box is also what
+ * makes that rule full-bleed, as the design draws it.
+ *
+ * The 10px column gap is the design's, and on a phone it is not decoration
+ * either: the two gaps are 20px of the ~74px the name column is left with once
+ * the 88px rail, the thumb and the fixed action column have taken their share.
  */
 const ROW =
-  "grid grid-cols-[3rem_minmax(0,1fr)_8.75rem] items-center gap-x-3 py-3";
+  "grid grid-cols-[2.75rem_minmax(0,1fr)_8.75rem] items-center gap-x-2.5 border-t border-[#F4F0EC] px-3 py-2.5";
 
 /**
  * The stepper's fixed footprint, right-aligned. 6.25rem = 100px, which is the
@@ -116,13 +128,13 @@ export async function ProductRow({
             `break-words` is what makes the clamp honest on a LATIN name.
             `line-clamp` only ever ellipsises a line-COUNT overflow: a word with
             no break opportunity in it — ESPECIALIDADES, ~12 characters, wider
-            than the 105px this column gets on a phone — is one line that
+            than the ~74px this column gets on a phone — is one line that
             overflows sideways, so the clamp has nothing to count and the word is
             cut mid-glyph with no ellipsis at all. Allowing the break puts the
             rest of the word on line two, where the clamp can do its job. Chinese
             never hit this (it breaks between any two characters), which is why
             the phone the bug was reported from never showed it. */}
-        <p className="line-clamp-2 leading-snug font-medium break-words">
+        <p className="line-clamp-2 text-sm leading-[1.35] font-semibold break-words">
           {name}
         </p>
 
@@ -157,16 +169,16 @@ export async function ProductRow({
             Ordering is unaffected: the stepper is gated on `priced`, which the
             server resolved either way. */}
         {showPrices && (
-          <p className="mt-1 text-sm font-semibold tabular-nums">
+          <p className="mt-1 font-num text-sm font-semibold tabular-nums">
             {caseCents != null ? (
               formatEuros(caseCents, locale)
             ) : (
-              // A note, not a figure, and sized like one: "Precio pendiente" at
-              // the price's own 14px is 106px wide and wraps onto a second line
-              // in the 105px this column gets on a phone — on every row, since
-              // every price is NULL until the owner's Wingest merge. At 12px it
-              // is 94px and sits on one line, which is also the size the meta
-              // line above it uses for everything that is not money.
+              // A note, not a figure, and sized like one: at the price's own
+              // 14px "Precio pendiente" is 106px wide, half again the column a
+              // phone leaves this text — on every row, since every price is NULL
+              // until the owner's Wingest merge. At 12px it is 94px, which still
+              // wraps here but into the shortest shape it has, and it is the
+              // size the meta line above uses for everything that is not money.
               <span className="text-xs font-normal text-muted">
                 {t("noPrice")}
               </span>
