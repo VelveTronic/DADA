@@ -258,7 +258,10 @@ export default async function StaffOrdersPage({
         </p>
       )}
 
-      <nav className="mt-6 flex gap-5 border-b border-border text-sm">
+      {/* `border-border-strong`, not the hairline the cards use: this rule sits
+          on the bare beige ground, where #F2EEEA against #F1EEEB is 1.001:1 and
+          the strip's underline simply is not there. */}
+      <nav className="mt-6 flex gap-5 border-b border-border-strong text-sm">
         {QUEUE_TABS.map((target) => (
           <Link
             key={target}

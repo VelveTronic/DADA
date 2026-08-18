@@ -7,7 +7,7 @@ import { BTN_QUIET, FIELD_SM } from "@/components/ui";
 import { MAX_LINE_QTY } from "@/lib/orders";
 
 /** The quiet row control with its disabled state, as `/staff/usuarios` styles it. */
-const ROW_BTN = `${BTN_QUIET} disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-border disabled:hover:text-ink`;
+const ROW_BTN = `${BTN_QUIET} disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-border-strong disabled:hover:text-ink`;
 
 /**
  * The save control, split out for the ONE thing it needs that its parent cannot

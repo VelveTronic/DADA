@@ -69,7 +69,7 @@ const BADGE = "rounded-md px-1.5 py-0.5 text-xs";
 const BADGE_ON = `${BADGE} bg-green-100 text-green-800`;
 const BADGE_OFF = `${BADGE} bg-amber-100 text-amber-800`;
 /** The row controls, which the actor's own row renders disabled. */
-const ROW_BTN = `${BTN_QUIET} disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-border disabled:hover:text-ink`;
+const ROW_BTN = `${BTN_QUIET} disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-border-strong disabled:hover:text-ink`;
 
 export default async function StaffUsersPage({
   params,

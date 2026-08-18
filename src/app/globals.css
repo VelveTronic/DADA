@@ -44,8 +44,15 @@
   /* The hairline that divides two things on white… */
   --color-border: #f2eeea;
   /* …and the heavier line a CONTROL is drawn with, which has to be visible
-     rather than merely present. */
+     rather than merely present. Anything sitting on the BEIGE ground needs this
+     one too: `--color-border` is a hairline tuned for white, and against
+     #F1EEEB it is a 1.001:1 rule, i.e. no rule at all. */
   --color-border-strong: #e4ded8;
+  /* An input's fill and its edge. A field is a shade OFF the card it sits on —
+     an input whose bounds the customer cannot see is an input they do not fill
+     in — so it gets its own pair rather than borrowing surface/border. */
+  --color-field: #fbfaf9;
+  --color-field-border: #e9e4df;
   --color-ink: #1c1917;
   /* Secondary wording — a row's second line, a quiet control's glyph. */
   --color-ink-soft: #57504a;

@@ -8,15 +8,15 @@ import { isOrderStatus, type OrderStatus } from "@/lib/orders";
  * Seven states, deliberately distinct, and the four the customer meets most are
  * now drawn from the warm-beige design's own palette rather than Tailwind's
  * default ramps: the brand's soft red opens the story (`submitted` — the order
- * is with us), amber holds it while the shop prices it (`confirmed`), a cool
- * slate marks its arrival in Wingest (`injected`) and a muted green closes it
- * (`albaran`). `processing` (the bridge has claimed the order) keeps violet, and
- * it keeps it for the reason it was given violet in the first place: it and
- * `injected` used to share blue, which made the one transition a staff member is
- * actually waiting on invisible. `bridge_failed` keeps Tailwind's red-100/800,
- * the loudest pair here, because it is the one lifecycle state that explicitly
- * requires staff intervention — `submitted`'s brand tint is deliberately the
- * quieter red of the two.
+ * is with us), amber holds it while it waits for the bridge to claim it
+ * (`confirmed`), a cool slate marks its arrival in Wingest (`injected`) and a
+ * muted green closes it (`albaran`). `processing` (the bridge has claimed the
+ * order) keeps violet, and it keeps it for the reason it was given violet in
+ * the first place: it and `injected` used to share blue, which made the one
+ * transition a staff member is actually waiting on invisible. `bridge_failed`
+ * keeps Tailwind's red-100/800, the loudest pair here, because it is the one
+ * lifecycle state that explicitly requires staff intervention — `submitted`'s
+ * brand tint is deliberately the quieter red of the two.
  */
 const STATUS_CLASS: Record<OrderStatus, string> = {
   submitted: "bg-brand-soft text-brand-ink",

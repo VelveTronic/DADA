@@ -1,8 +1,15 @@
 /**
  * The class vocabulary the whole portal is built from — the card and the
  * controls that sit on it. Every page shares these strings so the look cannot
- * drift page by page, and every value resolves through the tokens in
+ * drift page by page, and every colour resolves through the tokens in
  * `globals.css`: change the palette there, not here.
+ *
+ * Two deliberate exceptions, both of which would be noise as tokens. The
+ * stepper's `+` carries a brand-tinted drop shadow — `rgba(224,35,28,.45)`,
+ * `--color-brand` at 45% — which is one shadow on one control, not a palette
+ * entry. And the seven status chips have their own one-off pairs; those live
+ * with the chip in `order-status-badge.tsx`, because they are a per-STATE map
+ * rather than shared vocabulary.
  *
  * Deliberately a plain module with NO imports: `login-form.tsx` is a client
  * component, and anything it pulls in that reaches `next/headers` (as
@@ -19,21 +26,20 @@
  * `staff-sidebar.tsx` about the drawer that cost us). Add the padding at the
  * call site; a table card and a text card want different amounts.
  */
-export const CARD =
-  "rounded-[var(--radius-card)] border border-border bg-surface";
+export const CARD = "rounded-card border border-border bg-surface";
 
 /**
  * Text/number/date inputs and textareas. The field is a shade OFF the card it
  * sits on rather than the same white — an input the customer cannot see the
  * edges of is an input they do not fill in — and its border is heavier than a
- * card's hairline for the same reason.
+ * card's hairline for the same reason. Both shades are the `field` token pair.
  */
 export const FIELD =
-  "rounded-[10px] border border-[#E9E4DF] bg-[#FBFAF9] px-3 py-2 text-ink placeholder:text-faint focus:border-brand focus:outline-none";
+  "rounded-[10px] border border-field-border bg-field px-3 py-2 text-ink placeholder:text-faint focus:border-brand focus:outline-none";
 
 /** The same field at row scale, for the inputs that sit inside a list line. */
 export const FIELD_SM =
-  "rounded-[10px] border border-[#E9E4DF] bg-[#FBFAF9] px-2 py-1 text-sm text-ink placeholder:text-faint focus:border-brand focus:outline-none";
+  "rounded-[10px] border border-field-border bg-field px-2 py-1 text-sm text-ink placeholder:text-faint focus:border-brand focus:outline-none";
 
 /**
  * The one accent: brand red, white text. Every screen's main action. Hover

@@ -14,13 +14,16 @@ import "../globals.css";
  * would cost megabytes on the 4G a restaurant orders from.
  *
  * `subsets: ["latin"]` is the whole point: digits and Latin only, self-hosted by
- * `next/font` so the browser never talks to Google. Three weights, because
- * `font-semibold` on a quantity and `font-bold` on a total are both real in the
- * design.
+ * `next/font` so the browser never talks to Google.
+ *
+ * No `weight`, deliberately — that is what asks for the VARIABLE cut. One woff2
+ * then covers the whole 100–900 axis, where naming the three weights the design
+ * actually uses (500/600/700) shipped three separate static files instead. The
+ * `wdth` axis Archivo also carries is left out: `axes` is opt-in, so only `wght`
+ * comes down.
  */
 const archivo = Archivo({
   subsets: ["latin"],
-  weight: ["500", "600", "700"],
   variable: "--font-archivo",
   display: "swap",
 });
