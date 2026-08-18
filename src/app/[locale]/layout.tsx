@@ -16,10 +16,11 @@ import "../globals.css";
  * `subsets: ["latin"]` is the whole point: digits and Latin only, self-hosted by
  * `next/font` so the browser never talks to Google.
  *
- * No `weight`, deliberately — that is what asks for the VARIABLE cut. One woff2
- * then covers the whole 100–900 axis, where naming the three weights the design
- * actually uses (500/600/700) shipped three separate static files instead. The
- * `wdth` axis Archivo also carries is left out: `axes` is opt-in, so only `wght`
+ * No `weight`, deliberately — that is what asks for the VARIABLE cut: the same
+ * woff2 chunks Google serves either way (latin splits into three unicode
+ * ranges), but declared once across the whole 100–900 axis instead of pinned to
+ * three instances, which cut the @font-face blocks from 10 to 4. The `wdth`
+ * axis Archivo also carries is left out: `axes` is opt-in, so only `wght`
  * comes down.
  */
 const archivo = Archivo({
