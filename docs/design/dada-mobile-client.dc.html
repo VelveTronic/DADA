@@ -1,0 +1,723 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700;900&family=Archivo:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+  *{box-sizing:border-box}
+  body{margin:0;background:#F1EEEB;font-family:'Noto Sans SC','PingFang SC','Microsoft YaHei',sans-serif;-webkit-font-smoothing:antialiased;color:#1C1917}
+  a{color:#E0231C;text-decoration:none}
+  a:hover{color:#B31710}
+  .scr::-webkit-scrollbar,.rail::-webkit-scrollbar{width:0;height:0}
+</style>
+</helmet>
+
+<div style="padding:56px 48px 80px;display:flex;flex-direction:column;gap:36px">
+
+  <div style="display:flex;align-items:flex-end;gap:24px;flex-wrap:wrap">
+    <div style="display:flex;align-items:center;gap:12px">
+      <div style="width:38px;height:38px;border-radius:50%;background:#E0231C;color:#fff;display:flex;align-items:center;justify-content:center;font-size:19px;font-weight:700;line-height:1">東</div>
+      <div style="font-family:Archivo,sans-serif;font-weight:700;font-size:26px;letter-spacing:-.01em">DADA</div>
+    </div>
+    <div style="height:38px;width:1px;background:#DCD6D0"></div>
+    <div style="display:flex;flex-direction:column;gap:4px">
+      <div style="font-size:20px;font-weight:700">客户端 · 手机叫货</div>
+      <div style="font-size:13px;color:#8C857E">需求单模式：客户勾货提交，商家后台报价 · 390 × 844</div>
+    </div>
+  </div>
+
+  <div style="display:flex;flex-wrap:wrap;gap:40px 32px">
+
+    <div style="width:390px;flex:none;display:flex;flex-direction:column;gap:10px">
+      <div style="font-size:13px;font-weight:600;color:#79726B">01 分类点货 · 左右联动</div>
+      <div data-screen-label="01 分类点货" style="width:390px;height:844px;background:#fff;border-radius:30px;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 24px 60px -20px rgba(40,26,20,.35),0 0 0 1px rgba(28,25,23,.07)">
+        <div style="height:44px;display:flex;align-items:center;justify-content:space-between;padding:0 22px;flex:none">
+          <div style="font-family:Archivo,sans-serif;font-size:13px;font-weight:600">9:41</div>
+          <div style="display:flex;align-items:center;gap:5px">
+            <div style="width:16px;height:9px;border-radius:2px;background:#1C1917"></div>
+            <div style="width:12px;height:9px;border-radius:2px;background:#1C1917"></div>
+            <div style="width:22px;height:10px;border:1.5px solid #1C1917;border-radius:3px;padding:1.5px"><div style="width:70%;height:100%;background:#1C1917;border-radius:1px"></div></div>
+          </div>
+        </div>
+
+        <div style="flex:none;padding:2px 16px 12px;display:flex;flex-direction:column;gap:12px;border-bottom:1px solid #F2EEEA">
+          <div style="display:flex;align-items:center;justify-content:space-between">
+            <div style="display:flex;align-items:center;gap:9px">
+              <div style="width:26px;height:26px;border-radius:50%;background:#E0231C;color:#fff;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;line-height:1">東</div>
+              <div style="font-family:Archivo,sans-serif;font-weight:700;font-size:17px">DADA</div>
+              <div style="font-size:12px;color:#8C857E;padding-left:4px">东记火锅 · 朝阳店</div>
+            </div>
+            <div style="display:flex;align-items:center;gap:5px;font-size:12px;color:#79726B;min-height:44px;padding:0 2px 0 12px;margin-right:-2px;cursor:pointer">切换 <span style="color:#B8B0A8">›</span></div>
+          </div>
+          <div style="height:38px;border-radius:10px;background:#F6F3F1;display:flex;align-items:center;gap:8px;padding:0 12px">
+            <div style="width:13px;height:13px;border:1.5px solid #A8A099;border-radius:50%"></div>
+            <div style="font-size:13px;color:#A8A099">搜索商品 / 品牌 / 规格</div>
+          </div>
+        </div>
+
+        <div style="flex:none;background:#FFF6F5;padding:8px 16px;display:flex;align-items:center;gap:8px;border-bottom:1px solid #FBE4E2">
+          <div style="width:5px;height:5px;border-radius:50%;background:#E0231C;flex:none"></div>
+          <div style="font-size:11.5px;color:#B31710;line-height:1.4">提交后客服自动排单，最快次日 07:00 前送到</div>
+        </div>
+
+        <div style="flex:1;display:flex;min-height:0">
+          <div class="rail" style="width:88px;flex:none;background:#F7F5F3;overflow-y:auto;border-right:1px solid #EFEBE7">
+            <sc-for list="{{ railA }}" as="c" hint-placeholder-count="10">
+              <div onClick="{{ c.onPick }}" style="{{ c.railStyle }}">
+                <div style="{{ c.barStyle }}"></div>
+                <div style="line-height:1.3">{{ c.name }}</div>
+              </div>
+            </sc-for>
+          </div>
+
+          <div class="scr" style="flex:1;min-width:0;overflow-y:auto">
+            <div style="padding:13px 14px 9px;display:flex;align-items:baseline;justify-content:space-between;position:sticky;top:0;background:#fff">
+              <div style="font-size:14px;font-weight:700">{{ catAName }}</div>
+              <div style="font-size:11.5px;color:#A8A099">共 {{ catACount }} 种</div>
+            </div>
+            <sc-for list="{{ listA }}" as="p" hint-placeholder-count="6">
+              <div style="display:flex;gap:10px;padding:10px 12px;border-top:1px solid #F4F0EC;align-items:center">
+                <div style="width:44px;height:44px;border-radius:8px;background:repeating-linear-gradient(135deg,#F1EEEB 0 5px,#E7E2DD 5px 10px)"></div>
+                <div style="flex:1;min-width:0;font-size:14.5px;font-weight:600;line-height:1.35">{{ p.name }}</div>
+                <div style="flex:none;display:flex;align-items:center;gap:2px">
+                  <sc-if value="{{ p.hasQty }}" hint-placeholder-val="{{ true }}">
+                    <div onClick="{{ p.onDec }}" style="width:32px;height:32px;border-radius:8px;border:1px solid #E4DED8;display:flex;align-items:center;justify-content:center;font-size:17px;color:#57504A;cursor:pointer;user-select:none" style-hover="border-color:#E0231C;color:#E0231C">−</div>
+                    <div style="width:26px;text-align:center;font-family:Archivo,sans-serif;font-size:15px;font-weight:600;font-variant-numeric:tabular-nums">{{ p.qty }}</div>
+                  </sc-if>
+                  <div onClick="{{ p.onInc }}" style="width:32px;height:32px;border-radius:8px;background:#E0231C;color:#fff;display:flex;align-items:center;justify-content:center;font-size:17px;cursor:pointer;user-select:none;box-shadow:0 2px 6px -1px rgba(224,35,28,.45)" style-hover="background:#B31710">+</div>
+                </div>
+              </div>
+            </sc-for>
+            <div style="height:96px"></div>
+          </div>
+        </div>
+
+        <div style="flex:none;position:relative">
+          <div style="position:absolute;left:14px;right:14px;top:-62px;height:50px;border-radius:12px;background:#1C1917;display:flex;align-items:center;justify-content:space-between;padding:0 6px 0 16px;box-shadow:0 10px 24px -8px rgba(28,25,23,.5)">
+            <div style="color:#fff;font-size:12.5px">需求单 <span style="font-family:Archivo,sans-serif;font-weight:600;font-size:15px">{{ cartLines }}</span> 种 · {{ cartUnits }} 件</div>
+            <div style="height:38px;padding:0 18px;border-radius:9px;background:#E0231C;color:#fff;font-size:13.5px;font-weight:600;display:flex;align-items:center">去提交</div>
+          </div>
+          <div style="height:74px;border-top:1px solid #F2EEEA;display:flex;padding-bottom:12px;background:#fff">
+            <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;color:#E0231C">
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:2.5px;width:17px"><div style="height:7px;background:#E0231C;border-radius:1.5px"></div><div style="height:7px;background:#E0231C;border-radius:1.5px"></div><div style="height:7px;background:#E0231C;border-radius:1.5px"></div><div style="height:7px;background:#E0231C;border-radius:1.5px"></div></div>
+              <div style="font-size:10.5px;font-weight:600">分类</div>
+            </div>
+            <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;color:#A8A099">
+              <div style="width:17px;height:17px;display:flex;align-items:center;justify-content:center"><div style="width:13px;height:13px;border:1.8px solid #A8A099;border-radius:50%"></div></div>
+              <div style="font-size:10.5px">搜索</div>
+            </div>
+            <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;color:#A8A099;position:relative">
+              <div style="width:17px;height:15px;border:1.8px solid #A8A099;border-radius:3px 3px 5px 5px"></div>
+              <div style="position:absolute;top:8px;left:calc(50% + 6px);min-width:16px;height:16px;border-radius:8px;background:#E0231C;color:#fff;font-family:Archivo,sans-serif;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;padding:0 4px">{{ cartLines }}</div>
+              <div style="font-size:10.5px">需求单</div>
+            </div>
+            <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;color:#A8A099">
+              <div style="width:17px;height:17px;display:flex;align-items:flex-end;justify-content:center"><div style="width:15px;height:8px;border:1.8px solid #A8A099;border-bottom:none;border-radius:8px 8px 0 0"></div></div>
+              <div style="font-size:10.5px">我的</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div style="width:390px;flex:none;display:flex;flex-direction:column;gap:10px">
+      <div style="font-size:13px;font-weight:600;color:#79726B">02 需求单 · 已选清单</div>
+      <div data-screen-label="02 需求单已选" style="width:390px;height:844px;background:#fff;border-radius:30px;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 24px 60px -20px rgba(40,26,20,.35),0 0 0 1px rgba(28,25,23,.07)">
+        <div style="height:44px;display:flex;align-items:center;justify-content:space-between;padding:0 22px;flex:none">
+          <div style="font-family:Archivo,sans-serif;font-size:13px;font-weight:600">9:41</div>
+          <div style="display:flex;align-items:center;gap:5px">
+            <div style="width:16px;height:9px;border-radius:2px;background:#1C1917"></div>
+            <div style="width:12px;height:9px;border-radius:2px;background:#1C1917"></div>
+            <div style="width:22px;height:10px;border:1.5px solid #1C1917;border-radius:3px;padding:1.5px"><div style="width:70%;height:100%;background:#1C1917;border-radius:1px"></div></div>
+          </div>
+        </div>
+        <div style="flex:none;height:48px;display:flex;align-items:center;justify-content:space-between;padding:0 16px;border-bottom:1px solid #F2EEEA">
+          <div style="font-size:16.5px;font-weight:700">我的需求单</div>
+          <div style="font-size:12.5px;color:#79726B;min-width:44px;height:44px;display:flex;align-items:center;justify-content:flex-end;margin-right:-4px;padding-left:12px;cursor:pointer">清空</div>
+        </div>
+
+        <div style="flex:1;display:flex;min-height:0">
+          <div class="rail" style="width:88px;flex:none;background:#F7F5F3;overflow-y:auto;border-right:1px solid #EFEBE7">
+            <div style="padding:12px 8px 12px 10px;border-bottom:1px solid #E9E4DF;background:#fff;display:flex;align-items:center;gap:6px;font-size:12.5px;font-weight:700;color:#E0231C;position:relative">
+              <div style="position:absolute;left:0;top:11px;bottom:11px;width:3px;background:#E0231C;border-radius:0 2px 2px 0"></div>
+              <div style="line-height:1.3">已选<br><span style="font-family:Archivo,sans-serif;font-size:11px">{{ cartLines }} 种</span></div>
+            </div>
+            <sc-for list="{{ railPlain }}" as="c" hint-placeholder-count="9">
+              <div style="padding:13px 8px 13px 12px;font-size:12.5px;color:#57504A;display:flex;align-items:center;gap:4px;border-bottom:1px solid #E9E4DF">
+                <div style="line-height:1.3">{{ c.name }}</div>
+              </div>
+            </sc-for>
+          </div>
+
+          <div class="scr" style="flex:1;min-width:0;overflow-y:auto;display:flex;flex-direction:column">
+            <sc-for list="{{ cartItems }}" as="p" hint-placeholder-count="8">
+              <div style="display:flex;gap:10px;padding:10px 12px;border-bottom:1px solid #F4F0EC;align-items:center">
+                <div style="width:44px;height:44px;border-radius:8px;flex:none;background:repeating-linear-gradient(135deg,#F1EEEB 0 5px,#E7E2DD 5px 10px)"></div>
+                <div style="flex:1;min-width:0;font-size:14.5px;font-weight:600;line-height:1.35">{{ p.name }}</div>
+                <div style="flex:none;display:flex;align-items:center;gap:2px">
+                  <div onClick="{{ p.onDec }}" style="width:32px;height:32px;border-radius:8px;border:1px solid #E4DED8;display:flex;align-items:center;justify-content:center;font-size:17px;color:#57504A;cursor:pointer;user-select:none" style-hover="border-color:#E0231C;color:#E0231C">−</div>
+                  <div style="width:26px;text-align:center;font-family:Archivo,sans-serif;font-size:15px;font-weight:600;font-variant-numeric:tabular-nums">{{ p.qty }}</div>
+                  <div onClick="{{ p.onInc }}" style="width:32px;height:32px;border-radius:8px;background:#E0231C;color:#fff;display:flex;align-items:center;justify-content:center;font-size:19px;cursor:pointer;user-select:none" style-hover="background:#B31710">+</div>
+                </div>
+              </div>
+            </sc-for>
+            <div style="padding:16px 14px 12px;display:flex;flex-direction:column;gap:8px">
+              <div style="font-size:12.5px;font-weight:600;color:#57504A">订单备注</div>
+              <textarea placeholder="如：明早 7 点前送到后厨，白菜要新鲜的" style="height:72px;border:1px solid #E9E4DF;border-radius:10px;background:#FBFAF9;padding:10px 12px;font-size:12.5px;font-family:inherit;color:#1C1917;resize:none;outline:none"></textarea>
+            </div>
+            <div style="margin:0 14px 20px;padding:12px 14px;border-radius:10px;background:#F7F5F3;display:flex;flex-direction:column;gap:7px">
+              <div style="display:flex;justify-content:space-between;font-size:12px;color:#79726B"><div>提交方式</div><div style="color:#1C1917">提交后由商家排单配送</div></div>
+              <div style="display:flex;justify-content:space-between;font-size:12px;color:#79726B"><div>收货门店</div><div style="color:#1C1917">东记火锅 朝阳店</div></div>
+              <div style="display:flex;justify-content:space-between;font-size:12px;color:#79726B"><div>结算方式</div><div style="color:#1C1917">月结</div></div>
+            </div>
+          </div>
+        </div>
+
+        <div style="flex:none;height:82px;border-top:1px solid #F2EEEA;display:flex;align-items:center;justify-content:space-between;padding:0 14px 14px;gap:12px">
+          <div style="display:flex;flex-direction:column;gap:3px">
+            <div style="font-family:Archivo,sans-serif;font-size:19px;font-weight:700">{{ cartLines }} <span style="font-size:12px;font-weight:500;color:#79726B;font-family:'Noto Sans SC',sans-serif">种商品</span></div>
+            <div style="font-size:11px;color:#A8A099">合计 {{ cartUnits }} 件 · 无需付款</div>
+          </div>
+          <div style="flex:1;max-width:196px;height:48px;border-radius:11px;background:#E0231C;color:#fff;font-size:15px;font-weight:600;display:flex;align-items:center;justify-content:center;box-shadow:0 6px 16px -6px rgba(224,35,28,.6)">提交需求单</div>
+        </div>
+      </div>
+    </div>
+
+    <div style="width:390px;flex:none;display:flex;flex-direction:column;gap:10px">
+      <div style="font-size:13px;font-weight:600;color:#79726B">03 需求单里继续加货 · 分类联动</div>
+      <div data-screen-label="03 需求单加货" style="width:390px;height:844px;background:#fff;border-radius:30px;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 24px 60px -20px rgba(40,26,20,.35),0 0 0 1px rgba(28,25,23,.07)">
+        <div style="height:44px;display:flex;align-items:center;justify-content:space-between;padding:0 22px;flex:none">
+          <div style="font-family:Archivo,sans-serif;font-size:13px;font-weight:600">9:41</div>
+          <div style="display:flex;align-items:center;gap:5px">
+            <div style="width:16px;height:9px;border-radius:2px;background:#1C1917"></div>
+            <div style="width:12px;height:9px;border-radius:2px;background:#1C1917"></div>
+            <div style="width:22px;height:10px;border:1.5px solid #1C1917;border-radius:3px;padding:1.5px"><div style="width:70%;height:100%;background:#1C1917;border-radius:1px"></div></div>
+          </div>
+        </div>
+        <div style="flex:none;height:48px;display:flex;align-items:center;justify-content:space-between;padding:0 16px;border-bottom:1px solid #F2EEEA">
+          <div style="font-size:16.5px;font-weight:700">我的需求单</div>
+          <div style="font-size:12.5px;color:#E0231C;font-weight:600;min-height:44px;display:flex;align-items:center;padding-left:12px;margin-right:-4px;padding-right:4px;cursor:pointer">返回已选</div>
+        </div>
+        <div style="flex:none;padding:10px 16px;border-bottom:1px solid #F2EEEA">
+          <div style="height:36px;border-radius:10px;background:#F6F3F1;display:flex;align-items:center;gap:8px;padding:0 12px">
+            <div style="width:12px;height:12px;border:1.5px solid #A8A099;border-radius:50%"></div>
+            <div style="font-size:12.5px;color:#A8A099">在 {{ catBName }} 里搜索</div>
+          </div>
+        </div>
+
+        <div style="flex:1;display:flex;min-height:0">
+          <div class="rail" style="width:88px;flex:none;background:#F7F5F3;overflow-y:auto;border-right:1px solid #EFEBE7">
+            <div style="padding:12px 8px 12px 10px;border-bottom:1px solid #E9E4DF;font-size:12.5px;color:#57504A;display:flex;align-items:center;gap:6px">
+              <div style="line-height:1.3">已选<br><span style="font-family:Archivo,sans-serif;font-size:11px;color:#A8A099">{{ cartLines }} 种</span></div>
+            </div>
+            <sc-for list="{{ railB }}" as="c" hint-placeholder-count="10">
+              <div onClick="{{ c.onPick }}" style="{{ c.railStyle }}">
+                <div style="{{ c.barStyle }}"></div>
+                <div style="line-height:1.3">{{ c.name }}</div>
+              </div>
+            </sc-for>
+          </div>
+          <div class="scr" style="flex:1;min-width:0;overflow-y:auto">
+            <div style="padding:13px 14px 9px;display:flex;align-items:baseline;justify-content:space-between;position:sticky;top:0;background:#fff">
+              <div style="font-size:14px;font-weight:700">{{ catBName }}</div>
+              <div style="font-size:11.5px;color:#A8A099">共 {{ catBCount }} 种</div>
+            </div>
+            <sc-for list="{{ listB }}" as="p" hint-placeholder-count="6">
+              <div style="display:flex;gap:10px;padding:10px 12px;border-top:1px solid #F4F0EC;align-items:center">
+                <div style="width:44px;height:44px;border-radius:8px;background:repeating-linear-gradient(135deg,#F1EEEB 0 5px,#E7E2DD 5px 10px)"></div>
+                <div style="flex:1;min-width:0;font-size:14.5px;font-weight:600;line-height:1.35">{{ p.name }}</div>
+                <div style="flex:none;display:flex;align-items:center;gap:2px">
+                  <sc-if value="{{ p.hasQty }}" hint-placeholder-val="{{ true }}">
+                    <div onClick="{{ p.onDec }}" style="width:32px;height:32px;border-radius:8px;border:1px solid #E4DED8;display:flex;align-items:center;justify-content:center;font-size:17px;color:#57504A;cursor:pointer;user-select:none" style-hover="border-color:#E0231C;color:#E0231C">−</div>
+                    <div style="width:26px;text-align:center;font-family:Archivo,sans-serif;font-size:15px;font-weight:600;font-variant-numeric:tabular-nums">{{ p.qty }}</div>
+                  </sc-if>
+                  <div onClick="{{ p.onInc }}" style="width:32px;height:32px;border-radius:8px;background:#E0231C;color:#fff;display:flex;align-items:center;justify-content:center;font-size:17px;cursor:pointer;user-select:none;box-shadow:0 2px 6px -1px rgba(224,35,28,.45)" style-hover="background:#B31710">+</div>
+                </div>
+              </div>
+            </sc-for>
+            <div style="height:90px"></div>
+          </div>
+        </div>
+
+        <div style="flex:none;height:82px;border-top:1px solid #F2EEEA;display:flex;align-items:center;justify-content:space-between;padding:0 14px 14px;gap:12px">
+          <div style="display:flex;flex-direction:column;gap:3px">
+            <div style="font-family:Archivo,sans-serif;font-size:19px;font-weight:700">{{ cartLines }} <span style="font-size:12px;font-weight:500;color:#79726B;font-family:'Noto Sans SC',sans-serif">种商品</span></div>
+            <div style="font-size:11px;color:#A8A099">合计 {{ cartUnits }} 件</div>
+          </div>
+          <div style="flex:1;max-width:196px;height:48px;border-radius:11px;background:#E0231C;color:#fff;font-size:15px;font-weight:600;display:flex;align-items:center;justify-content:center;box-shadow:0 6px 16px -6px rgba(224,35,28,.6)">提交需求单</div>
+        </div>
+      </div>
+    </div>
+
+    <div style="width:390px;flex:none;display:flex;flex-direction:column;gap:10px">
+      <div style="font-size:13px;font-weight:600;color:#79726B">04 搜索</div>
+      <div data-screen-label="04 搜索" style="width:390px;height:844px;background:#fff;border-radius:30px;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 24px 60px -20px rgba(40,26,20,.35),0 0 0 1px rgba(28,25,23,.07)">
+        <div style="height:44px;display:flex;align-items:center;justify-content:space-between;padding:0 22px;flex:none">
+          <div style="font-family:Archivo,sans-serif;font-size:13px;font-weight:600">9:41</div>
+          <div style="display:flex;align-items:center;gap:5px">
+            <div style="width:16px;height:9px;border-radius:2px;background:#1C1917"></div>
+            <div style="width:12px;height:9px;border-radius:2px;background:#1C1917"></div>
+            <div style="width:22px;height:10px;border:1.5px solid #1C1917;border-radius:3px;padding:1.5px"><div style="width:70%;height:100%;background:#1C1917;border-radius:1px"></div></div>
+          </div>
+        </div>
+        <div style="flex:none;padding:4px 16px 12px;display:flex;align-items:center;gap:10px">
+          <div style="flex:1;height:40px;border-radius:10px;border:1.5px solid #E0231C;background:#fff;display:flex;align-items:center;gap:8px;padding:0 12px">
+            <div style="width:13px;height:13px;border:1.5px solid #E0231C;border-radius:50%;flex:none"></div>
+            <input defaultValue="可乐" placeholder="搜索商品" style="flex:1;min-width:0;border:none;outline:none;font-size:14px;font-family:inherit;color:#1C1917;background:transparent">
+            <div style="width:44px;height:44px;display:flex;align-items:center;justify-content:center;flex:none;margin-right:-12px;cursor:pointer"><div style="width:18px;height:18px;border-radius:50%;background:#E4DED8;color:#fff;font-size:12px;display:flex;align-items:center;justify-content:center">×</div></div>
+          </div>
+          <div style="font-size:13.5px;color:#57504A;min-height:44px;display:flex;align-items:center;padding:0 4px 0 8px;cursor:pointer">取消</div>
+        </div>
+
+        <div class="scr" style="flex:1;min-height:0;overflow-y:auto">
+          <div style="padding:6px 16px 14px;display:flex;flex-direction:column;gap:10px;border-bottom:1px solid #F2EEEA">
+            <div style="display:flex;align-items:center;justify-content:space-between">
+              <div style="font-size:12.5px;font-weight:600;color:#57504A">历史搜索</div>
+              <div style="font-size:11.5px;color:#A8A099">清除</div>
+            </div>
+            <div style="display:flex;flex-wrap:wrap;gap:8px">
+              <sc-for list="{{ history }}" as="h" hint-placeholder-count="6">
+                <div style="height:30px;padding:0 12px;border-radius:15px;background:#F5F2F0;color:#57504A;font-size:12.5px;display:flex;align-items:center">{{ h.k }}</div>
+              </sc-for>
+            </div>
+          </div>
+          <div style="padding:14px 16px 8px;display:flex;align-items:baseline;justify-content:space-between">
+            <div style="font-size:13.5px;font-weight:700">搜索结果 <span style="color:#A8A099;font-weight:500;font-size:11.5px">4 个商品</span></div>
+            <div style="font-size:11.5px;color:#79726B">按常购排序 ⌄</div>
+          </div>
+          <sc-for list="{{ results }}" as="p" hint-placeholder-count="4">
+            <div style="display:flex;gap:10px;padding:10px 16px;border-top:1px solid #F4F0EC;align-items:center">
+              <div style="width:44px;height:44px;border-radius:8px;background:repeating-linear-gradient(135deg,#F1EEEB 0 5px,#E7E2DD 5px 10px)"></div>
+              <div style="flex:1;min-width:0;font-size:14.5px;font-weight:600;line-height:1.35">{{ p.name }}</div>
+              <div style="flex:none;display:flex;align-items:center;gap:2px">
+                <sc-if value="{{ p.hasQty }}" hint-placeholder-val="{{ true }}">
+                  <div onClick="{{ p.onDec }}" style="width:32px;height:32px;border-radius:8px;border:1px solid #E4DED8;display:flex;align-items:center;justify-content:center;font-size:17px;color:#57504A;cursor:pointer;user-select:none" style-hover="border-color:#E0231C;color:#E0231C">−</div>
+                  <div style="width:26px;text-align:center;font-family:Archivo,sans-serif;font-size:15px;font-weight:600;font-variant-numeric:tabular-nums">{{ p.qty }}</div>
+                </sc-if>
+                <div onClick="{{ p.onInc }}" style="width:32px;height:32px;border-radius:8px;background:#E0231C;color:#fff;display:flex;align-items:center;justify-content:center;font-size:17px;cursor:pointer;user-select:none" style-hover="background:#B31710">+</div>
+              </div>
+            </div>
+          </sc-for>
+          <div style="height:24px"></div>
+        </div>
+
+        <div style="flex:none;height:74px;border-top:1px solid #F2EEEA;display:flex;padding-bottom:12px;background:#fff">
+          <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;color:#A8A099">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:2.5px;width:17px"><div style="height:7px;background:#A8A099;border-radius:1.5px"></div><div style="height:7px;background:#A8A099;border-radius:1.5px"></div><div style="height:7px;background:#A8A099;border-radius:1.5px"></div><div style="height:7px;background:#A8A099;border-radius:1.5px"></div></div>
+            <div style="font-size:10.5px">分类</div>
+          </div>
+          <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;color:#E0231C">
+            <div style="width:17px;height:17px;display:flex;align-items:center;justify-content:center"><div style="width:13px;height:13px;border:1.8px solid #E0231C;border-radius:50%"></div></div>
+            <div style="font-size:10.5px;font-weight:600">搜索</div>
+          </div>
+          <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;color:#A8A099;position:relative">
+            <div style="width:17px;height:15px;border:1.8px solid #A8A099;border-radius:3px 3px 5px 5px"></div>
+            <div style="position:absolute;top:8px;left:calc(50% + 6px);min-width:16px;height:16px;border-radius:8px;background:#E0231C;color:#fff;font-family:Archivo,sans-serif;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;padding:0 4px">{{ cartLines }}</div>
+            <div style="font-size:10.5px">需求单</div>
+          </div>
+          <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;color:#A8A099">
+            <div style="width:17px;height:17px;display:flex;align-items:flex-end;justify-content:center"><div style="width:15px;height:8px;border:1.8px solid #A8A099;border-bottom:none;border-radius:8px 8px 0 0"></div></div>
+            <div style="font-size:10.5px">我的</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div style="width:390px;flex:none;display:flex;flex-direction:column;gap:10px">
+      <div style="font-size:13px;font-weight:600;color:#79726B">05 我的账号</div>
+      <div data-screen-label="05 我的账号" style="width:390px;height:844px;background:#F7F5F3;border-radius:30px;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 24px 60px -20px rgba(40,26,20,.35),0 0 0 1px rgba(28,25,23,.07)">
+        <div style="flex:none;background:#E0231C;color:#fff;padding:0 18px 22px">
+          <div style="height:44px;display:flex;align-items:center;justify-content:space-between">
+            <div style="font-family:Archivo,sans-serif;font-size:13px;font-weight:600">9:41</div>
+            <div style="display:flex;align-items:center;gap:5px">
+              <div style="width:16px;height:9px;border-radius:2px;background:#fff"></div>
+              <div style="width:12px;height:9px;border-radius:2px;background:#fff"></div>
+              <div style="width:22px;height:10px;border:1.5px solid #fff;border-radius:3px;padding:1.5px"><div style="width:70%;height:100%;background:#fff;border-radius:1px"></div></div>
+            </div>
+          </div>
+          <div style="display:flex;align-items:center;gap:14px;padding:14px 0 20px">
+            <div style="width:54px;height:54px;border-radius:50%;background:#fff;color:#E0231C;display:flex;align-items:center;justify-content:center;font-size:24px;font-weight:700;flex:none">東</div>
+            <div style="display:flex;flex-direction:column;gap:5px;min-width:0">
+              <div style="font-size:18px;font-weight:700">东记火锅 · 朝阳店</div>
+              <div style="font-size:12px;opacity:.82">李经理 · 138 0013 8000</div>
+            </div>
+            <div style="margin-left:auto;font-size:12px;opacity:.85;min-height:44px;display:flex;align-items:center;padding-left:12px;cursor:pointer">编辑 ›</div>
+          </div>
+          <div style="display:flex;background:rgba(255,255,255,.14);border-radius:12px;padding:12px 0">
+            <sc-for list="{{ accountStats }}" as="s" hint-placeholder-count="3">
+              <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px">
+                <div style="font-family:Archivo,sans-serif;font-size:20px;font-weight:700">{{ s.n }}</div>
+                <div style="font-size:11px;opacity:.85">{{ s.label }}</div>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+
+        <div class="scr" style="flex:1;min-height:0;overflow-y:auto;padding:14px 14px 0;display:flex;flex-direction:column;gap:12px">
+          <div style="background:#fff;border-radius:14px;padding:4px 0">
+            <div style="min-height:54px;display:flex;align-items:center;gap:12px;padding:0 16px;border-bottom:1px solid #F4F0EC">
+              <div style="width:28px;height:28px;border-radius:8px;background:#FDECEA;display:flex;align-items:center;justify-content:center;flex:none">
+                <div style="display:flex;flex-direction:column;gap:2.5px;width:13px">
+                  <div style="height:2px;background:#E0231C;border-radius:1px"></div>
+                  <div style="height:2px;background:#E0231C;border-radius:1px"></div>
+                  <div style="height:2px;width:8px;background:#E0231C;border-radius:1px"></div>
+                </div>
+              </div>
+              <div style="flex:1;font-size:14.5px">我的订单</div>
+              <div style="font-size:12px;color:#A8A099">3 个进行中</div>
+              <div style="color:#C9C1BA;font-size:15px">›</div>
+            </div>
+            <div style="min-height:54px;display:flex;align-items:center;gap:12px;padding:0 16px;border-bottom:1px solid #F4F0EC">
+              <div style="width:28px;height:28px;border-radius:8px;background:#FDECEA;display:flex;align-items:center;justify-content:center;flex:none">
+                <div style="display:flex;flex-direction:column;align-items:center;gap:2px">
+                  <div style="width:7px;height:7px;border-radius:50%;border:1.6px solid #E0231C"></div>
+                  <div style="width:13px;height:6px;border:1.6px solid #E0231C;border-bottom:none;border-radius:7px 7px 0 0"></div>
+                </div>
+              </div>
+              <div style="flex:1;font-size:14.5px">我的信息</div>
+              <div style="color:#C9C1BA;font-size:15px">›</div>
+            </div>
+            <div style="min-height:54px;display:flex;align-items:center;gap:12px;padding:0 16px;border-bottom:1px solid #F4F0EC">
+              <div style="width:28px;height:28px;border-radius:8px;background:#FDECEA;display:flex;align-items:center;justify-content:center;flex:none">
+                <div style="width:11px;height:11px;border:1.6px solid #E0231C;border-radius:2px;transform:rotate(45deg)"></div>
+              </div>
+              <div style="flex:1;font-size:14.5px">常购清单</div>
+              <div style="font-size:12px;color:#A8A099">28 种</div>
+              <div style="color:#C9C1BA;font-size:15px">›</div>
+            </div>
+            <div style="min-height:54px;display:flex;align-items:center;gap:12px;padding:0 16px;border-bottom:1px solid #F4F0EC">
+              <div style="width:28px;height:28px;border-radius:8px;background:#FDECEA;display:flex;align-items:center;justify-content:center;flex:none">
+                <div style="width:13px;height:13px;border:1.6px solid #E0231C;border-radius:50%;display:flex;align-items:center;justify-content:center">
+                  <div style="width:4px;height:4px;border-radius:50%;background:#E0231C"></div>
+                </div>
+              </div>
+              <div style="flex:1;font-size:14.5px">收货门店与地址</div>
+              <div style="font-size:12px;color:#A8A099">2 个门店</div>
+              <div style="color:#C9C1BA;font-size:15px">›</div>
+            </div>
+          </div>
+          <div style="background:#fff;border-radius:14px;padding:4px 0">
+            <div style="min-height:54px;display:flex;align-items:center;gap:12px;padding:0 16px;border-bottom:1px solid #F4F0EC">
+              <div style="width:28px;height:28px;border-radius:8px;background:#F4F0EC;display:flex;align-items:center;justify-content:center;flex:none">
+                <div style="width:14px;height:11px;border:1.6px solid #79726B;border-radius:4px"></div>
+              </div>
+              <div style="flex:1;font-size:14.5px">联系客服</div>
+              <div style="font-size:12px;color:#A8A099">王丽</div>
+              <div style="color:#C9C1BA;font-size:15px">›</div>
+            </div>
+            <div style="min-height:54px;display:flex;align-items:center;gap:12px;padding:0 16px;border-bottom:1px solid #F4F0EC">
+              <div style="width:28px;height:28px;border-radius:8px;background:#F4F0EC;display:flex;align-items:center;justify-content:center;flex:none">
+                <div style="width:11px;height:14px;border:1.6px solid #79726B;border-radius:2px;display:flex;flex-direction:column;justify-content:center;gap:2px;padding:0 2px">
+                  <div style="height:1.5px;background:#79726B"></div>
+                  <div style="height:1.5px;background:#79726B"></div>
+                </div>
+              </div>
+              <div style="flex:1;font-size:14.5px">发票与对账</div>
+              <div style="font-size:12px;color:#A8A099">月结</div>
+              <div style="color:#C9C1BA;font-size:15px">›</div>
+            </div>
+            <div style="min-height:54px;display:flex;align-items:center;gap:12px;padding:0 16px;border-bottom:1px solid #F4F0EC">
+              <div style="width:28px;height:28px;border-radius:8px;background:#F4F0EC;display:flex;align-items:center;justify-content:center;flex:none">
+                <div style="width:11px;height:12px;border:1.6px solid #79726B;border-radius:6px 6px 2px 2px"></div>
+              </div>
+              <div style="flex:1;font-size:14.5px">通知设置</div>
+              <div style="color:#C9C1BA;font-size:15px">›</div>
+            </div>
+          </div>
+          <div style="height:46px;border-radius:12px;background:#fff;color:#79726B;font-size:14px;display:flex;align-items:center;justify-content:center;margin-bottom:16px">退出登录</div>
+        </div>
+
+        <div style="flex:none;height:74px;border-top:1px solid #EBE6E1;display:flex;padding-bottom:12px;background:#fff">
+          <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;color:#A8A099">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:2.5px;width:17px"><div style="height:7px;background:#A8A099;border-radius:1.5px"></div><div style="height:7px;background:#A8A099;border-radius:1.5px"></div><div style="height:7px;background:#A8A099;border-radius:1.5px"></div><div style="height:7px;background:#A8A099;border-radius:1.5px"></div></div>
+            <div style="font-size:10.5px">分类</div>
+          </div>
+          <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;color:#A8A099">
+            <div style="width:17px;height:17px;display:flex;align-items:center;justify-content:center"><div style="width:13px;height:13px;border:1.8px solid #A8A099;border-radius:50%"></div></div>
+            <div style="font-size:10.5px">搜索</div>
+          </div>
+          <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;color:#A8A099;position:relative">
+            <div style="width:17px;height:15px;border:1.8px solid #A8A099;border-radius:3px 3px 5px 5px"></div>
+            <div style="position:absolute;top:8px;left:calc(50% + 6px);min-width:16px;height:16px;border-radius:8px;background:#E0231C;color:#fff;font-family:Archivo,sans-serif;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;padding:0 4px">{{ cartLines }}</div>
+            <div style="font-size:10.5px">需求单</div>
+          </div>
+          <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;color:#E0231C">
+            <div style="width:17px;height:17px;display:flex;align-items:flex-end;justify-content:center"><div style="width:15px;height:8px;border:1.8px solid #E0231C;border-bottom:none;border-radius:8px 8px 0 0"></div></div>
+            <div style="font-size:10.5px;font-weight:600">我的</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div style="width:390px;flex:none;display:flex;flex-direction:column;gap:10px">
+      <div style="font-size:13px;font-weight:600;color:#79726B">06 我的订单</div>
+      <div data-screen-label="06 我的订单" style="width:390px;height:844px;background:#F7F5F3;border-radius:30px;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 24px 60px -20px rgba(40,26,20,.35),0 0 0 1px rgba(28,25,23,.07)">
+        <div style="flex:none;background:#fff">
+          <div style="height:44px;display:flex;align-items:center;justify-content:space-between;padding:0 22px">
+            <div style="font-family:Archivo,sans-serif;font-size:13px;font-weight:600">9:41</div>
+            <div style="display:flex;align-items:center;gap:5px">
+              <div style="width:16px;height:9px;border-radius:2px;background:#1C1917"></div>
+              <div style="width:12px;height:9px;border-radius:2px;background:#1C1917"></div>
+              <div style="width:22px;height:10px;border:1.5px solid #1C1917;border-radius:3px;padding:1.5px"><div style="width:70%;height:100%;background:#1C1917;border-radius:1px"></div></div>
+            </div>
+          </div>
+          <div style="height:48px;display:flex;align-items:center;gap:12px;padding:0 16px">
+            <div style="min-width:44px;height:44px;display:flex;align-items:center;margin-left:-10px;font-size:19px;color:#57504A;cursor:pointer">‹</div>
+            <div style="font-size:16.5px;font-weight:700">我的订单</div>
+          </div>
+          <div style="display:flex;gap:8px;padding:0 16px 12px;overflow-x:auto">
+            <sc-for list="{{ orderTabs }}" as="t" hint-placeholder-count="5">
+              <div style="{{ t.style }}">{{ t.label }}</div>
+            </sc-for>
+          </div>
+        </div>
+
+        <div class="scr" style="flex:1;min-height:0;overflow-y:auto;padding:12px 14px 20px;display:flex;flex-direction:column;gap:12px">
+          <sc-for list="{{ orders }}" as="o" hint-placeholder-count="4">
+            <div style="background:#fff;border-radius:14px;padding:14px;display:flex;flex-direction:column;gap:12px">
+              <div style="display:flex;align-items:center;justify-content:space-between">
+                <div style="font-family:Archivo,sans-serif;font-size:12.5px;color:#79726B">{{ o.no }}</div>
+                <div style="{{ o.tagStyle }}">{{ o.status }}</div>
+              </div>
+              <div style="display:flex;gap:8px;align-items:center">
+                <div style="width:50px;height:50px;border-radius:8px;flex:none;background:repeating-linear-gradient(135deg,#F1EEEB 0 5px,#E7E2DD 5px 10px)"></div>
+                <div style="width:50px;height:50px;border-radius:8px;flex:none;background:repeating-linear-gradient(135deg,#F1EEEB 0 5px,#E7E2DD 5px 10px)"></div>
+                <div style="width:50px;height:50px;border-radius:8px;flex:none;background:repeating-linear-gradient(135deg,#F1EEEB 0 5px,#E7E2DD 5px 10px)"></div>
+                <div style="flex:1;display:flex;flex-direction:column;gap:4px;padding-left:4px">
+                  <div style="font-size:13px;font-weight:600">共 {{ o.kinds }} 种 · {{ o.units }} 件</div>
+                  <div style="font-size:11.5px;color:#8C857E">{{ o.time }}</div>
+                </div>
+              </div>
+              <div style="font-size:11.5px;color:#79726B;background:#F9F7F5;border-radius:8px;padding:8px 10px;line-height:1.5">{{ o.note }}</div>
+              <div style="display:flex;gap:8px;justify-content:flex-end">
+                <div style="height:34px;padding:0 14px;border-radius:8px;border:1px solid #E4DED8;font-size:12.5px;color:#57504A;display:flex;align-items:center">查看详情</div>
+                <div style="{{ o.ctaStyle }}">{{ o.cta }}</div>
+              </div>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+    </div>
+
+    <div style="width:390px;flex:none;display:flex;flex-direction:column;gap:10px">
+      <div style="font-size:13px;font-weight:600;color:#79726B">07 我的信息</div>
+      <div data-screen-label="07 我的信息" style="width:390px;height:844px;background:#F7F5F3;border-radius:30px;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 24px 60px -20px rgba(40,26,20,.35),0 0 0 1px rgba(28,25,23,.07)">
+        <div style="flex:none;background:#fff;border-bottom:1px solid #F2EEEA">
+          <div style="height:44px;display:flex;align-items:center;justify-content:space-between;padding:0 22px">
+            <div style="font-family:Archivo,sans-serif;font-size:13px;font-weight:600">9:41</div>
+            <div style="display:flex;align-items:center;gap:5px">
+              <div style="width:16px;height:9px;border-radius:2px;background:#1C1917"></div>
+              <div style="width:12px;height:9px;border-radius:2px;background:#1C1917"></div>
+              <div style="width:22px;height:10px;border:1.5px solid #1C1917;border-radius:3px;padding:1.5px"><div style="width:70%;height:100%;background:#1C1917;border-radius:1px"></div></div>
+            </div>
+          </div>
+          <div style="height:48px;display:flex;align-items:center;gap:12px;padding:0 16px">
+            <div style="min-width:44px;height:44px;display:flex;align-items:center;margin-left:-10px;font-size:19px;color:#57504A;cursor:pointer">‹</div>
+            <div style="font-size:16.5px;font-weight:700">我的信息</div>
+            <div style="margin-left:auto;font-size:13px;color:#E0231C;font-weight:600;min-width:44px;height:44px;display:flex;align-items:center;justify-content:flex-end;padding-left:12px;cursor:pointer">保存</div>
+          </div>
+        </div>
+
+        <div class="scr" style="flex:1;min-height:0;overflow-y:auto;padding:14px 14px 24px;display:flex;flex-direction:column;gap:12px">
+          <div style="background:#fff;border-radius:14px;padding:16px;display:flex;align-items:center;gap:14px">
+            <div style="width:56px;height:56px;border-radius:50%;background:#E0231C;color:#fff;display:flex;align-items:center;justify-content:center;font-size:24px;font-weight:700;flex:none">東</div>
+            <div style="display:flex;flex-direction:column;gap:5px">
+              <div style="font-size:15px;font-weight:700">东记火锅 · 朝阳店</div>
+              <div style="font-size:11.5px;color:#8C857E">客户编号 C-10286 · 已认证商户</div>
+            </div>
+          </div>
+          <div style="background:#fff;border-radius:14px;overflow:hidden">
+            <div style="padding:12px 16px 4px;font-size:12px;font-weight:600;color:#A8A099">门店资料</div>
+            <sc-for list="{{ profileStore }}" as="f" hint-placeholder-count="4">
+              <div style="min-height:52px;display:flex;align-items:center;gap:12px;padding:12px 16px;border-top:1px solid #F4F0EC">
+                <div style="width:76px;flex:none;font-size:13px;color:#79726B">{{ f.k }}</div>
+                <div style="flex:1;font-size:14px;text-align:right;line-height:1.4">{{ f.v }}</div>
+                <div style="color:#C9C1BA;font-size:15px">›</div>
+              </div>
+            </sc-for>
+          </div>
+          <div style="background:#fff;border-radius:14px;overflow:hidden">
+            <div style="padding:12px 16px 4px;font-size:12px;font-weight:600;color:#A8A099">收货与结算</div>
+            <sc-for list="{{ profileDeliver }}" as="f" hint-placeholder-count="3">
+              <div style="min-height:52px;display:flex;align-items:center;gap:12px;padding:12px 16px;border-top:1px solid #F4F0EC">
+                <div style="width:76px;flex:none;font-size:13px;color:#79726B">{{ f.k }}</div>
+                <div style="flex:1;font-size:14px;text-align:right;line-height:1.4">{{ f.v }}</div>
+                <div style="color:#C9C1BA;font-size:15px">›</div>
+              </div>
+            </sc-for>
+          </div>
+          <div style="background:#FFF6F5;border:1px solid #FBE4E2;border-radius:14px;padding:14px 16px;display:flex;flex-direction:column;gap:6px">
+            <div style="font-size:13px;font-weight:600;color:#B31710">专属客服</div>
+            <div style="font-size:12.5px;color:#57504A;line-height:1.6">王丽 · 400 826 1188 转 3<br>工作时间 06:00 – 21:00</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:2900,&quot;height&quot;:1100}}">
+class Component extends DCLogic {
+  cats = [
+    { id: 'veg', name: '蔬果', n: 42 },
+    { id: 'meat', name: '肉禽蛋', n: 28 },
+    { id: 'aqua', name: '水产', n: 16 },
+    { id: 'grain', name: '米面粮油', n: 23 },
+    { id: 'sauce', name: '调味酱料', n: 37 },
+    { id: 'frozen', name: '冷冻半成品', n: 19 },
+    { id: 'drink', name: '饮料酒水', n: 54 },
+    { id: 'dispo', name: '一次性用品', n: 31 },
+    { id: 'clean', name: '清洁用品', n: 18 },
+    { id: 'hard', name: '厨房五金', n: 26 }
+  ];
+  items = [
+    { id: 'v1', cat: 'veg', name: '山东大白菜', spec: '25 斤 / 袋 · 净菜', unit: '袋', tag: '常购' },
+    { id: 'v2', cat: 'veg', name: '本地小青菜', spec: '10 斤 / 箱 · 当日采', unit: '箱', tag: '今日到货' },
+    { id: 'v3', cat: 'veg', name: '黄皮圆葱', spec: '20 斤 / 袋', unit: '袋', tag: '' },
+    { id: 'v4', cat: 'veg', name: '硬粉番茄', spec: '15 斤 / 箱', unit: '箱', tag: '' },
+    { id: 'v5', cat: 'veg', name: '荷兰土豆', spec: '25 斤 / 袋', unit: '袋', tag: '常购' },
+    { id: 'v6', cat: 'veg', name: '山东生姜', spec: '5 斤 / 袋', unit: '袋', tag: '' },
+    { id: 'v7', cat: 'veg', name: '金针菇', spec: '200g × 40 / 箱', unit: '箱', tag: '' },
+    { id: 'm1', cat: 'meat', name: '冷鲜猪五花', spec: '10 斤 / 件', unit: '件', tag: '常购' },
+    { id: 'm2', cat: 'meat', name: '去骨鸡腿肉', spec: '20 斤 / 箱', unit: '箱', tag: '' },
+    { id: 'm3', cat: 'meat', name: '进口牛腩', spec: '5 kg / 件', unit: '件', tag: '' },
+    { id: 'm4', cat: 'meat', name: '鲜鸡蛋', spec: '30 斤 / 箱', unit: '箱', tag: '常购' },
+    { id: 'a1', cat: 'aqua', name: '冻虾仁 41/50', spec: '2 kg / 袋', unit: '袋', tag: '' },
+    { id: 'a2', cat: 'aqua', name: '巴沙鱼柳', spec: '5 kg / 箱', unit: '箱', tag: '' },
+    { id: 'g1', cat: 'grain', name: '泰国香米', spec: '25 kg / 袋', unit: '袋', tag: '常购' },
+    { id: 'g2', cat: 'grain', name: '调和食用油', spec: '20 L / 桶', unit: '桶', tag: '' },
+    { id: 'g3', cat: 'grain', name: '高筋面粉', spec: '25 kg / 袋', unit: '袋', tag: '' },
+    { id: 's1', cat: 'sauce', name: '海天金标生抽', spec: '1.9 L × 6 / 箱', unit: '箱', tag: '常购' },
+    { id: 's2', cat: 'sauce', name: '蚝油', spec: '2.5 kg / 瓶', unit: '瓶', tag: '' },
+    { id: 's3', cat: 'sauce', name: '十三香', spec: '30 g × 100 / 箱', unit: '箱', tag: '' },
+    { id: 'f1', cat: 'frozen', name: '冷冻薯条 3/8', spec: '2.5 kg / 包', unit: '包', tag: '' },
+    { id: 'f2', cat: 'frozen', name: '手抓饼胚', spec: '20 片 / 包', unit: '包', tag: '' },
+    { id: 'd1', cat: 'drink', name: '可乐 罐装', spec: '330 ml × 24 / 箱', unit: '箱', tag: '常购' },
+    { id: 'd2', cat: 'drink', name: '可乐 大瓶', spec: '1.25 L × 12 / 箱', unit: '箱', tag: '' },
+    { id: 'd3', cat: 'drink', name: '饮用纯净水', spec: '550 ml × 24 / 箱', unit: '箱', tag: '常购' },
+    { id: 'd4', cat: 'drink', name: '鲜橙汁', spec: '1 L × 12 / 箱', unit: '箱', tag: '' },
+    { id: 'd5', cat: 'drink', name: '青岛啤酒', spec: '500 ml × 12 / 箱', unit: '箱', tag: '' },
+    { id: 'd6', cat: 'drink', name: '柠檬茶浓浆', spec: '2 kg × 6 / 箱', unit: '箱', tag: '新品' },
+    { id: 'p1', cat: 'dispo', name: '打包盒 750 ml', spec: '300 套 / 箱', unit: '箱', tag: '常购' },
+    { id: 'p2', cat: 'dispo', name: '一次性手套', spec: '100 只 / 包', unit: '包', tag: '' },
+    { id: 'p3', cat: 'dispo', name: '密胺竹筷', spec: '1000 双 / 箱', unit: '箱', tag: '' },
+    { id: 'c1', cat: 'clean', name: '浓缩洗碗精', spec: '20 kg / 桶', unit: '桶', tag: '' },
+    { id: 'c2', cat: 'clean', name: '厨房吸油纸', spec: '12 卷 / 包', unit: '包', tag: '' },
+    { id: 'h1', cat: 'hard', name: '不锈钢方盘', spec: '6 件 / 组', unit: '组', tag: '' },
+    { id: 'h2', cat: 'hard', name: '燃气金属软管', spec: '2 m / 根', unit: '根', tag: '' },
+    { id: 'h3', cat: 'hard', name: 'PE 保鲜膜', spec: '30 cm × 500 m / 卷', unit: '卷', tag: '' }
+  ];
+
+  state = {
+    catA: 'veg',
+    catB: 'drink',
+    qty: { v1: 2, v2: 1, m1: 1, g1: 1, s1: 1, d1: 3, d3: 2, p1: 2 }
+  };
+
+  inc(id) { this.setState(s => ({ qty: Object.assign({}, s.qty, { [id]: (s.qty[id] || 0) + 1 }) })); }
+  dec(id) {
+    this.setState(s => {
+      const q = Object.assign({}, s.qty);
+      const n = (q[id] || 0) - 1;
+      if (n > 0) q[id] = n; else delete q[id];
+      return { qty: q };
+    });
+  }
+
+  deco(p) {
+    const qty = this.state.qty[p.id] || 0;
+    const cat = this.cats.find(c => c.id === p.cat);
+    return Object.assign({}, p, {
+      qty, hasQty: qty > 0,
+      catName: cat ? cat.name : '',
+      onInc: () => this.inc(p.id),
+      onDec: () => this.dec(p.id)
+    });
+  }
+
+  rail(active, onPick) {
+    return this.cats.map(c => {
+      const on = c.id === active;
+      return {
+        id: c.id, name: c.name,
+        railStyle: 'padding:13px 8px 13px 12px;font-size:12.5px;cursor:pointer;display:flex;align-items:center;gap:5px;position:relative;line-height:1.3;border-bottom:1px solid #E9E4DF;'
+          + (on ? 'background:#fff;color:#E0231C;font-weight:700;' : 'color:#57504A;font-weight:400;'),
+        barStyle: on
+          ? 'position:absolute;left:0;top:11px;bottom:11px;width:3px;background:#E0231C;border-radius:0 2px 2px 0;'
+          : 'display:none;',
+        onPick: onPick ? () => onPick(c.id) : undefined
+      };
+    });
+  }
+
+  renderVals() {
+    const q = this.state.qty;
+    const catA = this.cats.find(c => c.id === this.state.catA);
+    const catB = this.cats.find(c => c.id === this.state.catB);
+    const cartIds = Object.keys(q);
+    const tab = (label, on) => ({
+      label,
+      style: 'height:32px;padding:0 14px;border-radius:16px;font-size:12.5px;white-space:nowrap;display:flex;align-items:center;flex:none;'
+        + (on ? 'background:#E0231C;color:#fff;font-weight:600;' : 'background:#F5F2F0;color:#57504A;')
+    });
+    const chip = (text, kind) => {
+      const map = {
+        quote: 'background:#FDECEA;color:#B31710;',
+        wait: 'background:#FFF4E6;color:#B26A00;',
+        ship: 'background:#EEF2F7;color:#3E5A78;',
+        done: 'background:#F0F4F0;color:#4A6A4E;'
+      };
+      return 'font-size:11.5px;font-weight:600;border-radius:6px;padding:4px 8px;' + map[kind];
+    };
+    const cta = (solid) => 'height:34px;padding:0 14px;border-radius:8px;font-size:12.5px;font-weight:600;display:flex;align-items:center;'
+      + (solid ? 'background:#E0231C;color:#fff;' : 'border:1px solid #E0231C;color:#E0231C;');
+
+    return {
+      railA: this.rail(this.state.catA, id => this.setState({ catA: id })),
+      railB: this.rail(this.state.catB, id => this.setState({ catB: id })),
+      railPlain: this.rail(null, null),
+      listA: this.items.filter(i => i.cat === this.state.catA).map(i => this.deco(i)),
+      listB: this.items.filter(i => i.cat === this.state.catB).map(i => this.deco(i)),
+      catAName: catA ? catA.name : '', catACount: catA ? catA.n : 0,
+      catBName: catB ? catB.name : '', catBCount: catB ? catB.n : 0,
+      cartItems: this.items.filter(i => q[i.id]).map(i => this.deco(i)),
+      cartLines: cartIds.length,
+      cartUnits: cartIds.reduce((t, k) => t + q[k], 0),
+      results: this.items.filter(i => i.name.indexOf('可乐') >= 0 || i.id === 'd6' || i.id === 'd4').map(i => this.deco(i)),
+      history: [{ k: '可乐' }, { k: '大白菜' }, { k: '打包盒' }, { k: '生抽' }, { k: '一次性手套' }, { k: '香米' }],
+      accountStats: [{ n: 2, label: '已提交' }, { n: 1, label: '配送中' }, { n: 14, label: '本月下单' }],
+      menuMain: [
+        { mark: '单', label: '我的订单', hint: '3 个进行中' },
+        { mark: '信', label: '我的信息', hint: '' },
+        { mark: '常', label: '常购清单', hint: '28 种' },
+        { mark: '址', label: '收货门店与地址', hint: '2 个门店' }
+      ],
+      menuSub: [
+        { mark: '客', label: '联系客服', hint: '王丽' },
+        { mark: '票', label: '发票与对账', hint: '月结' },
+        { mark: '设', label: '通知设置', hint: '' }
+      ],
+      orderTabs: [tab('全部', false), tab('已提交', true), tab('待配送', false), tab('配送中', false), tab('已完成', false)],
+      orders: [
+        { no: 'DD-20260818-014', status: '已提交', tagStyle: chip('', 'quote'), kinds: 8, units: 13, time: '今天 09:12 提交', note: '备注：明早 7 点前送到后厨，白菜要新鲜的', cta: '修改订单', ctaStyle: cta(true) },
+        { no: 'DD-20260817-036', status: '待配送', tagStyle: chip('', 'wait'), kinds: 4, units: 6, time: '昨天 20:41 提交 · 已排单', note: '备注：五金件先送一套试用', cta: '再来一单', ctaStyle: cta(false) },
+        { no: 'DD-20260816-021', status: '配送中', tagStyle: chip('', 'ship'), kinds: 11, units: 26, time: '8 月 16 日 提交 · 今日出车', note: '备注：走后门卸货，联系李经理', cta: '再来一单', ctaStyle: cta(false) },
+        { no: 'DD-20260812-009', status: '已完成', tagStyle: chip('', 'done'), kinds: 9, units: 18, time: '8 月 12 日 已签收', note: '备注：无', cta: '再来一单', ctaStyle: cta(false) }
+      ]
+    };
+  }
+}
+
+</script>
+</body>
+</html>
