@@ -185,26 +185,24 @@ SELECT local_tcp_port FROM sys.dm_exec_connections WHERE session_id = @@SPID;
 
 ## ③ 三个计划任务 / Tres tareas programadas
 
-### ⏰ 先记住这件事：服务器的时钟是中国时间
+### ⏰ 服务器时钟：2026-08-18 起已是马德里时间
 
-**SERVER 的 Windows 时钟跑的是中国时间（UTC+8），而生意跑在马德里时间。**
-`schtasks /st` 用的是**机器本地时间**，也就是中国时间。
+**SERVER 的 Windows 时钟自 2026-08-18 起改为马德里时间（Romance Standard
+Time）**，和生意同一个时区。`schtasks /st` 用的是机器本地时间——现在就是
+马德里时间，所以「每天早上 6:30 跑价格同步」直接写 `/st 06:30`，不再需要
+任何换算。
 
-所以「每天早上 6:30（马德里）跑价格同步」这条要求，落到命令里是
-**服务器本地 12:30**：
-
-| 服务器本地（UTC+8） | UTC | 马德里 |
-| --- | --- | --- |
-| 12:30（夏令时期间） | 04:30 | **06:30 CEST** |
-| 12:30（冬令时期间） | 04:30 | **05:30 CET** |
-
-中国不实行夏令时，所以服务器 12:30 永远等于 UTC 04:30；马德里那头随夏冬令时
-在 06:30 / 05:30 之间摆动。**两个时间都在营业前的清晨，都可以接受。**
-
-> 🚫 **不要"顺手修正"成 06:30。** 把 `/st` 写成 06:30 会变成马德里午夜 00:30
-> （夏令时）——那是备份和 ERP 夜间作业的时段。这里的 12:30 是对的。
+> 📜 历史注记：2026-08-18 之前 SERVER 跑的是中国时间（UTC+8），当时的手册
+> 让人把 06:30（马德里）写成服务器本地 12:30。如果在别处看到 12:30 的旧说法
+> 或旧任务，那是时钟切换前的产物——按现在的马德里时钟，12:30 会落在午市
+> 高峰，**必须**用 06:30 重建。
 >
-> 订单注入（每分钟）和出货单回写（每小时）跟时区无关，不受这条影响。
+> 桥接程序本身不受时钟切换影响：业务日期一律经
+> `AT TIME ZONE 'Romance Standard Time'` 换算，日志时间戳一律是 UTC。
+> 订单注入（每分钟）和出货单回写（每小时）跟时区无关。
+>
+> ⚠️ 顺手检查一件事：SERVER 上**其他**按本地时间排程的任务（备份、ERP 夜间
+> 作业）在时钟切换后全部平移了 6-7 小时，需要逐个核对重排。
 
 ### 三条创建命令
 
@@ -221,7 +219,7 @@ schtasks /create /tn "DADA Bridge Albaran" /tr "\"C:\Program Files\nodejs\node.e
 ```
 
 ```
-schtasks /create /tn "DADA Bridge Prices" /tr "\"C:\Program Files\nodejs\node.exe\" \"C:\dada\bridge\dada-bridge.js\" price-sync" /sc daily /mo 1 /st 12:30 /ru "SERVER\<账号>" /rp * /rl LIMITED /f
+schtasks /create /tn "DADA Bridge Prices" /tr "\"C:\Program Files\nodejs\node.exe\" \"C:\dada\bridge\dada-bridge.js\" price-sync" /sc daily /mo 1 /st 06:30 /ru "SERVER\<账号>" /rp * /rl LIMITED /f
 ```
 
 要点：
@@ -321,9 +319,11 @@ node C:\dada\bridge\dada-bridge.js price-sync
 2026-08-16T04:38:29.640Z INFO price-sync summary articles=3021 matched=2854 notInPortal=167 fullyUnpriced=42 orderableWithPrice=2712 notInPortalSample="[\"1-0001\",\"1-0002\",\"1-0007\",\"2-0114\",\"2-0115\",\"3-0006\",\"3-0007\",\"4-0201\",\"4-0202\",\"4-0203\",\"5-0011\",\"5-0012\",\"6-0044\",\"6-0045\",\"7-0100\",\"7-0101\",\"8-0033\",\"8-0034\",\"9-0007\",\"9-0008\"]" ok=true
 ```
 
-> ⏰ **日志时间戳一律是 UTC（结尾的 `Z`）**，不是服务器的中国时间，也不是马德里
-> 时间。上面这轮就是第 ③ 节说的"服务器本地 12:30"那一次：12:30（UTC+8）＝
-> **04:30Z**。对时间时先减 8 小时再看。
+> ⏰ **日志时间戳一律是 UTC（结尾的 `Z`）**，不是马德里本地时间。马德里夏令时
+> 比 UTC 快 2 小时、冬令时快 1 小时——对时间时先减 2（夏）/1（冬）小时再看。
+> （上面的样例录制于 SERVER 还是中国时钟的时期：当时的本地 12:30 = 04:30Z；
+> 2026-08-18 时钟切到马德里后，本地 06:30 的价格同步会以 **04:30Z（夏）/
+> 05:30Z（冬）**出现在日志里。）
 
 `notInPortal` 是 ERP 里有、门户里没有的编号数量；`sample=` 和
 `notInPortalSample` 都列出**前 20 个**，用来判断那批到底是"ERP 自用的包材/服务
