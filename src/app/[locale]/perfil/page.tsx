@@ -1,7 +1,7 @@
 import type { Locale } from "next-intl";
 import { getTranslations, setRequestLocale } from "next-intl/server";
 import { AppShell } from "@/components/app-shell";
-import { GLASS_CARD } from "@/components/ui";
+import { CARD } from "@/components/ui";
 import { beginCompanyUser, finishCompanyUser } from "@/lib/auth/guards";
 import { perfRun } from "@/lib/perf";
 import { isProfileResult, type ProfileResult } from "@/lib/profile";
@@ -88,7 +88,7 @@ export default async function ProfilePage({
     >
       <h1 className="mt-8 text-2xl font-bold tracking-tight">{t("title")}</h1>
 
-      <section className={`${GLASS_CARD} mt-6 p-5`}>
+      <section className={`${CARD} mt-6 p-5`}>
         <h2 className="font-medium">{t("accountTitle")}</h2>
 
         <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-[10rem_1fr]">
@@ -115,7 +115,7 @@ export default async function ProfilePage({
         />
       </section>
 
-      <section className={`${GLASS_CARD} mt-6 p-5`}>
+      <section className={`${CARD} mt-6 p-5`}>
         <h2 className="font-medium">{t("passwordTitle")}</h2>
 
         {banner(pwdResult)}

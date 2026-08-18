@@ -8,7 +8,7 @@ import {
 } from "@/app/actions/staff-orders";
 import { OrderStatusBadge } from "@/components/order-status-badge";
 import { StaffShell } from "@/components/staff-shell";
-import { FIELD_SM, GLASS_CARD } from "@/components/ui";
+import { CARD, FIELD_SM } from "@/components/ui";
 import { beginStaff, finishStaff } from "@/lib/auth/guards";
 import { localizedName, unitLabel } from "@/lib/catalog/display";
 import { formatEuros } from "@/lib/money";
@@ -275,11 +275,11 @@ export default async function StaffOrdersPage({
       </nav>
 
       {orders.length === 0 ? (
-        <p className={`${GLASS_CARD} mt-4 p-10 text-center text-muted`}>
+        <p className={`${CARD} mt-4 p-10 text-center text-muted`}>
           {t("noOrders")}
         </p>
       ) : (
-        <ul className={`${GLASS_CARD} mt-4 divide-y divide-border px-4 sm:px-5`}>
+        <ul className={`${CARD} mt-4 divide-y divide-border px-4 sm:px-5`}>
           {orders.map((order) => {
             const lines = linesByOrder.get(order.id) ?? [];
             const bridgeFailure = failuresByOrder.get(order.id);

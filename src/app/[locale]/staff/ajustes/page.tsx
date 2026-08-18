@@ -2,7 +2,7 @@ import type { Locale } from "next-intl";
 import { getTranslations, setRequestLocale } from "next-intl/server";
 import { redirect } from "next/navigation";
 import { StaffShell } from "@/components/staff-shell";
-import { GLASS_CARD } from "@/components/ui";
+import { CARD } from "@/components/ui";
 import { beginStaff, finishStaff } from "@/lib/auth/guards";
 import { perfRun } from "@/lib/perf";
 import { getSetting, isSettingsResult } from "@/lib/settings";
@@ -99,7 +99,7 @@ export default async function StaffSettingsPage({
       {/* One card per switch, each with its own 保存. The banner above is
           shared because a save redirects here with a single `?result=` — which
           is honest: only one form can be submitted at a time. */}
-      <section className={`${GLASS_CARD} mt-6 p-5`}>
+      <section className={`${CARD} mt-6 p-5`}>
         <h2 className="font-medium">{t("pricesTitle")}</h2>
         <SettingsForm
           locale={locale}
@@ -113,7 +113,7 @@ export default async function StaffSettingsPage({
         />
       </section>
 
-      <section className={`${GLASS_CARD} mt-6 p-5`}>
+      <section className={`${CARD} mt-6 p-5`}>
         <h2 className="font-medium">{t("deliveryDateTitle")}</h2>
         <SettingsForm
           locale={locale}

@@ -8,7 +8,7 @@ import {
 } from "@/app/actions/staff-products";
 import { ProductThumb } from "@/components/product-thumb";
 import { StaffShell } from "@/components/staff-shell";
-import { BTN_PRIMARY, BTN_QUIET, FIELD, GLASS_CARD } from "@/components/ui";
+import { BTN_PRIMARY, BTN_QUIET, CARD, FIELD } from "@/components/ui";
 import { requireStaff } from "@/lib/auth/guards";
 import { localizedName, sanitizeSearch, unitLabel } from "@/lib/catalog/display";
 import { perfRun } from "@/lib/perf";
@@ -149,11 +149,11 @@ export default async function StaffProductsPage({
       </form>
 
       {products.length === 0 ? (
-        <p className={`${GLASS_CARD} mt-4 p-10 text-center text-muted`}>
+        <p className={`${CARD} mt-4 p-10 text-center text-muted`}>
           {tCatalog("noResults")}
         </p>
       ) : (
-        <div className={`${GLASS_CARD} mt-4 overflow-x-auto p-4 sm:p-5`}>
+        <div className={`${CARD} mt-4 overflow-x-auto p-4 sm:p-5`}>
           <table className="w-full text-sm">
             <thead>
               {/* Headers step BACK: small, muted and unbolded, so the weight in

@@ -3,7 +3,7 @@ import { getTranslations, setRequestLocale } from "next-intl/server";
 import Link from "next/link";
 import { AppShell } from "@/components/app-shell";
 import { SearchIcon } from "@/components/icons";
-import { BTN_PRIMARY, FIELD, GLASS_CARD } from "@/components/ui";
+import { BTN_PRIMARY, CARD, FIELD } from "@/components/ui";
 import { beginCompanyUser, finishCompanyUser } from "@/lib/auth/guards";
 import { localizedName, sanitizeSearch } from "@/lib/catalog/display";
 import { perfRun } from "@/lib/perf";
@@ -311,7 +311,7 @@ export default async function CatalogPage({
         // hand. The link is only there when something IS filtering; on a truly
         // empty catalogue it would be a link to the same empty page.
         <div
-          className={`${GLASS_CARD} mt-4 flex flex-col items-center gap-3 px-6 py-12 text-center`}
+          className={`${CARD} mt-4 flex flex-col items-center gap-3 px-6 py-12 text-center`}
         >
           <span className="flex size-12 items-center justify-center rounded-full bg-border text-muted">
             <SearchIcon />
@@ -321,7 +321,7 @@ export default async function CatalogPage({
             <Link
               href={href({ q: "", tab: "all", cat: "", page: 1 })}
               // Same shape as the pager below — the two quiet navigations on
-              // this page, both 44px and both brand-ink on the glass.
+              // this page, both 44px and both brand-ink on the card.
               className="inline-flex h-11 items-center rounded-lg px-3 text-sm text-brand-ink underline underline-offset-4 transition-colors hover:bg-brand-soft"
             >
               {t("clearFilters")}
@@ -329,9 +329,7 @@ export default async function CatalogPage({
           )}
         </div>
       ) : (
-        <ul
-          className={`${GLASS_CARD} mt-4 divide-y divide-border px-3 sm:px-5`}
-        >
+        <ul className={`${CARD} mt-4 divide-y divide-border px-3 sm:px-5`}>
           {/* The row itself lives in `product-row.tsx`: it is where the layout
               that this page's customers press lives, and it is the one piece of
               the catalogue worth being able to mount on its own. */}

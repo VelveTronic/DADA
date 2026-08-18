@@ -1,7 +1,7 @@
 import type { Locale } from "next-intl";
 import { getTranslations, setRequestLocale } from "next-intl/server";
 import { StaffShell } from "@/components/staff-shell";
-import { GLASS_CARD } from "@/components/ui";
+import { CARD } from "@/components/ui";
 import { beginStaff, finishStaff } from "@/lib/auth/guards";
 import {
   bridgeCountLabelKey,
@@ -101,7 +101,7 @@ export default async function StaffHome({
         role: staffUser.role,
       }}
     >
-      <section className={`${GLASS_CARD} mt-6 p-5`}>
+      <section className={`${CARD} mt-6 p-5`}>
         <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
           <h2 className="font-medium">{t("bridge.title")}</h2>
           <p className="text-xs text-muted">{t("bridge.subtitle")}</p>

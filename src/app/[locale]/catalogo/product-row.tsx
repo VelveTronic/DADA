@@ -35,14 +35,14 @@ import type { CustomerCatalogProduct } from "@/lib/supabase/public.types";
  *   └──────┴──────────────────────────┴──────────────────────────┘
  * ```
  *
- * **Why the action column is a FIXED track and not `auto`.** The pill inside it
- * grows from a lone `+` (34px) to `− n +` (90px) the moment the product is in
- * the cart. An `auto` track would resize on that press: every row's name column
- * would jump 56px narrower, re-wrapping titles down the whole list, and the
- * button under the customer's finger would move while they were pressing it. The
- * track is sized for the WIDE state and the pill is right-aligned in it, so the
- * geometry is identical in both — which is also what keeps the stars in a column
- * down a 50-row page however many rows are already in the cart.
+ * **Why the action column is a FIXED track and not `auto`.** The stepper inside
+ * it grows from a lone `+` (32px) to `− n +` (100px) the moment the product is
+ * in the cart. An `auto` track would resize on that press: every row's name
+ * column would jump 68px narrower, re-wrapping titles down the whole list, and
+ * the button under the customer's finger would move while they were pressing it.
+ * The track is sized for the WIDE state and the stepper is right-aligned in it,
+ * so the geometry is identical in both — which is also what keeps the stars in a
+ * column down a 50-row page however many rows are already in the cart.
  *
  * The 8.75rem is the sum of what stands in it and nothing else: 6.25rem for the
  * stepper (see `STEPPER_SLOT`), a 4px gap, and the 2.25rem star. **The gap is
@@ -62,10 +62,10 @@ const ROW =
 
 /**
  * The stepper's fixed footprint, right-aligned. 6.25rem = 100px, which is the
- * widest the pill can ever be: 2px of border + a 32px `−` + the quantity, capped
- * at 32px by `max-w-8` in `qty-stepper.tsx`, + a 32px `+` = 98px. Sized from the
- * control rather than guessed, so no quantity can make the pill overhang the
- * track and reach back over the name.
+ * widest the stepper can ever be: a 32px `−`, a 2px gap, the quantity capped at
+ * 32px by `max-w-8` in `STEPPER_QTY`, another 2px gap and a 32px `+` = 100px.
+ * Sized from the control rather than guessed, so no quantity can make the
+ * stepper overhang the track and reach back over the name.
  *
  * A row that cannot be ordered renders the slot EMPTY rather than dropping it:
  * the star column stays where it is, and so does everything below.

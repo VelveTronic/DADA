@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { signOut } from "@/app/actions/auth";
 import { UserIcon } from "@/components/icons";
-import { GLASS_CARD, ICON_BTN, ICON_BTN_ACTIVE } from "@/components/ui";
+import { CARD, ICON_BTN, ICON_BTN_ACTIVE } from "@/components/ui";
 
 /**
  * The header's 用户 button and the panel it opens: 我的订单, 我的配送地址,
@@ -211,7 +211,7 @@ export function UserMenu({
           onBlur={onPanelFocusOut}
           // Right-aligned and narrower than a phone: the trigger is the last
           // control in the row, so a left-aligned panel would hang off-screen.
-          className={`${GLASS_CARD} absolute right-0 top-full z-50 mt-2 w-56 p-1 shadow-lg`}
+          className={`${CARD} absolute right-0 top-full z-50 mt-2 w-56 p-1 shadow-lg`}
         >
           {/* Whose account this is. Not a menuitem — there is nothing to press —
               and therefore `role="presentation"`: a `menu` may only own menu

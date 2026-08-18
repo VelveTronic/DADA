@@ -8,8 +8,8 @@ import { StorefrontNav } from "@/components/storefront-nav";
 import { CART_COOKIE, parseCart } from "@/lib/cart";
 
 /**
- * The storefront's sticky glass header plus the page's `<main>`, for every
- * signed-in CUSTOMER page.
+ * The storefront's sticky header plus the page's `<main>`, for every signed-in
+ * CUSTOMER page.
  *
  * Each page used to hand-roll its own title row, its own back link and its own
  * logout form, which is why the brand mark, the app name and the way out now
@@ -67,7 +67,12 @@ export async function AppShell({
 
   return (
     <CartProvider cart={cart} prices={cartPrices ?? {}}>
-      <header className="sticky top-0 z-40 border-b border-border bg-background/85 backdrop-blur-[14px]">
+      {/* Solid white on the beige ground, not tinted glass: the header is a
+          SURFACE in this design, the same white as the cards under it, and the
+          hairline is what separates the two. Dropping the `backdrop-filter` also
+          drops the containing block it silently created for `fixed`
+          descendants — see the note in `staff-sidebar.tsx`. */}
+      <header className="sticky top-0 z-40 border-b border-border bg-surface">
         {/* One row that never wraps: mark on the left, icons pinned right. No
             `flex-wrap` here on purpose — four 44px targets and a wordmark fit
             inside 375px, and a wrapping header would push the catalogue down a

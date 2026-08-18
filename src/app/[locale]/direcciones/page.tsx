@@ -2,7 +2,7 @@ import type { Locale } from "next-intl";
 import { getTranslations, setRequestLocale } from "next-intl/server";
 import { Fragment } from "react";
 import { AppShell } from "@/components/app-shell";
-import { GLASS_CARD } from "@/components/ui";
+import { CARD } from "@/components/ui";
 import { beginCompanyUser, finishCompanyUser } from "@/lib/auth/guards";
 import { perfRun } from "@/lib/perf";
 import { getSetting } from "@/lib/settings";
@@ -84,7 +84,7 @@ export default async function AddressesPage({
     >
       <h1 className="mt-8 text-2xl font-bold tracking-tight">{t("title")}</h1>
 
-      <section className={`${GLASS_CARD} mt-6 p-5`}>
+      <section className={`${CARD} mt-6 p-5`}>
         <h2 className="font-medium">{t("cardTitle")}</h2>
 
         <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-[10rem_1fr]">

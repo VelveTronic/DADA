@@ -2,7 +2,7 @@ import type { Locale } from "next-intl";
 import { getTranslations, setRequestLocale } from "next-intl/server";
 import { AppShell } from "@/components/app-shell";
 import { OrderStatusBadge } from "@/components/order-status-badge";
-import { GLASS_CARD } from "@/components/ui";
+import { CARD } from "@/components/ui";
 import { beginCompanyUser, finishCompanyUser } from "@/lib/auth/guards";
 import { formatEuros } from "@/lib/money";
 import { formatOrderDate, parseOrderNumber } from "@/lib/orders";
@@ -83,11 +83,11 @@ export default async function OrdersPage({
       )}
 
       {orders.length === 0 ? (
-        <p className={`${GLASS_CARD} mt-4 p-10 text-center text-muted`}>
+        <p className={`${CARD} mt-4 p-10 text-center text-muted`}>
           {t("empty")}
         </p>
       ) : (
-        <ul className={`${GLASS_CARD} mt-4 divide-y divide-border px-4 sm:px-5`}>
+        <ul className={`${CARD} mt-4 divide-y divide-border px-4 sm:px-5`}>
           {orders.map((order) => (
             <li key={order.id} className="py-3">
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1">

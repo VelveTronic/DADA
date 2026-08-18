@@ -3,7 +3,7 @@ import { getTranslations, setRequestLocale } from "next-intl/server";
 import { redirect } from "next/navigation";
 import { setStaffRole, setUserActive } from "@/app/actions/staff-users";
 import { StaffShell } from "@/components/staff-shell";
-import { BTN_QUIET, FIELD_SM, GLASS_CARD } from "@/components/ui";
+import { BTN_QUIET, CARD, FIELD_SM } from "@/components/ui";
 import { requireStaff } from "@/lib/auth/guards";
 import { perfRun } from "@/lib/perf";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -223,7 +223,7 @@ export default async function StaffUsersPage({
         </p>
       )}
 
-      <section className={`${GLASS_CARD} mt-6 p-5`}>
+      <section className={`${CARD} mt-6 p-5`}>
         <h2 className="font-medium">{t("customersTitle")}</h2>
 
         {customers.length === 0 ? (
@@ -311,7 +311,7 @@ export default async function StaffUsersPage({
           manager never sees that staff accounts exist here, and
           `createStaffAccount` / `setStaffRole` refuse them regardless. */}
       {owner && (
-        <section className={`${GLASS_CARD} mt-6 p-5`}>
+        <section className={`${CARD} mt-6 p-5`}>
           <h2 className="font-medium">{t("staffTitle")}</h2>
 
           {staff.length === 0 ? (

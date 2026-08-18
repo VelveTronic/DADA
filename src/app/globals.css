@@ -7,11 +7,11 @@
  * visitor's OS colour preference — was deleted: nothing in the portal honoured
  * it, so a customer on a dark-mode phone got a flipped ground and ink under
  * components written against light greys (grey-500 on near-black), which failed
- * AA — the reviewer flagged exactly that. The look
- * the owner asked for is the white frosted-glass one below, and it is painted
- * explicitly — ground, ink and `color-scheme` — so it holds whatever the host OS
- * prefers. Reintroducing a dark theme means restyling every page, not toggling
- * two variables.
+ * AA — the reviewer flagged exactly that. The look the owner asked for is the
+ * warm-beige one below — beige ground, SOLID white cards, one red — and it is
+ * painted explicitly — ground, ink and `color-scheme` — so it holds whatever the
+ * host OS prefers. Reintroducing a dark theme means restyling every page, not
+ * toggling two variables.
  */
 :root {
   /* Keeps native controls (date picker, number spinners, scrollbars) light too
@@ -20,39 +20,61 @@
 }
 
 /**
- * The palette, straight off the DADA logo. The sphere's red is the ONLY accent;
- * everything else is ground, glass and ink. Tailwind v4 turns each `--color-*`
- * key into utilities on its own (`bg-surface`, `border-border`, `text-muted`,
- * `bg-brand`…), which is why the theme block IS the design system here.
+ * The palette of the mobile design (`docs/design/dada-mobile-client.dc.html`),
+ * which is the DADA logo's red over a warm paper ground. The sphere's red is
+ * still the ONLY accent; everything else is ground, card and ink. Tailwind v4
+ * turns each `--color-*` key into utilities on its own (`bg-surface`,
+ * `border-border-strong`, `text-faint`, `bg-brand`…), which is why the theme
+ * block IS the design system here.
  *
  * The semantic banner colours (green/amber/red `*-50`/`*-800` pairs) stay on
  * Tailwind's default palette: those report the state of an order, they are not
  * brand.
  */
 @theme {
-  /* A soft warm grey, never white: frosted glass only reads against a ground
+  /* Warm beige, never white: a white card only reads as a card against a ground
      that differs from it. */
-  --color-background: #f5f6f4;
-  /* THE glass. Paired with `backdrop-blur-[14px]` on every card and the header. */
-  --color-surface: rgb(255 255 255 / 0.72);
-  --color-border: rgb(30 32 30 / 0.08);
-  --color-ink: #1d2021;
-  --color-muted: #6b7075;
-  /* The sphere's own red. It is a FILL colour: white on it clears AA (4.6:1),
-     but it as text on glass does not (4.4:1). */
-  --color-brand: #e8192c;
+  --color-background: #f1eeeb;
+  /* The card, the header, every list pane — SOLID. The frosted glass is retired:
+     `backdrop-blur` behind an opaque fill is a no-op, and the design is flat. */
+  --color-surface: #ffffff;
+  /* Half a step off white, for the surfaces that sit INSIDE one: the category
+     rail, a grouped page's ground, info boxes and chips. */
+  --color-surface-dim: #f7f5f3;
+  /* The hairline that divides two things on white… */
+  --color-border: #f2eeea;
+  /* …and the heavier line a CONTROL is drawn with, which has to be visible
+     rather than merely present. */
+  --color-border-strong: #e4ded8;
+  --color-ink: #1c1917;
+  /* Secondary wording — a row's second line, a quiet control's glyph. */
+  --color-ink-soft: #57504a;
+  /* Tertiary: captions, hints, units. */
+  --color-muted: #79726b;
+  /* The lightest ink that is still ink: placeholders and inactive labels. It is
+     NOT for anything a customer has to read. */
+  --color-faint: #a8a099;
+  /* The sphere's own red. It is a FILL colour: white on it clears AA (4.75:1),
+     but it as text on a light ground does not. */
+  --color-brand: #e0231c;
   /* …so the accent has a second, darker shade for TEXT — brand-red wording,
-     links and hovers on a light ground clear AA at 5.7:1 with this one. Same
-     hue, same accent, one of the two per context: fills take `--color-brand`,
-     letters take this. */
-  --color-brand-ink: #c8102e;
-  --color-brand-soft: #fdecee;
-  --radius-card: 16px;
+     links and the hover of every brand fill clear AA at 6.9:1 with this one.
+     Same hue, same accent, one of the two per context: fills take
+     `--color-brand`, letters take this. */
+  --color-brand-ink: #b31710;
+  --color-brand-soft: #fdecea;
+  --radius-card: 14px;
+  /* Archivo — the ONE webfont, loaded once in `[locale]/layout.tsx` — is here
+     for NUMERALS: quantities, counts, money, order numbers. Tailwind turns this
+     key into the `font-num` utility. No CJK webfont is shipped; the body stack
+     below is whatever the customer's phone already has, which on the Chinese
+     Android and iOS handsets this portal is used on is the right face anyway. */
+  --font-num: var(--font-archivo), ui-sans-serif, sans-serif;
 }
 
 body {
   background: var(--color-background);
   color: var(--color-ink);
-  font-family: Arial, Helvetica, "PingFang SC", "Microsoft YaHei", "Noto Sans SC",
-    sans-serif;
+  font-family: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei",
+    "Noto Sans SC", sans-serif;
 }

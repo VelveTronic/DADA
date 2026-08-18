@@ -10,7 +10,7 @@ import {
   CartSubtotal,
 } from "@/components/cart/cart-line";
 import { ProductThumb } from "@/components/product-thumb";
-import { BTN_PRIMARY, FIELD, GLASS_CARD } from "@/components/ui";
+import { BTN_PRIMARY, CARD, FIELD } from "@/components/ui";
 import { beginCompanyUser, finishCompanyUser } from "@/lib/auth/guards";
 import { CART_COOKIE, parseCart } from "@/lib/cart";
 import { localizedName, unitLabel } from "@/lib/catalog/display";
@@ -228,14 +228,12 @@ export default async function CartPage({
       )}
 
       {rows.length === 0 ? (
-        <p className={`${GLASS_CARD} mt-4 p-10 text-center text-muted`}>
+        <p className={`${CARD} mt-4 p-10 text-center text-muted`}>
           {t("empty")}
         </p>
       ) : (
         <>
-          <ul
-            className={`${GLASS_CARD} mt-4 divide-y divide-border px-4 sm:px-5`}
-          >
+          <ul className={`${CARD} mt-4 divide-y divide-border px-4 sm:px-5`}>
             {rows.map((row) => {
               const name = localizedName(row.product?.name, locale);
               const orderable = row.product?.is_orderable === true;
@@ -348,10 +346,7 @@ export default async function CartPage({
 
           {/* No line inputs: submitOrder reads them from the httpOnly cookie, so
               nothing here can add a product or set a price. */}
-          <form
-            action={submitOrder}
-            className={`${GLASS_CARD} mt-6 p-4 sm:p-5`}
-          >
+          <form action={submitOrder} className={`${CARD} mt-6 p-4 sm:p-5`}>
             <input type="hidden" name="locale" value={locale} />
             <input type="hidden" name="client_token" value={clientToken} />
             <h2 className="text-lg font-semibold">{t("checkout")}</h2>

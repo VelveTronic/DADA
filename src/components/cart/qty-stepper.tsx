@@ -2,13 +2,18 @@
 
 import { useTranslations } from "next-intl";
 import { useRef } from "react";
-import { STEPPER, STEPPER_BTN } from "@/components/ui";
+import {
+  STEPPER_DEC,
+  STEPPER_INC,
+  STEPPER_QTY,
+  STEPPER_WRAP,
+} from "@/components/ui";
 import { useCart } from "./cart-provider";
 
 /**
- * The catalogue row's add control: one glass pill holding a `+`, which GROWS a
- * `−` and a figure to its left once the product is in the cart — TOKACHI's
- * `quick-add-button.tsx`, adapted to a cookie cart. The pill is the same
+ * The catalogue row's add control: a red `+` square, which GROWS a `−` square
+ * and a figure to its left once the product is in the cart — TOKACHI's
+ * `quick-add-button.tsx`, adapted to a cookie cart. The wrapper is the same
  * element in both states; only its contents change (see the note on the
  * return).
  *
@@ -26,9 +31,9 @@ import { useCart } from "./cart-provider";
  * one cannot go in the basket. The BLOCKER is unchanged either way; only the
  * wording is, and the customer sees no amount they were not meant to.
  *
- * **`−` at 1 removes the line**, shrinking the pill back to its lone `+`. That
- * is the cart's own contract (`setQty` at 0 deletes) and TOKACHI's, so the pill
- * has no dead bottom rung and the row needs no second control to undo an
+ * **`−` at 1 removes the line**, shrinking the control back to its lone `+`.
+ * That is the cart's own contract (`setQty` at 0 deletes) and TOKACHI's, so the
+ * stepper has no dead bottom rung and the row needs no second control to undo an
  * accidental add.
  *
  * The `+` stays disabled on an unpriced product even once a quantity exists —
@@ -77,7 +82,7 @@ export function QtyStepper({
   // the list — they land back at the top and have to walk down again to press
   // `+` a second time.
   return (
-    <div className={STEPPER}>
+    <div className={STEPPER_WRAP}>
       {qty > 0 && (
         <button
           key="minus"
@@ -93,7 +98,7 @@ export function QtyStepper({
             if (qty <= 1) plusRef.current?.focus();
             setQty(productId, qty - 1);
           }}
-          className={STEPPER_BTN}
+          className={STEPPER_DEC}
         >
           −
         </button>
@@ -101,18 +106,7 @@ export function QtyStepper({
       {/* Announced on change, so a screen reader hears the new quantity without
           the button labels having to carry it. */}
       {qty > 0 && (
-        <span
-          key="qty"
-          aria-live="polite"
-          // Between 1.5rem and 2rem wide, and that CEILING is what the
-          // catalogue row's fixed action column is sized against: the pill can
-          // never grow past 98px, so no quantity — 9999 is the cookie's cap, and
-          // a weighed line can carry decimals typed on the cart page — can make
-          // it overhang its track and reach back over the product name. Four
-          // tabular digits fit the 32px; anything longer ellipsises here and
-          // stays exact on the cart page, which is where such a number is read.
-          className="min-w-6 max-w-8 truncate text-center text-sm font-semibold tabular-nums"
-        >
+        <span key="qty" aria-live="polite" className={STEPPER_QTY}>
           {qty}
         </span>
       )}
@@ -124,7 +118,7 @@ export function QtyStepper({
         aria-label={addLabel}
         title={addTitle}
         onClick={() => setQty(productId, qty > 0 ? qty + 1 : 1)}
-        className={STEPPER_BTN}
+        className={STEPPER_INC}
       >
         +
       </button>

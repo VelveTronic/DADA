@@ -195,7 +195,7 @@ function SidebarBody({
 }
 
 /**
- * The back office's fixed left column — Medusa's admin shape in DADA's glass.
+ * The back office's fixed left column — Medusa's admin shape in DADA's white.
  *
  * Three widths, one component:
  * - below `sm` it is not drawn at all and `StaffTopBar` below carries the same
@@ -212,7 +212,7 @@ function SidebarBody({
  */
 export function StaffSidebar(props: SidebarProps) {
   return (
-    <aside className="sticky top-0 hidden h-screen w-16 shrink-0 flex-col self-start border-r border-border bg-surface backdrop-blur-[14px] sm:flex lg:w-60">
+    <aside className="sticky top-0 hidden h-screen w-16 shrink-0 flex-col self-start border-r border-border bg-surface sm:flex lg:w-60">
       <SidebarBody {...props} collapsible />
     </aside>
   );
@@ -278,7 +278,7 @@ export function StaffTopBar(props: SidebarProps) {
 
   return (
     <>
-      <div className="sticky top-0 z-40 border-b border-border bg-background/85 backdrop-blur-[14px] sm:hidden">
+      <div className="sticky top-0 z-40 border-b border-border bg-surface sm:hidden">
         <div className="flex items-center gap-1 px-2 py-1">
           <button
             ref={triggerRef}
@@ -308,12 +308,17 @@ export function StaffTopBar(props: SidebarProps) {
           `fixed` descendant — the same rule as `transform` — so a drawer nested
           inside it resolved `inset-y-0` against a 52px strip: a 288×52 panel with
           every row folded out of reach, on the one viewport where the drawer IS
-          the navigation. Out here the containing block is the viewport again,
-          because nothing between this and the initial containing block filters,
-          transforms or contains. `sm:hidden` on both is belt and braces: the
-          trigger is inside a bar that is already `display:none` from `sm` up, and
-          the effect above closes the drawer if the viewport crosses that line
-          while it is open. */}
+          the navigation. The bar no longer carries a `backdrop-filter` (it is
+          solid `bg-surface` since the warm-beige palette landed, and blurring
+          behind an opaque fill did nothing anyway), so that hazard is currently
+          latent rather than live — which is exactly why the drawer STAYS out
+          here. Any future filter, transform, `perspective`, `will-change` or
+          `contain` on the bar would silently fold the drawer back up, and out
+          here the containing block is the viewport because nothing between this
+          and the initial containing block does any of those. `sm:hidden` on both
+          is belt and braces: the trigger is inside a bar that is already
+          `display:none` from `sm` up, and the effect above closes the drawer if
+          the viewport crosses that line while it is open. */}
       {open && (
         <>
           {/* Not a button and not in the tab order: Escape and the close control

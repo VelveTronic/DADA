@@ -1,7 +1,7 @@
 import type { Locale } from "next-intl";
 import { getTranslations, setRequestLocale } from "next-intl/server";
 import Image from "next/image";
-import { GLASS_CARD } from "@/components/ui";
+import { CARD } from "@/components/ui";
 import { perfRun } from "@/lib/perf";
 import { LoginForm } from "./login-form";
 
@@ -60,7 +60,7 @@ export default async function LoginPage({
           {t("errorInactive")}
         </p>
       )}
-      <div className={`${GLASS_CARD} p-6`}>
+      <div className={`${CARD} p-6`}>
         <LoginForm
           locale={locale}
           labels={{

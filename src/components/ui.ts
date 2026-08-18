@@ -1,7 +1,7 @@
 /**
- * The class vocabulary the whole portal is built from — the frosted-glass card
- * and the three controls that sit on it. Seven pages share these strings so the
- * look cannot drift page by page, and every value resolves through the tokens in
+ * The class vocabulary the whole portal is built from — the card and the
+ * controls that sit on it. Every page shares these strings so the look cannot
+ * drift page by page, and every value resolves through the tokens in
  * `globals.css`: change the palette there, not here.
  *
  * Deliberately a plain module with NO imports: `login-form.tsx` is a client
@@ -10,25 +10,38 @@
  */
 
 /**
- * White at 72% over the warm-grey ground, a hairline border and a 14px backdrop
- * blur, at the one card radius — the same four properties the sticky header uses.
- * Add the padding at the call site; a table card and a text card want different
- * amounts.
+ * Solid white on the beige ground, a hairline border, at the one card radius.
+ *
+ * It was `GLASS_CARD` — white at 72% under a 14px backdrop blur — and both
+ * halves of that went with the warm-beige design: the fill is opaque now, and a
+ * `backdrop-filter` behind an opaque fill blurs nothing at all while still
+ * making the element a containing block for `fixed` descendants (see the note in
+ * `staff-sidebar.tsx` about the drawer that cost us). Add the padding at the
+ * call site; a table card and a text card want different amounts.
  */
-export const GLASS_CARD =
-  "rounded-[var(--radius-card)] border border-border bg-surface backdrop-blur-[14px]";
+export const CARD =
+  "rounded-[var(--radius-card)] border border-border bg-surface";
 
-/** Text/number/date inputs and textareas. */
+/**
+ * Text/number/date inputs and textareas. The field is a shade OFF the card it
+ * sits on rather than the same white — an input the customer cannot see the
+ * edges of is an input they do not fill in — and its border is heavier than a
+ * card's hairline for the same reason.
+ */
 export const FIELD =
-  "rounded-lg border border-border bg-white/70 px-3 py-2 text-ink placeholder:text-muted focus:border-brand focus:outline-none";
+  "rounded-[10px] border border-[#E9E4DF] bg-[#FBFAF9] px-3 py-2 text-ink placeholder:text-faint focus:border-brand focus:outline-none";
 
 /** The same field at row scale, for the inputs that sit inside a list line. */
 export const FIELD_SM =
-  "rounded-lg border border-border bg-white/70 px-2 py-1 text-sm text-ink placeholder:text-muted focus:border-brand focus:outline-none";
+  "rounded-[10px] border border-[#E9E4DF] bg-[#FBFAF9] px-2 py-1 text-sm text-ink placeholder:text-faint focus:border-brand focus:outline-none";
 
-/** The one accent: brand red, white text. Every screen's main action. */
+/**
+ * The one accent: brand red, white text. Every screen's main action. Hover
+ * darkens to `brand-ink` — the same second shade the red WORDING uses — rather
+ * than fading the fill, which on a warm ground reads as disabled.
+ */
 export const BTN_PRIMARY =
-  "rounded-lg bg-brand px-4 py-2 text-white transition-colors hover:bg-brand/90 disabled:cursor-not-allowed disabled:opacity-40";
+  "rounded-[10px] bg-brand px-4 py-2 font-semibold text-white transition-colors hover:bg-brand-ink disabled:cursor-not-allowed disabled:opacity-40";
 
 /**
  * The small quiet control that sits inside a row — a per-line update, a
@@ -36,7 +49,7 @@ export const BTN_PRIMARY =
  * back until it is hovered.
  */
 export const BTN_QUIET =
-  "rounded-lg border border-border bg-white/70 px-2 py-1 text-xs transition-colors hover:border-brand hover:text-brand-ink";
+  "rounded-lg border border-border-strong bg-surface px-2 py-1 text-xs transition-colors hover:border-brand hover:text-brand-ink";
 
 /**
  * A quiet shell link: small, muted, brand-ink on hover. Today the staff
@@ -83,14 +96,35 @@ export const ICON_BTN = `${ICON_BTN_BASE} text-ink`;
 export const ICON_BTN_ACTIVE = `${ICON_BTN_BASE} bg-brand-soft text-brand-ink`;
 
 /**
- * The `− n +` pill: one bordered glass capsule, rather than controls floating
- * loose in a table cell. It holds the lone `+` of an empty row just as it holds
- * all three once there is a quantity — same capsule, more inside it — which is
- * what lets the `+` keep focus across the 0→1 change. Its 32px squares are the
- * row's touch targets, so they are sized here and not left to the glyph.
+ * The `− n +` stepper: TWO detached 32px squares with the figure between them,
+ * not one bordered capsule. The design gives the `+` the accent outright — it is
+ * the press the catalogue exists for — and leaves `−` a quiet outlined square,
+ * so the two are told apart by weight before they are read.
+ *
+ * The wrapper holds the lone `+` of an empty row just as it holds all three once
+ * there is a quantity — same wrapper, more inside it — which is what lets the
+ * `+` keep focus across the 0→1 change. The 32px squares are the row's touch
+ * targets, so they are sized here and not left to the glyph.
+ *
+ * Widest state: 32 + 2 + 32 + 2 + 32 = 100px, which is exactly the 6.25rem track
+ * `product-row.tsx` reserves for it.
  */
-export const STEPPER =
-  "inline-flex h-9 items-center rounded-full border border-border bg-white/70 transition-colors focus-within:border-brand hover:border-brand";
+export const STEPPER_WRAP = "inline-flex items-center gap-0.5";
 
-export const STEPPER_BTN =
-  "inline-flex size-8 items-center justify-center rounded-full text-base leading-none transition-colors hover:text-brand-ink disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:text-ink";
+export const STEPPER_DEC =
+  "inline-flex size-8 items-center justify-center rounded-lg border border-border-strong bg-surface text-[17px] leading-none text-ink-soft transition-colors hover:border-brand hover:text-brand-ink";
+
+export const STEPPER_INC =
+  "inline-flex size-8 items-center justify-center rounded-lg bg-brand text-[17px] leading-none text-white shadow-[0_2px_6px_-1px_rgba(224,35,28,.45)] transition-colors hover:bg-brand-ink disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-brand";
+
+/**
+ * The figure between them. Between 1.5rem and 2rem wide, and that CEILING is
+ * what the catalogue row's fixed action column is sized against: the stepper can
+ * never grow past 100px, so no quantity — 9999 is the cookie's cap, and a
+ * weighed line can carry decimals typed on the cart page — can make it overhang
+ * its track and reach back over the product name. Four tabular Archivo digits
+ * fit the 32px; anything longer ellipsises here and stays exact on the cart
+ * page, which is where such a number is read.
+ */
+export const STEPPER_QTY =
+  "min-w-6 max-w-8 truncate text-center font-num text-[15px] font-semibold tabular-nums";
