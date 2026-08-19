@@ -11,9 +11,10 @@ import { CARD, ICON_BTN, ICON_BTN_ACTIVE } from "@/components/ui";
  * The header's 用户 button and the panel it opens: 我的账号, 我的订单,
  * 我的配送地址, 我的信息, and the way out.
  *
- * Hand-rolled, with no headless-ui and no new dependency — four links and a
- * submit button did not justify one, and a fifth link does not change that. What that costs is the keyboard contract,
- * which is written out here rather than inherited:
+ * Hand-rolled, with no headless-ui and no new dependency — three links and a
+ * submit button did not justify one, and the 我的账号 entry that makes them
+ * four does not change that. What that costs is the keyboard contract, which
+ * is written out here rather than inherited:
  *
  * - the trigger carries `aria-haspopup="menu"` and `aria-expanded`, and the
  *   panel is a real `role="menu"` of `role="menuitem"`s, so the pair announces

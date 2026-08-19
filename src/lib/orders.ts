@@ -115,9 +115,15 @@ export function madridMonthStartIso(now: Date): string {
     })
       .formatToParts(probe)
       .find((part) => part.type === "timeZoneName")
-      // "GMT+02:00" → "+02:00". A zero offset formats as the bare "GMT", which
-      // is why the fallback exists at all; Madrid is UTC+1 or +2 and never hits
-      // it.
+      // "GMT+02:00" → "+02:00". The `|| "+00:00"` is a TYPE floor, not a
+      // behavioural one: `find` may return undefined, so the optional chain
+      // hands back `string | undefined` where the template below needs a
+      // `string`. It cannot fire on this runtime — Node 22 with full ICU always
+      // emits `GMT±HH:MM` from `longOffset`, zero offsets included (`UTC` and
+      // `Africa/Abidjan` both format as "GMT+00:00", never a bare "GMT") — and
+      // Madrid is +1 or +2 regardless. Were some exotic ICU to drop the part,
+      // the month boundary would move by the true offset for one render of one
+      // stat count: a floor worth having, not worth throwing over.
       ?.value.replace("GMT", "") || "+00:00";
   return `${month}-01T00:00:00${offset}`;
 }

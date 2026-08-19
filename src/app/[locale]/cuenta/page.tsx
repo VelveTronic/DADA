@@ -154,8 +154,9 @@ export default async function AccountPage({
           .from("orders")
           .select("id", { count: "exact", head: true })
           .eq("company_id", companyId)
-          // Madrid's month, not UTC's — see `madridMonthStartIso`. Read once
-          // here so all of this render agrees on which month it is.
+          // Madrid's month, not UTC's — see `madridMonthStartIso`. This is the
+          // helper's only call site; it is here rather than inlined because the
+          // offset arithmetic is what needs the unit test, not the query.
           .gte("created_at", madridMonthStartIso(new Date())),
       ),
       perf.step(
@@ -192,9 +193,9 @@ export default async function AccountPage({
     .join(" · ");
 
   const stats = [
-    { n: activeCount, label: t("statActive") },
-    { n: doneCount, label: t("statDone") },
-    { n: monthCount, label: t("statMonth") },
+    { key: "active", n: activeCount, label: t("statActive") },
+    { key: "done", n: doneCount, label: t("statDone") },
+    { key: "month", n: monthCount, label: t("statMonth") },
   ];
 
   const rows = [
@@ -253,7 +254,21 @@ export default async function AccountPage({
           would be relying on the spelling of a token.) So the one red surface in
           the portal names its own three: the shared radius, a transparent border
           that keeps its 1px box aligned with every other card down the page, and
-          the fill. */}
+          the fill.
+
+          AA OVER MOCKUP LITERALISM, the call this repo already made on Task
+          1's chips and muted text. The design veils this card's small text with
+          opacity, and composited over the red all three land under 4.5:1: the
+          identity line at 3.45 (`opacity-80` → #F9D3D2), the 编辑 link at 3.74
+          (`opacity-85` → #FADEDD), the stat labels at 3.29 (`opacity-85` over a
+          `bg-white/15` strip). So the veils come off — those three are plain
+          white, 4.74:1 on #E0231C. The strip could not pass that way, because a
+          LIGHTER ground makes white text WORSE, so it flips from a white glow
+          to a darker well: `bg-black/10`, which rasterises to #C91F19 over the
+          red and carries the 11px labels at 5.69:1. Every figure here was
+          measured off the rendered pixels, not off the declared colours. What
+          the opacity was carrying, size and weight carry instead — the name is
+          `text-lg` bold, the identity `text-xs`. */}
       <section className="mt-4 rounded-card border border-transparent bg-brand p-5 text-white">
         <div className="flex items-center gap-3.5">
           {/* The mark on a white disc, which is what a restaurant recognises
@@ -279,18 +294,20 @@ export default async function AccountPage({
             </p>
             {/* Both halves are nullable, so the line is only drawn when there is
                 one — an empty `<p>` would still take its 16px under the name. */}
-            {identity && (
-              <p className="truncate text-xs opacity-80">{identity}</p>
-            )}
+            {identity && <p className="truncate text-xs">{identity}</p>}
           </div>
 
           {/* 44px of height for the thumb, taken as `min-h-11` rather than a
               fixed box so the row's own alignment still centres it. The chevron
-              is decoration; `aria-label` pins the name to the word. */}
+              is decoration, so it is hidden and the word is the whole visible
+              label — but 编辑 alone names nothing in a list of links read out
+              of context, so the accessible name says what is being edited. It
+              composes two strings already on this page rather than adding a
+              third to translate: 编辑 · 我的信息 / Editar · Mis datos. */}
           <Link
             href={`/${locale}/perfil`}
-            aria-label={t("edit")}
-            className="ml-auto flex min-h-11 shrink-0 items-center pl-3 text-xs opacity-85"
+            aria-label={`${t("edit")} · ${t("menuProfile")}`}
+            className="ml-auto flex min-h-11 shrink-0 items-center pl-3 text-xs"
           >
             {t("edit")}
             <span aria-hidden className="ml-1">
@@ -299,33 +316,48 @@ export default async function AccountPage({
           </Link>
         </div>
 
-        {/* White at 15% over the red: the strip is a shade of the card it sits
-            on, not a second surface. Three equal columns, so the figures line up
-            whatever their labels are — 本月下单 and "Pedidos este mes" are not
-            the same width. */}
-        <div className="mt-4 flex rounded-xl bg-white/15 p-3">
+        {/* Black at 10% over the red: the strip is still a shade of the card
+            it sits on rather than a second surface, but an inset WELL instead
+            of a glow — see the AA note above for why that direction. Three
+            equal columns, so the figures line up whatever their labels are:
+            本月下单 and "Pedidos este mes" are not the same width.
+
+            A description list, because three label/figure pairs are exactly
+            that. The valid grouping is `dl > div > dt… dd…`, so the `dt` comes
+            FIRST inside its `div` — which is also the order the pair reads in
+            ("进行中, 3") — and `flex-col-reverse` puts the figure back on top
+            visually without inverting the markup. */}
+        <dl className="mt-4 flex rounded-xl bg-black/10 p-3">
           {stats.map((stat) => (
+            // Keyed by the stat's own name, not by its label: the label is
+            // translated, so a zh/es switch would rewrite every key.
             <div
-              key={stat.label}
-              className="flex flex-1 flex-col items-center gap-1"
+              key={stat.key}
+              className="flex flex-1 flex-col-reverse items-center gap-1"
             >
+              <dt className="text-[11px]">{stat.label}</dt>
               {/* `font-num` is Archivo, the one webfont, loaded for exactly
                   this: numerals. `tabular-nums` keeps the three columns from
                   shifting as the figures change. */}
-              <span className="font-num text-xl font-bold tabular-nums">
+              <dd className="font-num text-xl font-bold tabular-nums">
                 {stat.n}
-              </span>
-              <span className="text-[11px] opacity-85">{stat.label}</span>
+              </dd>
             </div>
           ))}
-        </div>
+        </dl>
       </section>
 
       {/* A second landmark on a page that already has the header's, so it is
-          named. The links are its own children: `divide-y` draws the hairline
-          BETWEEN them, and each row is one link edge to edge — a 54px target a
-          thumb cannot miss, rather than a label with a link somewhere in it. */}
-      <nav aria-label={t("title")} className={`${CARD} mt-3 divide-y divide-border`}>
+          named — and named for ITSELF (账号菜单 / "Menú de la cuenta") rather
+          than with `account.title`, which is the h1's string: a landmark list
+          reading "我的 / 我的" would be two entries for one page. The links are
+          its own children: `divide-y` draws the hairline BETWEEN them, and each
+          row is one link edge to edge — a 54px target a thumb cannot miss,
+          rather than a label with a link somewhere in it. */}
+      <nav
+        aria-label={t("menuLabel")}
+        className={`${CARD} mt-3 divide-y divide-border`}
+      >
         {rows.map((row) => (
           <Link
             key={row.href}

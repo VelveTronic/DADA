@@ -125,6 +125,7 @@
   },
   "account": {
     "title": "我的",
+    "menuLabel": "账号菜单",
     "edit": "编辑",
     "statActive": "进行中",
     "statDone": "已完成",

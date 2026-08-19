@@ -125,13 +125,14 @@
   },
   "account": {
     "title": "Mi cuenta",
+    "menuLabel": "Menú de la cuenta",
     "edit": "Editar",
     "statActive": "En curso",
     "statDone": "Completados",
     "statMonth": "Pedidos este mes",
     "menuOrders": "Mis pedidos",
     "menuFavorites": "Mis habituales",
-    "menuAddresses": "Tienda y dirección de entrega",
+    "menuAddresses": "Dirección de entrega",
     "menuProfile": "Mis datos",
     "hintActive": "{n} en curso",
     "hintKinds": "{n, plural, one {# artículo} other {# artículos}}"
