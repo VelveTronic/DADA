@@ -89,7 +89,7 @@
     "deliveryDate": "Fecha de entrega",
     "note": "Observaciones del pedido",
     "notePlaceholder": "Por ejemplo: entregar antes de las 7:00 en cocina",
-    "methodLabel": "Tramitación",
+    "methodLabel": "Gestión del pedido",
     "methodValue": "DADA programa el reparto tras recibir el pedido",
     "storeLabel": "Entrega en",
     "kindsCount": "{lines, plural, one {<n>#</n> artículo} other {<n>#</n> artículos}}",

@@ -90,49 +90,61 @@ export function PasswordForm({
   const eyes = { show: labels.showPassword, hide: labels.hidePassword };
 
   return (
-    // Same gutter and rule as the form above, for the same reason.
-    <form
-      action={changePassword}
-      className="grid max-w-sm gap-3 border-t border-border px-4 py-4"
-    >
+    // Same gutter and rule as the form above, for the same reason — and the
+    // width cap is INSIDE the rule, not on it. `max-w-sm` on the form itself
+    // capped the very element drawing the `border-t`: past a viewport of ~418px
+    // (the card's inner width is the viewport less `main`'s 32px of gutter and
+    // the card's 2px of border) the divider stopped at 384px while every other
+    // rule in these cards ran to the card's edge — one short rule among
+    // full-bleed ones, on the desktop this portal also serves. So the form stays
+    // edge to edge and the boxes are held in by the wrapper below: the same
+    // 384px `DisplayNameForm` puts on its own input, spent on one wrapper here
+    // because `PasswordInput` owns the input's class string and there are three
+    // of them.
+    <form action={changePassword} className="border-t border-border px-4 py-4">
       <input type="hidden" name="locale" value={locale} />
 
-      <label className="flex flex-col gap-1 text-sm">
-        {labels.currentPassword}
-        <PasswordInput
-          name="current_password"
-          autoComplete="current-password"
-          required
-          labels={eyes}
-        />
-      </label>
+      <div className="grid max-w-sm gap-3">
+        <label className="flex flex-col gap-1 text-sm">
+          {labels.currentPassword}
+          <PasswordInput
+            name="current_password"
+            autoComplete="current-password"
+            required
+            labels={eyes}
+          />
+        </label>
 
-      <label className="flex flex-col gap-1 text-sm">
-        {labels.newPassword}
-        <PasswordInput
-          name="new_password"
-          autoComplete="new-password"
-          required
-          minLength={MIN_PASSWORD_LENGTH}
-          labels={eyes}
-        />
-        <span className="text-xs text-muted">{labels.passwordHint}</span>
-      </label>
+        <label className="flex flex-col gap-1 text-sm">
+          {labels.newPassword}
+          <PasswordInput
+            name="new_password"
+            autoComplete="new-password"
+            required
+            minLength={MIN_PASSWORD_LENGTH}
+            labels={eyes}
+          />
+          <span className="text-xs text-muted">{labels.passwordHint}</span>
+        </label>
 
-      <label className="flex flex-col gap-1 text-sm">
-        {labels.confirmPassword}
-        <PasswordInput
-          name="confirm_password"
-          autoComplete="new-password"
-          required
-          minLength={MIN_PASSWORD_LENGTH}
-          labels={eyes}
-        />
-      </label>
+        <label className="flex flex-col gap-1 text-sm">
+          {labels.confirmPassword}
+          <PasswordInput
+            name="confirm_password"
+            autoComplete="new-password"
+            required
+            minLength={MIN_PASSWORD_LENGTH}
+            labels={eyes}
+          />
+        </label>
 
-      <button type="submit" className={`mt-1 justify-self-start ${BTN_PRIMARY}`}>
-        {labels.changePassword}
-      </button>
+        <button
+          type="submit"
+          className={`mt-1 justify-self-start ${BTN_PRIMARY}`}
+        >
+          {labels.changePassword}
+        </button>
+      </div>
     </form>
   );
 }

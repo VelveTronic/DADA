@@ -82,42 +82,37 @@ export default async function ProfilePage({
     finishCompanyUser(pendingUser, locale),
     perf.step("settings", getSetting(supabase, "show_prices")),
   ]);
-
-  // The ERP customer number, read HERE rather than widened into the guard's
-  // `companies(...)` join: that select is on the hot path of every customer page
-  // and `codcli` is drawn on this one screen. Same trade `/direcciones` makes
-  // for its address columns, and the same shape — it is keyed by `company_id`,
-  // which is what the profile row above went to fetch, so it cannot join the
-  // round trip before it. RLS (`companies_select`) would narrow an authenticated
-  // customer to this exact row without the filter; the `.eq` says whose row it
-  // wants out loud, and is worth one round trip on a page nobody opens twice a
-  // day.
-  const { data: company, error } = await perf.step(
-    "company",
-    supabase
-      .from("companies")
-      // Enumerated, never `select('*')`: `notes` is internal and column-revoked
-      // from authenticated, and a star select fails the WHOLE query with a 403.
-      .select("codcli")
-      .eq("id", portalUser.company_id)
-      .maybeSingle(),
-  );
   perf.end();
-  if (error) console.error("perfil company query:", error);
 
+  // The ERP customer number comes off the company the guard already embedded
+  // (`guards.ts`), not off a query of this page's own: `codcli` is keyed by
+  // `company_id`, which is what the guard's own row goes to fetch, so a
+  // page-level read could never overlap anything — it would be a third round
+  // trip stacked behind two. One integer on a join already selecting `name`
+  // from that same row is the cheaper end of the trade.
+  //
   // Nullable in the schema — a restaurant is onboarded in the portal before it
-  // is linked to Wingest — and a failed read lands here as null too. Either way
-  // the LINE is what disappears, not a placeholder in its place: "客户编号 —"
-  // is a customer number that reads as broken rather than as pending.
-  const codcli = company?.codcli ?? null;
+  // is linked to Wingest — and when it is null the LINE is what disappears, not
+  // a placeholder in its place: "客户编号 —" is a customer number that reads as
+  // broken rather than as pending.
+  const codcli = portalUser.companies.codcli;
 
+  /**
+   * The answer to one submit, rendered DIRECTLY ABOVE THE FORM IT ANSWERS — in
+   * the first card that is under the email row and its hint, in the second it is
+   * under the section head, because in each case that is where the form begins.
+   * A banner reports on the fields below it and on nothing else: `?name=` at the
+   * top of the first card would put "El nombre visible no puede estar vacío"
+   * over the EMAIL, which is the one thing on this page that cannot be changed
+   * at all.
+   */
   const banner = (result: ProfileResult | null) =>
     result && (
       <p
         role={result === "ok" ? "status" : "alert"}
         // `mx-4`, because these cards pad their own rows rather than their box:
         // without it the banner would run edge to edge inside the card and read
-        // as a second surface. Everything else about it is untouched.
+        // as a second surface.
         className={`mx-4 mt-1 mb-3 rounded-lg px-3 py-2 text-sm ${
           result === "ok"
             ? "bg-green-50 text-green-800"
@@ -129,14 +124,19 @@ export default async function ProfilePage({
     );
 
   /**
-   * A design-07 section head. `text-faint` is the mockup's own #A8A099 and it is
-   * the LICENSED use of that token (`globals.css`): it labels a group whose rows
-   * say what they are on their own — an address beside 邮箱, a named input under
-   * it — i.e. supplementary text that repeats what the content already shows,
-   * exactly like the /cuenta rows' hints. It is never body copy, and it never
-   * sits on anything but the white card below.
+   * A design-07 section head. The mockup paints these in its faintest grey and
+   * this is one of the places the repo does not follow it: `text-faint` is
+   * #A8A099, 2.58:1 on the white card, and WCAG 1.4.3 wants 4.5:1 of wording
+   * this size. `globals.css` licenses that token for placeholders and for
+   * supplementary text that repeats what a label already said — and a heading is
+   * neither: 账号资料 and 修改密码 are the ONLY place their grouping is named, so
+   * a customer who cannot read them cannot tell which card they are in.
+   * `text-muted` (#6E6760, 5.57:1 on white) is the same warm grey a shade darker
+   * and clears AA. Same call as the tab bar's labels (`tab-bar.tsx`), the cart
+   * bar's figures (`cart-bar-figures.tsx`) and the /cuenta card: AA over mockup
+   * literalism.
    */
-  const HEAD = "px-4 pt-3 pb-1 text-xs font-semibold text-faint";
+  const HEAD = "px-4 pt-3 pb-1 text-xs font-semibold text-muted";
 
   return (
     <AppShell
@@ -194,9 +194,12 @@ export default async function ProfilePage({
             // `font-num` for the figure in it — Archivo, the one webfont, is
             // loaded for numerals — and the CJK/Latin words fall through the
             // stack to the body face as they do on every other `font-num` line.
-            // `String(...)`, because a bare number argument would be FORMATTED:
-            // ICU renders 10286 as "10.286" in Spanish, and a customer number
-            // with a thousands separator in it is not the customer's number.
+            // `String(...)` is belt and braces, not a fix: a BARE `{code}`
+            // argument is stringified by ICU, never formatted (verified against
+            // intl-messageformat 11 — only `{code, number}` reaches
+            // `Intl.NumberFormat`, which is what would print 10286 as "10.286"
+            // in Spanish). The cast keeps the message immune to that suffix
+            // being added to the key later.
             <p className="font-num text-[11.5px] text-muted">
               {t("customerNo", { code: String(codcli) })}
             </p>
@@ -209,8 +212,6 @@ export default async function ProfilePage({
       <section className={`${CARD} mt-3`}>
         <h2 className={HEAD}>{t("sectionAccount")}</h2>
 
-        {banner(nameResult)}
-
         <div className="flex min-h-[52px] items-center gap-3 border-t border-border px-4 py-3 text-sm">
           <span className="w-[76px] flex-none text-[13px] text-muted">
             {t("email")}
@@ -221,7 +222,14 @@ export default async function ProfilePage({
             {user.email ?? "—"}
           </span>
         </div>
-        <p className="px-4 pt-2 text-xs text-muted">{t("emailHint")}</p>
+        {/* `pb-3` as well as `pt-2`: what follows this hint draws a rule at its
+            own top edge — the form's `border-t`, or the banner's box when a
+            submit has just been answered — so with `pt-2` alone the sentence sat
+            ON that rule. Two units above and three below keeps it nearer the row
+            it belongs to (which pads `py-3`) than to the form under it. */}
+        <p className="px-4 pt-2 pb-3 text-xs text-muted">{t("emailHint")}</p>
+
+        {banner(nameResult)}
 
         <DisplayNameForm
           locale={locale}

@@ -39,9 +39,12 @@ export function LoginForm({
       {/* The same 44px on the password box, reached from the LABEL because the
           input itself is not ours to class: `PasswordInput` owns that string
           (the `relative` wrapper and the `pr-10` that clears the eye button are
-          its geometry), and this is the only screen that wants a taller field —
-          the three boxes on /perfil sit inside a card's form, not on the glass,
-          so a prop on the shared component would be a knob with one user.
+          its geometry), and this is the only screen that wants a taller field.
+          These two boxes ARE the screen — one card on an otherwise empty page,
+          nothing else to press — while /perfil's three sit in a form under a
+          section head, one card in a stack of them, at the size the list rows
+          around it are written in. A prop on the shared component would be a
+          knob with one user.
           `[&_input]:h-11` sets a property `FIELD` never names, so there is
           nothing here for it to fight with either. */}
       <label className="flex flex-col gap-1 text-sm [&_input]:h-11">

@@ -51,12 +51,23 @@ type ServerSupabase = Awaited<ReturnType<typeof createServerSupabase>>;
 /**
  * One string literal, never a concatenation: supabase-js types the row from the
  * literal, and a `select` built at runtime widens to `string` and loses it.
+ *
+ * The embedded company carries `codcli` for ONE screen: the identity card on
+ * `/perfil` prints the ERP customer number under the restaurant's name. It rides
+ * here rather than being read on that page because the join is already running
+ * on every customer page and that row is already on the wire — one more integer
+ * in a `select` that is fetching `name` from the very same row costs nothing,
+ * while the page-level version could not overlap anything: it is keyed by
+ * `company_id`, which is what THIS query goes to fetch, so it could only ever be
+ * a third serialized round trip. `/direcciones` still reads its four address
+ * columns on its own page; those are wide text columns for one screen, and the
+ * trade there runs the other way.
  */
 function companyUserQuery(supabase: ServerSupabase, userId: string) {
   return supabase
     .from("portal_users")
     .select(
-      "id, company_id, display_name, locale, is_active, companies:company_id(id, name, tarcli, is_active)",
+      "id, company_id, display_name, locale, is_active, companies:company_id(id, codcli, name, tarcli, is_active)",
     )
     .eq("id", userId)
     .maybeSingle();

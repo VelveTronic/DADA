@@ -135,14 +135,19 @@ export default async function AddressesPage({
         <h1 className="min-w-0 truncate text-lg font-bold">{t("title")}</h1>
       </div>
 
-      {/* 门店资料 — design 07's key/value card. The head is `text-faint`, the
-          mockup's own #A8A099, and that is the LICENSED use of the token
-          (`globals.css`): it labels a group whose rows say what they are on
-          their own — a street beside 地址, a phone number beside 联系电话 — i.e.
-          supplementary text, the same licence /cuenta's row hints hold. It is
-          never body copy, and it only ever sits on this white card. */}
+      {/* 门店资料 — design 07's key/value card. The mockup paints its head in
+          the design's faintest grey and this is one of the places the repo does
+          not follow it: `text-faint` is #A8A099, 2.58:1 on the white card, and
+          WCAG 1.4.3 wants 4.5:1 of wording this size. `globals.css` licenses
+          that token for placeholders and for supplementary text that repeats
+          what a label already said — and a heading is neither: this line is the
+          ONLY place the card's grouping is named, and the rows under it name
+          their own fields, not the group. `text-muted` (#6E6760, 5.57:1 on
+          white) is the same warm grey a shade darker and clears AA. Same call as
+          the tab bar's labels (`tab-bar.tsx`), the cart bar's figures
+          (`cart-bar-figures.tsx`) and /perfil's own heads. */}
       <section className={`${CARD} mt-3`}>
-        <h2 className="px-4 pt-3 pb-1 text-xs font-semibold text-faint">
+        <h2 className="px-4 pt-3 pb-1 text-xs font-semibold text-muted">
           {t("sectionStore")}
         </h2>
 
@@ -176,11 +181,14 @@ export default async function AddressesPage({
 
       {/* Why there is no edit button on this screen, as design 07's wash card.
           The two colours are the mockup's own one-off tint — a hair lighter and
-          warmer than `brand-soft` (#FDECEA), which is the chip fill and would
-          read as a control here — so they are written as literals rather than
-          promoted to palette entries, the same call `/cuenta` makes for its
-          chevron grey. The HEAD's #B31710 is not a literal: that one IS the
-          palette's `brand-ink`, the shade this repo uses for every red word. */}
+          a hair less warm than `brand-soft` (#FDECEA): the red is barely
+          separated from the blue in it (R−B of 10, against brand-soft's 19), so
+          it reads as a near-white wash rather than as the pink of the chip fill,
+          which is what keeps it from looking like a control here. Literals
+          rather than palette entries for exactly that reason — one card wants
+          them — the same call `/cuenta` makes for its chevron grey. The head's
+          red is not a literal: that one IS the palette's `brand-ink`, the shade
+          this repo uses for every red word. */}
       <section className="mt-3 rounded-card border border-[#FBE4E2] bg-[#FFF6F5] p-4">
         <h2 className="text-[13px] font-semibold text-brand-ink">
           {t("noteTitle")}
