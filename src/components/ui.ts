@@ -112,7 +112,7 @@ export const ICON_BTN_ACTIVE = `${ICON_BTN_BASE} bg-brand-soft text-brand-ink`;
  * `+` keep focus across the 0→1 change. The 32px squares are the row's touch
  * targets, so they are sized here and not left to the glyph.
  *
- * Widest state: 32 + 2 + 26 + 2 + 32 = 94px, which is exactly the 5.875rem track
+ * Widest state: 32 + 2 + 28 + 2 + 32 = 96px, which is exactly the `6rem` track
  * `product-row.tsx` reserves for it.
  */
 export const STEPPER_WRAP = "inline-flex items-center gap-0.5";
@@ -124,27 +124,26 @@ export const STEPPER_INC =
   "inline-flex size-8 items-center justify-center rounded-lg bg-brand text-[17px] leading-none text-white shadow-[0_2px_6px_-1px_rgba(224,35,28,.45)] transition-colors hover:bg-brand-ink disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-brand";
 
 /**
- * The figure between them. Between 24px (`min-w-6`) and 26px wide, and that
+ * The figure between them. Between 24px (`min-w-6`) and 28px wide, and that
  * CEILING is what the catalogue row's fixed action column is sized against: the
- * stepper can never grow past 94px, so no quantity — 9999 is the cookie's cap,
+ * stepper can never grow past 96px, so no quantity — 9999 is the cookie's cap,
  * and a weighed line can carry decimals typed on the cart page — can make it
  * overhang its track and reach back over the product name.
  *
- * 26px is the design mockup's own qty box, and MEASURED in the browser a tabular
- * Archivo digit at 15px/600 advances 8.69px. So: one and two digits sit inside
- * the box (17.38px), THREE come to 26.06px and are already ellipsised by that
- * 0.06px, four to 34.75px. The honest reading of this ceiling is two digits in
- * full and an ellipsis from three up — not the four the old 32px box implied.
- * (`scrollWidth` rounds to an integer and reports three digits as fitting; the
- * rendered glyphs are the truth, and they show `12…`.)
+ * MEASURED in the browser, a tabular Archivo digit at 15px/600 advances 8.69px.
+ * So one, two and THREE digits all sit inside this box — 8.69, 17.38 and
+ * 26.06px against 28px — and it is four (34.75px) that is ellipsised. The box
+ * was the mockup's own 26px, which three digits overflowed by 0.06px and turned
+ * a plausible order of 120 cajas into `12…`; `max-w-7` is the next native
+ * Tailwind step up and buys the whole three-digit range for two pixels.
  *
- * Nothing is lost when it abbreviates. The number is the full text of the
+ * Nothing is lost when it does abbreviate. The number is the full text of the
  * `aria-live` span this class is on, so a screen reader announces the exact
  * quantity; the cart cookie stores it exactly; and the cart page — where a
- * three-figure order line is actually read and edited — has room to show it.
- * This 26px catalogue box is the one place a figure is shortened, and it is
+ * four-figure order line is actually read and edited — has room to show it.
+ * This catalogue box is the one place a figure is shortened, and it is
  * shortened because the pixels it would take back come straight off the product
  * name (see the width arithmetic on `ROW` in `product-row.tsx`).
  */
 export const STEPPER_QTY =
-  "min-w-6 max-w-[26px] truncate text-center font-num text-[15px] font-semibold tabular-nums";
+  "min-w-6 max-w-7 truncate text-center font-num text-[15px] font-semibold tabular-nums";

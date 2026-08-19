@@ -18,9 +18,13 @@ import Image from "next/image";
  *
  * It is handed to `next/image` as the LAYOUT width, not a doubled one: with no
  * `sizes` prop Next emits a 1x/2x srcSet from it — each of 44 and 88 rounded UP
- * to the next configured image size, so 48w and 96w, exactly the pair the 48px
- * box asked for. `sizes` is for `fill` or CSS-responsive images and would
- * replace those two candidates with the whole 32w…3840w ladder on every row
+ * to the next configured image size, so 48w and 96w. The 48px box this row used
+ * to draw asked for the same pair, which is why shrinking to 44 changed no
+ * bytes: `imageSizes` defaults to `[32, 48, 64, 96, 128, 256, 384]`
+ * (`node_modules/next/dist/shared/lib/image-config.js:41`, and `next.config.ts`
+ * does not override it), so 44 and 88 round to 48 and 96 exactly as 48 and 96
+ * did. `sizes` is for `fill` or CSS-responsive images and would replace those
+ * two candidates with the whole 32w…3840w ladder on every row
  * (`node_modules/next/dist/docs/01-app/03-api-reference/02-components/image.md`).
  * Loading stays lazy, which is `next/image`'s default.
  */

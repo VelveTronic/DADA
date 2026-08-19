@@ -24,7 +24,6 @@
     "profile": "Mis datos"
   },
   "catalog": {
-    "empty": "Catálogo en preparación",
     "searchPlaceholder": "Buscar producto, marca o formato",
     "searchButton": "Buscar",
     "notice": "Tras enviar el pedido, DADA lo confirma y organiza el reparto; sin pago en línea.",
@@ -32,7 +31,7 @@
     "railAll": "Todo",
     "railFavorites": "Habituales",
     "paneFavorites": "Mis habituales",
-    "paneCount": "{n} artículos",
+    "paneCount": "{n, plural, one {# artículo} other {# artículos}}",
     "noResults": "Sin resultados",
     "clearFilters": "Quitar filtros y ver todo",
     "unavailable": "Agotado",

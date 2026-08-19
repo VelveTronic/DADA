@@ -29,6 +29,12 @@ import { CART_COOKIE, parseCart } from "@/lib/cart";
  * shrink below its content and the panes push the page down instead of
  * scrolling), and the page's own panes carry it the last step.
  *
+ * One wrinkle that is temporary: until Task 5 removes the old red `CartBar`, its
+ * in-flow `h-20 lg:hidden` spacer is a FOURTH flex child of `<main>` on a phone
+ * whose cart is not empty, so on those requests the catalogue's panes are laid
+ * out 80px shorter than they otherwise would be. Task 5 deletes that bar and
+ * takes the spacer with it.
+ *
  * `h-dvh` rather than `h-screen`: on a phone the address bar grows and shrinks
  * the viewport, and `dvh` is the unit that follows it.
  *

@@ -51,6 +51,13 @@ export async function CategoryRail({ entries }: { entries: RailEntry[] }) {
         <Link
           key={entry.id}
           href={entry.href}
+          // 63 links in one scrolling column, and the default `auto` prefetch
+          // would fire on every one of them as it enters the viewport. It would
+          // fetch nothing worth having: `/catalogo` is `force-dynamic` and has
+          // no `loading.tsx`, so a dynamic route's auto-prefetch stops at the
+          // nearest loading boundary and there is none
+          // (`node_modules/next/dist/docs/01-app/03-api-reference/02-components/link.md`).
+          prefetch={false}
           // The lit entry is the page's current filter, which is what
           // `aria-current="page"` means; the data attribute is the handle
           // `RailAutoscroll` finds it by.

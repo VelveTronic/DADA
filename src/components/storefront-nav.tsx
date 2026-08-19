@@ -47,11 +47,12 @@ export function StorefrontNav({
         <ShopIcon />
       </Link>
 
-      {/* The search "control" is a link to the catalogue's own search box, with
-          the parameter that tells the page to focus it. There is no second
-          search UI to keep in step and no client JS behind this: the catalogue
-          renders `autoFocus` on the input it already has, the browser focuses it
-          on parse, and the parameter disappears with the next search. */}
+      {/* Today this is a link to the CATALOGUE, and `?focus=search` on it is
+          inert: the catalogue's own search box became a link to `/buscar`, and
+          nothing reads a `focus` parameter any more — the page's `searchParams`
+          type names `tab`, `page` and `cat` only. The href is left exactly as it
+          is on purpose; Task 5 repoints this icon at `/buscar`, the screen that
+          owns searching, and drops the dead parameter with it. */}
       <Link
         href={`/${locale}/catalogo?focus=search`}
         aria-label={t("search")}

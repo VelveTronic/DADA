@@ -30,31 +30,33 @@ import type { CustomerCatalogProduct } from "@/lib/supabase/public.types";
  *
  * ```text
  *   ┌───────┬────────────────────────────┬───────────────┐
- *   │2.75rem│ minmax(0,1fr)              │ 5.875rem FIXED│
+ *   │2.75rem│ minmax(0,1fr)              │ 6rem FIXED    │
  *   │ thumb │ name (2 lines max)         │ [stepper slot]│
- *   │       │ codart · CAJA×24  [称重] ★ │   − n +  94px │
+ *   │       │ codart · CAJA×24  [称重] ★ │   − n +  96px │
  *   │       │ 12,00 €                    │               │
  *   └───────┴────────────────────────────┴───────────────┘
  * ```
  *
  * **Why the action column is a FIXED track and not `auto`.** The stepper inside
- * it grows from a lone `+` (32px) to `− n +` (94px) the moment the product is in
+ * it grows from a lone `+` (32px) to `− n +` (96px) the moment the product is in
  * the cart. An `auto` track would resize on that press: every row's name column
- * would jump 62px narrower, re-wrapping titles down the whole list, and the
+ * would jump 64px narrower, re-wrapping titles down the whole list, and the
  * button under the customer's finger would move while they were pressing it. The
  * track is sized for the WIDE state and the stepper is right-aligned in it, so
  * the geometry is identical in both — which is also what keeps the `+` squares
  * in a column down a 50-row page however many rows are already in the cart.
  *
- * **5.875rem is the stepper and nothing else** (94px — see `STEPPER_SLOT`), and
+ * **6rem is the stepper and nothing else** (96px — see `STEPPER_SLOT`), and
  * that is the whole point of this revision. The track used to be 8.75rem,
  * because the star stood beside the stepper: 6.25rem + a 4px gap + the 2.25rem
  * star = 140px. Measured on a 390px phone, what the name was left with was
  * 390 − 88 rail − 24 row insets − 44 thumb − 20 column gaps − 140 = 74px:
  * three or four characters and an ellipsis. Customers here identify goods BY
  * NAME, so that is not a product list. With the star out of the column the same
- * arithmetic ends 390 − 88 − 24 − 44 − 20 − 94 = 120px — which is exactly the
- * name width the design mockup draws.
+ * arithmetic ends 390 − 88 − 24 − 44 − 20 − 96 = 118px. The design mockup draws
+ * 120: the missing 2px are spent, deliberately, on the quantity box — 26px
+ * ellipsised a three-figure order and 28px does not (see `STEPPER_QTY`), and a
+ * legible quantity is worth more than the two pixels it costs the name.
  *
  * **The star moved DOWN a line, not off the row.** A favourite is row STATE —
  * what this product already is to this customer — and not a third action
@@ -99,20 +101,20 @@ import type { CustomerCatalogProduct } from "@/lib/supabase/public.types";
  * now also the dead space between the `−` square and the star above it.
  */
 const ROW =
-  "grid grid-cols-[2.75rem_minmax(0,1fr)_5.875rem] items-center gap-x-2.5 border-t border-[#F4F0EC] px-3 py-2.5";
+  "grid grid-cols-[2.75rem_minmax(0,1fr)_6rem] items-center gap-x-2.5 border-t border-[#F4F0EC] px-3 py-2.5";
 
 /**
- * The stepper's fixed footprint, right-aligned. 5.875rem = 94px, which is the
+ * The stepper's fixed footprint, right-aligned. 6rem = 96px, which is the
  * widest the stepper can ever be: a 32px `−`, a 2px gap, the quantity capped at
- * 26px by `max-w-[26px]` in `STEPPER_QTY`, another 2px gap and a 32px `+` = 94px.
+ * 28px by `max-w-7` in `STEPPER_QTY`, another 2px gap and a 32px `+` = 96px.
  * Sized from the control rather than guessed, so no quantity can make the
  * stepper overhang the track and reach back over the name.
  *
  * A row that cannot be ordered renders the slot EMPTY rather than dropping it:
- * the track still claims its 94px, so the name column keeps the same width on
+ * the track still claims its 96px, so the name column keeps the same width on
  * every row of the list and the `+` squares stay in a column.
  */
-const STEPPER_SLOT = "flex w-[5.875rem] shrink-0 justify-end";
+const STEPPER_SLOT = "flex w-24 shrink-0 justify-end";
 
 export async function ProductRow({
   product,
@@ -158,7 +160,7 @@ export async function ProductRow({
             `break-words` is what makes the clamp honest on a LATIN name.
             `line-clamp` only ever ellipsises a line-COUNT overflow: a word with
             no break opportunity in it — ESPECIALIDADES, 14 characters, still
-            wider than the 120px this column gets on a phone — is one line that
+            wider than the 118px this column gets on a phone — is one line that
             overflows sideways, so the clamp has nothing to count and the word is
             cut mid-glyph with no ellipsis at all. Allowing the break puts the
             rest of the word on line two, where the clamp can do its job. Chinese
@@ -182,9 +184,21 @@ export async function ProductRow({
           <span className="truncate">
             {product.codart} · {unitLabel(product.unit, product.units_per_case)}
           </span>
-          {/* Both badges keep their width — a truncated 断货 says nothing — so it
-              is the codart that gives way on a narrow screen. */}
-          {product.is_weighed && (
+          {/* AT MOST ONE badge, and 断货 wins. Now that the star shares this
+              line, the meta row has the name column's 118px to spend, and a row
+              that is both weighed and out of stock wanted more than that: in
+              Spanish, `Por peso` 60 + `Agotado` 57 + the 36px star + three 6px
+              gaps ≈ 171px of content that cannot shrink (all three are
+              `shrink-0`, so only the codart can give). The line overflowed its
+              column and carried the star out past the edge every other row
+              aligns it to. So 称重 renders only while the product is AVAILABLE:
+              an out-of-stock row cannot be ordered, which makes how it is
+              weighed moot on it, while 断货 is the whole reason it looks the way
+              it does. One badge is then the worst case, and it fits — the wider
+              of the two, `Por peso` 60 + star 36 + two gaps 12 ≈ 108px in 118.
+              Badges keep their width either way — a truncated 断货 says nothing
+              — so it is the codart that gives way on a narrow screen. */}
+          {product.is_available && product.is_weighed && (
             <span className="shrink-0 rounded-md bg-amber-100 px-1.5 py-0.5 text-amber-800">
               {t("weighed")}
             </span>
@@ -236,8 +250,8 @@ export async function ProductRow({
             ) : (
               // A note, not a figure, and sized like one. At the price's own
               // 14px semibold Archivo, "Precio pendiente" measures 109px
-              // against the 120px this column now gets — it clears the width
-              // by 11px, and it is on EVERY row until the owner's Wingest
+              // against the 118px this column now gets — it clears the width
+              // by 9px, and it is on EVERY row until the owner's Wingest
               // merge lands a tarifa, so the margin is worth having rather
               // than spending. At 12px it is 90px, which is the same one line
               // with room around it, and 12px is already the size the meta

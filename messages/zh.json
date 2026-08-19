@@ -24,7 +24,6 @@
     "profile": "我的信息"
   },
   "catalog": {
-    "empty": "目录准备中",
     "searchPlaceholder": "搜索商品 / 品牌 / 规格",
     "searchButton": "搜索",
     "notice": "提交需求单后由 DADA 客服确认排单，无需在线付款",

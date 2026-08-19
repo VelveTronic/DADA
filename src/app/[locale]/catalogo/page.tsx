@@ -235,9 +235,10 @@ export default async function CatalogPage({
           aria-label={t("searchPlaceholder")}
           className="mx-4 mt-2 flex h-10 items-center gap-2 rounded-[10px] bg-surface-dim px-3 text-sm text-faint transition-colors hover:text-muted"
         >
-          {/* The shared glyph is drawn at 24px for the 44px header buttons; in a
-              38px field it is the design's small loupe, and the box around it is
-              what resizes it — `icons.tsx` fixes the size on the SVG itself. */}
+          {/* The shared glyph is drawn at 24px for the 44px header buttons; in
+              this 40px field (`h-10`) it is the design's small loupe, and the
+              box around it is what resizes it — `icons.tsx` fixes the size on
+              the SVG itself. */}
           <span aria-hidden className="flex-none [&>svg]:size-4">
             <SearchIcon />
           </span>
@@ -265,7 +266,19 @@ export default async function CatalogPage({
       <div className="flex min-h-0 flex-1">
         <CategoryRail entries={railEntries} />
 
-        <div className="min-w-0 flex-1 overflow-y-auto bg-surface">
+        {/* KEYED, so every catalogue navigation remounts this pane at scrollTop
+            0. The pane owns the scrolling in viewport mode, and Next resets the
+            DOCUMENT's scroll on a navigation — which no longer reaches in here.
+            React would otherwise reuse this unkeyed div across the press and
+            keep its scrollTop: 下一页 from the bottom of page 1 landed at the
+            BOTTOM of page 2. The RAIL beside it is deliberately NOT keyed — its
+            scroll position is where the customer left the category column and
+            has to survive the press; `rail-autoscroll.tsx` only nudges the lit
+            entry into view, once, on mount. */}
+        <div
+          key={`${tab}|${activeCategory?.erp_code ?? ""}|${page}`}
+          className="min-w-0 flex-1 overflow-y-auto bg-surface"
+        >
           {/* Sticky inside the pane, not the page: it names the filter the rail
               set and counts what came back, and it has to keep saying so forty
               rows down. The count is the query's own exact count, so it is the
@@ -348,7 +361,14 @@ export default async function CatalogPage({
 
           {/* Scroll room under the last row for the bars that float over this
               pane on a phone. Desktop keeps a small one so the list does not end
-              flush against the window. */}
+              flush against the window.
+
+              It is sized for the pair Task 5 lands — the floating tab bar and
+              the demand bar. Until then the OLD red `CartBar` is still in the
+              tree and reserves its own 80px (`cart-bar.tsx`), so on a phone with
+              something in the cart this tail is temporarily double-generous.
+              Task 5 deletes that bar and its spacer, and this one is what is
+              left. */}
           <div aria-hidden className="h-28 lg:h-8" />
         </div>
       </div>
