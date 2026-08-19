@@ -66,6 +66,25 @@ export function setQty(cart: Cart, productId: string, qty: number): Cart {
 }
 
 /**
+ * The UNITS in a cart: every line's quantity added up, where `count` (the
+ * header badge, the demand bar's first figure) is the number of LINES.
+ *
+ * The bar says both — 需求单 3 种 · 12 件 — because they answer different
+ * questions: how many products were picked, and how much is coming on the van.
+ *
+ * Rounded to three decimals for the same reason `parseCart` and `setQty` round
+ * there: a weighed line is fractional, and adding fractions in binary floating
+ * point produces 0.30000000000000004, which is not a quantity anybody should
+ * read on a phone. Three decimals is the cookie's own precision, so nothing is
+ * lost in the rounding that was not already lost on the way in.
+ */
+export function cartUnits(cart: Cart): number {
+  let total = 0;
+  for (const qty of Object.values(cart)) total += qty;
+  return Math.round(total * 1000) / 1000;
+}
+
+/**
  * `setQty` that answers with the cart instead of throwing: a change the rules
  * above refuse leaves it exactly as it was.
  *

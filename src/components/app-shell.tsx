@@ -5,19 +5,22 @@ import Link from "next/link";
 import { CartBar } from "@/components/cart/cart-bar";
 import { CartErrorBanner, CartProvider } from "@/components/cart/cart-provider";
 import { StorefrontNav } from "@/components/storefront-nav";
+import { TabBar } from "@/components/tab-bar";
 import { CART_COOKIE, parseCart } from "@/lib/cart";
 
 /**
- * The storefront's sticky header plus the page's `<main>`, for every signed-in
- * CUSTOMER page, in one of two LAYOUTS.
+ * The storefront's sticky header, the page's `<main>` and the phone's two
+ * floating bars, for every signed-in CUSTOMER page, in one of two LAYOUTS.
  *
  * ```text
  *   layout="page"                    layout="viewport"
  *   ─────────────────────            ─────────────────────
  *   header (sticky)                  ┌ flex h-dvh flex-col ┐
- *   main  px-4 pb-16                 │ header   flex-none  │
+ *   main  px-4 pb-…                  │ header   flex-none  │
  *   …the document scrolls            │ main     flex-1     │  …the PAGE scrolls
- *                                    └ min-h-0 ────────────┘     its own panes
+ *   ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌             └ min-h-0 ────────────┘     its own panes
+ *   CartBar   ┐ fixed, below `lg`, out of flow in BOTH layouts:
+ *   TabBar    ┘ neither is a flex child of anything
  * ```
  *
  * `"page"` is the whole portal: one scrolling document, insets on `<main>`.
@@ -29,11 +32,13 @@ import { CART_COOKIE, parseCart } from "@/lib/cart";
  * shrink below its content and the panes push the page down instead of
  * scrolling), and the page's own panes carry it the last step.
  *
- * One wrinkle that is temporary: until Task 5 removes the old red `CartBar`, its
- * in-flow `h-20 lg:hidden` spacer is a FOURTH flex child of `<main>` on a phone
- * whose cart is not empty, so on those requests the catalogue's panes are laid
- * out 80px shorter than they otherwise would be. Task 5 deletes that bar and
- * takes the spacer with it.
+ * **The bottom 114px of a phone belongs to the two bars**: a 56px `TabBar` on
+ * the safe area and, while the cart has something in it, the 50px demand bar
+ * floating just above it. Both are `position: fixed`, so they are out of flow —
+ * they cost the height chain nothing and reserve nothing either, which is why
+ * the clearance is bottom padding on the content instead: `<main>`'s own in
+ * `"page"` mode below, and the pane tail in `catalogo/page.tsx` in `"viewport"`
+ * mode, where `<main>` has no insets at all.
  *
  * `h-dvh` rather than `h-screen`: on a phone the address bar grows and shrinks
  * the viewport, and `dvh` is the unit that follows it.
@@ -45,16 +50,19 @@ import { CART_COOKIE, parseCart } from "@/lib/cart";
  * It used to serve the staff pages too, behind a `nav` prop, and it no longer
  * does: the two halves had stopped sharing anything but the `<main>` element.
  * Staff pages render `StaffShell` — a persistent left sidebar — and this file
- * kept only the half it is actually about: the DADA mark and four ICONS
- * (商店, 搜索, 购物车, 用户), the last of which opens the account menu that holds
- * 我的订单 and the way out. The word 订货平台 is gone from it: a storefront
- * header carries the BRAND, and the app's full name still names the browser tab
- * (`common.appName` in `layout.tsx`) and titles the login page.
+ * kept only the half it is actually about: the DADA mark and the way to every
+ * other screen. That way is now TWO controls for two devices, and exactly one
+ * of them is ever on screen: the header's icon row (商店, 搜索, 购物车, 用户,
+ * the last of which opens the account menu holding 我的订单 and the way out) on
+ * `lg` and up, and the bottom tab bar below it. The word 订货平台 is gone from
+ * the header: a storefront header carries the BRAND, and the app's full name
+ * still names the browser tab (`common.appName` in `layout.tsx`) and titles the
+ * login page.
  *
- * Server component: nothing it renders itself is interactive; the icon row is
- * one client leaf (`StorefrontNav`). It wraps the page in `CartProvider` and
- * hands the cart's three client leaves — the header count, the refusal banner
- * and the phone's bottom bar — the cookie it just read.
+ * Server component: nothing it renders itself is interactive; the icon row and
+ * the tab bar are client leaves. It wraps the page in `CartProvider` and hands
+ * the cart's four client leaves — the header count, the tab bar's badge, the
+ * refusal banner and the demand bar — the cookie it just read.
  *
  * A page may READ the cart cookie; only the cart server actions write it. The
  * read below seeds the provider, and it is the reason every page under this
@@ -115,10 +123,12 @@ export async function AppShell({
           viewport ? " flex-none" : ""
         }`}
       >
-        {/* One row that never wraps: mark on the left, icons pinned right. No
-            `flex-wrap` here on purpose — four 44px targets and a wordmark fit
-            inside 375px, and a wrapping header would push the catalogue down a
-            line on exactly the phones this layout is for. */}
+        {/* One row that never wraps: the mark on the left, and on the right
+            EITHER the restaurant's name (phone) or the icon row (desktop) —
+            never both, and never wrapped. The phone's navigation moved to the
+            bottom of the screen (`TabBar`), which is what frees this row to say
+            WHOSE portal this is; on `lg` the icons come back and the name goes,
+            because that row is still the desktop's only way around. */}
         <div className="mx-auto flex max-w-5xl items-center gap-3 px-4 py-2">
           <Link
             href={`/${locale}/catalogo`}
@@ -143,18 +153,40 @@ export async function AppShell({
             <span className="text-lg font-semibold tracking-tight">DADA</span>
           </Link>
 
-          <StorefrontNav locale={locale} userName={user.name} />
+          {/* The restaurant, beside the brand, on the phone only. Capped at 45%
+              of the row and truncated: these names run long (a shop name, a dot
+              and a branch), and the one thing this row may never do is push the
+              mark off the left of the screen. */}
+          <span className="ml-auto max-w-[45%] truncate text-xs text-muted lg:hidden">
+            {user.name}
+          </span>
+
+          {/* `ml-auto` is on the WRAPPER now, not on the nav inside it: the nav
+              is `display:none` below `lg`, and a hidden element pushes nothing.
+              At `lg` the span above is the hidden one — which takes no width and
+              opens no `gap` — so this row is the desktop header exactly as it
+              was. */}
+          <div className="ml-auto hidden lg:flex">
+            <StorefrontNav locale={locale} userName={user.name} />
+          </div>
         </div>
       </header>
 
       {/* In viewport mode `<main>` carries NO insets: the catalogue's panes run
           edge to edge (the rail's own fill is the left gutter) and each half of
-          it pads its own contents. */}
+          it pads its own contents.
+
+          In page mode the bottom inset is the phone's TAB BAR plus a finger's
+          breathing room — 56px of bar, 16px of air, and the safe area under
+          both — so the last card on a page is never pinned against a fixed
+          control. The desktop keeps the 64px it always had: no tab bar there.
+          The two screens that also float the demand bar over this (`/catalogo`,
+          `/buscar`) add the rest of its 114px themselves. */}
       <main
         className={
           viewport
             ? "mx-auto flex w-full max-w-5xl min-h-0 flex-1 flex-col"
-            : "mx-auto max-w-5xl px-4 pb-16"
+            : "mx-auto max-w-5xl px-4 pb-[calc(4.5rem+env(safe-area-inset-bottom))] lg:pb-16"
         }
       >
         {/* Where the `?cartError` banner used to land after a redirect. Same
@@ -170,8 +202,16 @@ export async function AppShell({
           <CartErrorBanner />
         )}
         {children}
-        <CartBar locale={locale} showPrices={showPrices} />
       </main>
+
+      {/* Outside `<main>`, which holds the page's CONTENT: these two are fixed
+          furniture over it. The demand bar used to live in there and reserve
+          its own 80px with an in-flow spacer — a real fourth flex child of the
+          catalogue's column, which laid its panes out 80px short. Nothing here
+          is in flow any more, so nothing distorts that column; the clearance is
+          the content's own padding now. Written in the order they stack. */}
+      <CartBar locale={locale} showPrices={showPrices} />
+      <TabBar locale={locale} />
     </>
   );
 

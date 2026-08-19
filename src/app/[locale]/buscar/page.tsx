@@ -188,14 +188,22 @@ export default async function SearchPage({
           nothing else, and a sheet only as tall as that field ends in a hard
           beige edge 145px down the phone that reads as a page which failed to
           load (the shell's header is 61px — `py-2` around a 44px icon row, plus
-          its hairline — and this sheet is 84px: 4 above the form row, the row's
-          44 — its `items-center` line is as tall as the 取消 link's `h-11`, not
-          the 40px field — 12 below it, and the 24px tail). It costs an empty
-          screen the ability to be flicked ~125px (the
-          shell's header plus `<main>`'s own bottom inset) past its content; the
-          alternative was subtracting those two by hand here, which is a number
-          about the SHELL and would go stale inside it. */}
-      <div className="-mx-4 min-h-dvh bg-surface">
+          its hairline — and this sheet, without its tail, is 60px: 4 above the
+          form row, the row's 44 — its `items-center` line is as tall as the
+          取消 link's `h-11`, not the 40px field — and 12 below it). It costs an
+          empty screen the ability to be flicked past its content by the shell's
+          header plus `<main>`'s own bottom inset: ~133px on a phone, ~125px on
+          a desktop. The alternative was subtracting those two by hand here,
+          which is a number about the SHELL and would go stale inside it.
+
+          The sheet's bottom PADDING is what the phone's two floating bars need
+          under the last row: they reach 114px up from the glass between them —
+          the tab bar's 56px row and its hairline, a 7px gap, and the 50px
+          demand bar (`tab-bar.tsx`, `cart/cart-bar.tsx`) — and 144px of white
+          is that with the design's own tail on top of it, so the sheet does not
+          end where its last row does. The desktop has neither bar; 64px is its
+          tail. */}
+      <div className="-mx-4 min-h-dvh bg-surface pb-36 lg:pb-16">
         {/* A plain GET form, submitting to this same page. Enter (the phone
             keyboard's 搜索 key) is what submits it, and the result is an
             ordinary navigation to `?q=…` — no handler, no state, and the back
@@ -359,11 +367,6 @@ export default async function SearchPage({
             )}
           </>
         )}
-
-        {/* The design's 24px tail: the sheet does not end flush against its last
-            row. What floats OVER it is the old red cart bar, which reserves its
-            own 80px in the flow (`cart-bar.tsx`) — Task 5 replaces that pair. */}
-        <div aria-hidden className="h-6" />
       </div>
     </AppShell>
   );

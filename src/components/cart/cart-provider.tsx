@@ -12,7 +12,7 @@ import {
   type ReactNode,
 } from "react";
 import { setCartLineQty, type CartErrorCode } from "@/app/actions/cart";
-import { trySetQty, type Cart } from "@/lib/cart";
+import { cartUnits, trySetQty, type Cart } from "@/lib/cart";
 import { cartSubtotalCents } from "@/lib/money";
 
 /**
@@ -54,6 +54,11 @@ type CartContextValue = {
   qtyOf: (productId: string) => number;
   /** The badge number: LINES, not units — what the header has always counted. */
   count: number;
+  /**
+   * The other figure, and the demand bar shows both: every line's quantity
+   * added up. Fractions are real here too, so it is rounded — see `cartUnits`.
+   */
+  units: number;
   /**
    * Cents, or null when this page did not price every line in the cart. See
    * `cartSubtotalCents`: no price is ever derived here.
@@ -130,6 +135,7 @@ export function CartProvider({
     () => ({
       qtyOf: (productId: string) => optimisticCart[productId] ?? 0,
       count: Object.keys(optimisticCart).length,
+      units: cartUnits(optimisticCart),
       subtotalCents: cartSubtotalCents(optimisticCart, prices),
       setQty,
       error,

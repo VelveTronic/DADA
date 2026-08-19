@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   CART_COOKIE,
   CART_MAX_LINES,
+  cartUnits,
   isProductId,
   parseCart,
   serializeCart,
@@ -98,6 +99,36 @@ describe("trySetQty", () => {
     const before = { [A]: 2 };
     trySetQty(before, A, 9);
     expect(before).toEqual({ [A]: 2 });
+  });
+});
+
+/**
+ * The demand bar's second figure: 件, the units, beside 种, the lines. The
+ * float-noise case is the one this function exists for — two weighed lines add
+ * up to 0.30000000000000004 in binary floating point, and the bar would print
+ * every one of those digits.
+ */
+describe("cartUnits", () => {
+  const A = "11111111-1111-4111-8111-111111111111";
+  const B = "22222222-2222-4222-8222-222222222222";
+
+  it("is 0 for an empty cart", () => {
+    expect(cartUnits({})).toBe(0);
+  });
+
+  it("adds whole quantities up", () => {
+    expect(cartUnits({ [A]: 2 })).toBe(2);
+    expect(cartUnits({ [A]: 2, [B]: 3 })).toBe(5);
+  });
+
+  it("adds fractional (weighed) quantities up", () => {
+    expect(cartUnits({ [A]: 0.5, [B]: 0.25 })).toBe(0.75);
+  });
+
+  it("rounds the float noise away", () => {
+    expect(0.1 + 0.2).not.toBe(0.3); // the reason for the rounding
+    expect(cartUnits({ [A]: 0.1, [B]: 0.2 })).toBe(0.3);
+    expect(cartUnits({ [A]: 1.005, [B]: 2.115 })).toBe(3.12);
   });
 });
 

@@ -368,16 +368,18 @@ export default async function CatalogPage({
             </nav>
           )}
 
-          {/* Scroll room under the last row for the bars that float over this
-              pane on a phone. Desktop keeps a small one so the list does not end
-              flush against the window.
+          {/* Scroll room under the last row for the two bars that float over
+              this pane on a phone — the ONLY reservation either of them gets,
+              since both are fixed and neither is in anyone's flow.
 
-              It is sized for the pair Task 5 lands — the floating tab bar and
-              the demand bar. Until then the OLD red `CartBar` is still in the
-              tree and reserves its own 80px (`cart-bar.tsx`), so on a phone with
-              something in the cart this tail is temporarily double-generous.
-              Task 5 deletes that bar and its spacer, and this one is what is
-              left. */}
+              The pair reaches 114px up from the glass: the tab bar's 56px row
+              and its hairline, a 7px gap, and the 50px demand bar above it
+              (`tab-bar.tsx`, `cart/cart-bar.tsx`). `h-28` is 112px, and the two
+              missing pixels are covered by the row's own `py-2.5`: measured at
+              390×844 with fifty rows, the last row's CONTENT ends 122px above
+              the glass, 8px clear of the demand bar's top edge.
+              Desktop has neither bar and keeps a small tail so the list does not
+              end flush against the window. */}
           <div aria-hidden className="h-28 lg:h-8" />
         </div>
       </div>

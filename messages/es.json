@@ -21,7 +21,13 @@
     "search": "Buscar",
     "account": "Mi cuenta",
     "addresses": "Mi dirección de entrega",
-    "profile": "Mis datos"
+    "profile": "Mis datos",
+    "tabsLabel": "Navegación",
+    "tabCatalog": "Catálogo",
+    "tabSearch": "Buscar",
+    "tabCart": "Pedido",
+    "tabAccount": "Mi cuenta",
+    "cartWithCount": "Pedido, {n, plural, one {# línea} other {# líneas}}"
   },
   "catalog": {
     "searchPlaceholder": "Buscar producto, marca o formato",
@@ -93,7 +99,9 @@
       "BAD_QTY_STEP": "Este producto solo se pide en unidades enteras. Corrija la cantidad.",
       "NOTE_TOO_LONG": "Las observaciones son demasiado largas. Máximo 2000 caracteres.",
       "UNKNOWN": "No se ha podido enviar el pedido. Inténtelo de nuevo."
-    }
+    },
+    "goSubmit": "Enviar",
+    "barSummary": "<n>{lines, number}</n> art. · {units, number} uds."
   },
   "orders": {
     "title": "Mis pedidos",
