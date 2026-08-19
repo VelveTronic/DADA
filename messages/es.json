@@ -123,6 +123,19 @@
     "note": "Para modificarla, contacte con DADA",
     "empty": "Todavía no tenemos su dirección de entrega. Contacte con DADA para añadirla."
   },
+  "account": {
+    "title": "Mi cuenta",
+    "edit": "Editar",
+    "statActive": "En curso",
+    "statDone": "Completados",
+    "statMonth": "Pedidos este mes",
+    "menuOrders": "Mis pedidos",
+    "menuFavorites": "Mis habituales",
+    "menuAddresses": "Tienda y dirección de entrega",
+    "menuProfile": "Mis datos",
+    "hintActive": "{n} en curso",
+    "hintKinds": "{n, plural, one {# artículo} other {# artículos}}"
+  },
   "profile": {
     "title": "Mis datos",
     "accountTitle": "Datos de la cuenta",

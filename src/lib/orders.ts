@@ -69,6 +69,59 @@ export function isOrderStatus(value: string): value is OrderStatus {
   return ORDER_STATUSES.some((status) => status === value);
 }
 
+/**
+ * Everything that is still HAPPENING: the five states above `albaran`, which is
+ * the whole list minus the one that means delivered and the one that means
+ * called off.
+ *
+ * It exists so the account hub can answer "how many of my orders are still
+ * running" with ONE figure. The five it groups include the three the bridge
+ * owns (`processing`, `bridge_failed`, `injected`), and grouping them is the
+ * point: a restaurant has no use for the difference between an order the bridge
+ * has claimed and one it has already written into Wingest, and the hub's stat
+ * must not turn into a live readout of our plumbing. The per-order badge on
+ * `/pedidos` still names each state; this is the roll-up beside it.
+ */
+export const ACTIVE_ORDER_STATUSES: readonly OrderStatus[] = [
+  "submitted",
+  "confirmed",
+  "processing",
+  "bridge_failed",
+  "injected",
+];
+
+/**
+ * The instant Madrid's CURRENT month began, as an offset-bearing ISO string for
+ * a `created_at >= …` filter.
+ *
+ * `created_at` is a `timestamptz`, so "this month" has to be asked on Madrid's
+ * calendar — the same one `madridDay` reads and `create_order` judges delivery
+ * dates against. Sending the naive `2026-08-01T00:00:00Z` instead would silently
+ * drop every order placed between 22:00 and midnight UTC on 31 July: two hours
+ * that a Spanish restaurant has already been calling August.
+ *
+ * The offset is read off the month's own first day rather than off `now`, and at
+ * NOON so no rounding is involved. Madrid switches on the last Sunday of March
+ * and October, so the 1st never contains a flip and the offset noon reports is
+ * the offset the whole first day has — which is the only day this string names.
+ */
+export function madridMonthStartIso(now: Date): string {
+  const month = madridDay(now).slice(0, 7); // "2026-08"
+  const probe = new Date(`${month}-01T12:00:00Z`);
+  const offset =
+    new Intl.DateTimeFormat("en-US", {
+      timeZone: "Europe/Madrid",
+      timeZoneName: "longOffset",
+    })
+      .formatToParts(probe)
+      .find((part) => part.type === "timeZoneName")
+      // "GMT+02:00" → "+02:00". A zero offset formats as the bare "GMT", which
+      // is why the fallback exists at all; Madrid is UTC+1 or +2 and never hits
+      // it.
+      ?.value.replace("GMT", "") || "+00:00";
+  return `${month}-01T00:00:00${offset}`;
+}
+
 /** The four views the staff queue offers; `all` means "no status filter". */
 export const QUEUE_TABS = [
   "submitted",

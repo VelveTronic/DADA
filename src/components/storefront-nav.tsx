@@ -9,7 +9,7 @@ import { ICON_BTN, ICON_BTN_ACTIVE } from "@/components/ui";
 import { usePathname } from "@/i18n/navigation";
 
 /** The pages behind the 用户 menu; the trigger stays lit while on any of them. */
-const ACCOUNT_PATHS = ["/pedidos", "/direcciones", "/perfil"];
+const ACCOUNT_PATHS = ["/cuenta", "/pedidos", "/direcciones", "/perfil"];
 
 /**
  * The storefront header's right-hand side: 商店, 搜索, 购物车, 用户 — icons only,

@@ -8,11 +8,11 @@ import { UserIcon } from "@/components/icons";
 import { CARD, ICON_BTN, ICON_BTN_ACTIVE } from "@/components/ui";
 
 /**
- * The header's 用户 button and the panel it opens: 我的订单, 我的配送地址,
- * 我的信息, and the way out.
+ * The header's 用户 button and the panel it opens: 我的账号, 我的订单,
+ * 我的配送地址, 我的信息, and the way out.
  *
  * Hand-rolled, with no headless-ui and no new dependency — four links and a
- * submit button do not justify one. What that costs is the keyboard contract,
+ * submit button did not justify one, and a fifth link does not change that. What that costs is the keyboard contract,
  * which is written out here rather than inherited:
  *
  * - the trigger carries `aria-haspopup="menu"` and `aria-expanded`, and the
@@ -42,7 +42,7 @@ import { CARD, ICON_BTN, ICON_BTN_ACTIVE } from "@/components/ui";
 export function UserMenu({
   locale,
   userName,
-  /** True while the customer is on one of the three pages this menu leads to. */
+  /** True while the customer is on one of the four pages this menu leads to. */
   active,
 }: {
   locale: string;
@@ -124,7 +124,7 @@ export function UserMenu({
               step > 0
               ? 0
               : list.length - 1
-            : // Wraps both ways, which is what a menu of four is expected to do.
+            : // Wraps both ways, which is what a short menu is expected to do.
               (at + step + list.length) % list.length;
     list[next]?.focus();
   };
@@ -167,6 +167,11 @@ export function UserMenu({
   };
 
   const entries = [
+    // First, and deliberately: 我的账号 is the phone's account HUB — the same
+    // four destinations as the rest of this list, plus the restaurant's own
+    // figures — so on a small screen it is the one entry that leads everywhere.
+    // This panel stays the desktop's shortcut to the individual pages.
+    { href: `/${locale}/cuenta`, label: t("account") },
     { href: `/${locale}/pedidos`, label: t("orders") },
     { href: `/${locale}/direcciones`, label: t("addresses") },
     { href: `/${locale}/perfil`, label: t("profile") },

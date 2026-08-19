@@ -123,6 +123,19 @@
     "note": "地址有误请联系我们修改",
     "empty": "我们还没有登记您的送货地址，请联系 DADA 补充。"
   },
+  "account": {
+    "title": "我的",
+    "edit": "编辑",
+    "statActive": "进行中",
+    "statDone": "已完成",
+    "statMonth": "本月下单",
+    "menuOrders": "我的订单",
+    "menuFavorites": "常购清单",
+    "menuAddresses": "收货门店与地址",
+    "menuProfile": "我的信息",
+    "hintActive": "{n} 个进行中",
+    "hintKinds": "{n} 种"
+  },
   "profile": {
     "title": "我的信息",
     "accountTitle": "账号信息",

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  ACTIVE_ORDER_STATUSES,
   addDays,
   formatOrderDate,
   isLineEditResult,
@@ -9,6 +10,7 @@ import {
   isUuid,
   LINE_EDIT_RESULTS,
   madridDay,
+  madridMonthStartIso,
   mapLineEditError,
   mapOrderError,
   MAX_LINE_QTY,
@@ -28,6 +30,55 @@ describe("madridDay", () => {
     expect(madridDay(new Date("2026-01-01T00:30:00Z"))).toBe("2026-01-01");
     // …and 23:30 UTC on New Year's Eve is already the new year there.
     expect(madridDay(new Date("2025-12-31T23:30:00Z"))).toBe("2026-01-01");
+  });
+});
+
+describe("madridMonthStartIso", () => {
+  // Each row is an instant and the month start a `created_at >= …` filter has to
+  // carry for it. The offsets are Madrid's own: +02:00 in summer, +01:00 in
+  // winter.
+  it.each([
+    // Mid-month, one row per half of the year.
+    ["2026-08-18T09:00:00Z", "2026-08-01T00:00:00+02:00"],
+    ["2026-01-15T09:00:00Z", "2026-01-01T00:00:00+01:00"],
+    // The rollover is MADRID's: 22:30 UTC on 31 August is already 1 September
+    // there, so the month has turned while UTC still says August.
+    ["2026-08-31T22:30:00Z", "2026-09-01T00:00:00+02:00"],
+    // The same edge in winter, where the Madrid day turns an hour later.
+    ["2026-01-31T23:30:00Z", "2026-02-01T00:00:00+01:00"],
+    // A month that CONTAINS a switch still starts on the offset its first day
+    // had — Madrid springs forward on 2026-03-29, three weeks after this start.
+    ["2026-03-15T12:00:00Z", "2026-03-01T00:00:00+01:00"],
+  ])("%s → %s", (now, expected) => {
+    expect(madridMonthStartIso(new Date(now))).toBe(expected);
+  });
+
+  it("starts the month where the Spanish calendar starts it", () => {
+    // The whole reason the offset is spelled out: the naive `…T00:00:00Z` would
+    // begin two hours late and lose every order placed in the first two hours of
+    // the 1st as a restaurant in Madrid counts them.
+    expect(
+      new Date(madridMonthStartIso(new Date("2026-08-18T09:00:00Z"))).toISOString(),
+    ).toBe("2026-07-31T22:00:00.000Z");
+  });
+});
+
+describe("ACTIVE_ORDER_STATUSES", () => {
+  it("is every status except the two that END an order", () => {
+    // Derived from the full list rather than retyped: a status added to
+    // `orders_status_check` and to `ORDER_STATUSES` has to be classified here
+    // too, and this is what fails if it is not.
+    expect([...ACTIVE_ORDER_STATUSES]).toEqual(
+      ORDER_STATUSES.filter(
+        (status) => status !== "albaran" && status !== "cancelled",
+      ),
+    );
+  });
+
+  it("holds only states the check constraint allows", () => {
+    for (const status of ACTIVE_ORDER_STATUSES) {
+      expect(isOrderStatus(status)).toBe(true);
+    }
   });
 });
 
