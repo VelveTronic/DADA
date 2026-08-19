@@ -6,7 +6,7 @@ import { AppShell } from "@/components/app-shell";
 import { SearchIcon } from "@/components/icons";
 import { ProductRow } from "@/components/product-row";
 import { beginCompanyUser, finishCompanyUser } from "@/lib/auth/guards";
-import { localizedName } from "@/lib/catalog/display";
+import { sortCategories } from "@/lib/categories";
 import { perfRun } from "@/lib/perf";
 import { getSetting } from "@/lib/settings";
 import type { CustomerCatalogProduct } from "@/lib/supabase/public.types";
@@ -78,12 +78,12 @@ export default async function CatalogPage({
   // Ordered here rather than in SQL: `name` is jsonb, so only the app knows
   // which of {zh, es} this locale actually shows — and that name is the
   // tiebreaker for the many freepos sort values that collide on one number.
-  const categories = (categoryRows ?? [])
-    .map((row) => ({ ...row, label: localizedName(row.name, locale) }))
-    .sort(
-      (a, b) =>
-        a.sort_order - b.sort_order || a.label.localeCompare(b.label, locale),
-    );
+  //
+  // The comparator itself lives in `lib/categories.ts` because the back office's
+  // 分类管理 page reorders this very rail: the ↑/↓ buttons there move rows in the
+  // list THIS function produces, so both screens import one function rather than
+  // keeping two sorts in step by hand.
+  const categories = sortCategories(categoryRows ?? [], locale);
   // The whole validation of ?cat=: an erp_code that is not an active category
   // resolves to nothing and the page renders unfiltered, never a failed query.
   const activeCategory = categories.find((c) => c.erp_code === rawCat) ?? null;
