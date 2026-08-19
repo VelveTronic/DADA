@@ -242,7 +242,7 @@ export default async function CatalogPage({
         <Link
           href={`/${locale}/buscar`}
           aria-label={t("searchPlaceholder")}
-          className="mx-4 mt-2 flex h-10 items-center gap-2 rounded-[10px] bg-surface-dim px-3 text-sm text-faint transition-colors hover:text-muted"
+          className="mx-4 my-2 flex h-10 items-center gap-2 rounded-[10px] bg-surface-dim px-3 text-sm text-faint transition-colors hover:text-muted"
         >
           {/* The shared glyph is drawn at 24px for the 44px header buttons; in
               this 40px field (`h-10`) it is the design's small loupe, and the
@@ -253,19 +253,10 @@ export default async function CatalogPage({
           </span>
           {t("searchPlaceholder")}
         </Link>
-
-        {/* What this catalogue IS, said once at the top of it: a demand list,
-            not a checkout. The restaurant picks goods and submits; DADA prices
-            and schedules. Nobody is ever asked for a card, and the design puts
-            that sentence here because the alternative is a customer who reaches
-            the submit button still expecting one. */}
-        <p className="mt-3 flex items-center gap-2 border-y border-[#FBE4E2] bg-[#FFF6F5] px-4 py-2 text-xs text-brand-ink">
-          <span
-            aria-hidden
-            className="size-[5px] flex-none rounded-full bg-brand"
-          />
-          {t("notice")}
-        </p>
+        {/* The mockup drew a red notice strip under the search box (提交后由客服
+            排单…); the owner cut it on 2026-08-19 — the sentence earned no pixels
+            on every catalogue visit. The box's `my-2` is what now separates it
+            from the pane header below. */}
       </div>
 
       {/* The two panes. `min-h-0` is what makes them scroll rather than stretch:
@@ -333,7 +324,6 @@ export default async function CatalogPage({
                   key={p.id as string}
                   product={p}
                   locale={locale}
-                  isFavorite={favoriteIds.has(p.id as string)}
                   showPrices={showPrices}
                 />
               ))}

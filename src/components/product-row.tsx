@@ -1,6 +1,5 @@
 import type { Locale } from "next-intl";
 import { getTranslations } from "next-intl/server";
-import { toggleFavorite } from "@/app/actions/favorites";
 import { QtyStepper } from "@/components/cart/qty-stepper";
 import { ProductThumb } from "@/components/product-thumb";
 import { localizedName, unitLabel } from "@/lib/catalog/display";
@@ -8,8 +7,8 @@ import { formatEuros } from "@/lib/money";
 import type { CustomerCatalogProduct } from "@/lib/supabase/public.types";
 
 /**
- * ONE catalogue line: photo, what the product is, and the two things a customer
- * can do to it. Shared by every list of products a customer scrolls — the
+ * ONE catalogue line: photo, what the product is, and the stepper that puts it
+ * in the cart. Shared by every list of products a customer scrolls — the
  * catalogue's right pane and the search results — which is why it lives here and
  * not under one route.
  *
@@ -32,7 +31,7 @@ import type { CustomerCatalogProduct } from "@/lib/supabase/public.types";
  *   ┌───────┬────────────────────────────┬───────────────┐
  *   │2.75rem│ minmax(0,1fr)              │ 6rem FIXED    │
  *   │ thumb │ name (2 lines max)         │ [stepper slot]│
- *   │       │ codart · CAJA×24  [称重] ★ │   − n +  96px │
+ *   │       │ codart · CAJA×24  [称重]   │   − n +  96px │
  *   │       │ 12,00 €                    │               │
  *   └───────┴────────────────────────────┴───────────────┘
  * ```
@@ -46,47 +45,25 @@ import type { CustomerCatalogProduct } from "@/lib/supabase/public.types";
  * the geometry is identical in both — which is also what keeps the `+` squares
  * in a column down a 50-row page however many rows are already in the cart.
  *
- * **6rem is the stepper and nothing else** (96px — see `STEPPER_SLOT`), and
- * that is the whole point of this revision. The track used to be 8.75rem,
- * because the star stood beside the stepper: 6.25rem + a 4px gap + the 2.25rem
- * star = 140px. Measured on a 390px phone, what the name was left with was
- * 390 − 88 rail − 24 row insets − 44 thumb − 20 column gaps − 140 = 74px:
- * three or four characters and an ellipsis. Customers here identify goods BY
- * NAME, so that is not a product list. With the star out of the column the same
- * arithmetic ends 390 − 88 − 24 − 44 − 20 − 96 = 118px. The design mockup draws
- * 120: the missing 2px are spent, deliberately, on the quantity box — 26px
- * ellipsised a three-figure order and 28px does not (see `STEPPER_QTY`), and a
- * legible quantity is worth more than the two pixels it costs the name.
+ * **6rem is the stepper and nothing else** (96px — see `STEPPER_SLOT`). The
+ * track used to be 8.75rem, because the favourite star stood beside the
+ * stepper: 6.25rem + a 4px gap + the 2.25rem star = 140px. Measured on a 390px
+ * phone, what the name was left with was three or four characters and an
+ * ellipsis — and customers here identify goods BY NAME, so that was not a
+ * product list. With the star out of the column the arithmetic ends
+ * 390 − 92 rail (widened for five-character entries) − 24 row insets − 44 thumb
+ * − 20 column gaps − 96 = 114px. The design mockup draws 120: the difference is
+ * spent, deliberately, on the quantity box — 26px ellipsised a three-figure
+ * order and 28px does not (see `STEPPER_QTY`) — and on the rail's fifth glyph.
  *
- * **The star moved DOWN a line, not off the row.** A favourite is row STATE —
- * what this product already is to this customer — and not a third action
- * competing with `+`, so it belongs with the reference data on the meta line
- * (`codart · CAJA×24`, the badges) rather than in the column of things to press.
- * The name is what the row exists to show, and it gets the pixels the move frees.
- * `ml-auto` pushes the star to the line's right edge, so it still reads as a
- * column down the page however long each codart is, and the `truncate`d codart
- * is what gives way when the line runs out of room.
- *
- * **The miss margin got bigger, not smaller.** Flush against each other, the
- * `+`'s right edge IS the star's left edge, and a thumb aiming at `+` that lands
- * 2px wide adds nothing to the cart — it silently toggles a favourite instead.
- * Two adjacent controls whose outcomes have nothing to do with each other need
- * dead pixels between them, and side by side the row could only afford 4px. The
- * star now sits a line lower and on the far side of the 10px column gap from the
- * `−` square, so the nearest approach between the two is that gap.
- *
- * **A 36px hit box that costs the row no height.** The meta line is a 16px text
- * line (20px on the rows where a badge sits in it) and the star's box is 36px,
- * which on its own would make that line — and every row in the catalogue — 20px
- * taller. `-my-2.5` gives 10px back at the top and 10px at the bottom, so the
- * star contributes 36 − 20 = 16px of FLOW height, never more than the line it is
- * on, and simply overhangs the name above it and the price below it without
- * moving either. `relative` is what makes the overhang a target and not paint:
- * a positioned element hit-tests above the in-flow price line that follows it in
- * the DOM, so the part of the box hanging over that line still takes the press.
- * 36px is short of the 44px a full-width touch target would be — on a phone the
- * extra 8px would come straight back out of the name — and clears WCAG 2.2 AA's
- * 24px target minimum.
+ * **The star is HIDDEN, owner's call (2026-08-19).** Its first retreat was from
+ * the action column down onto the meta line, to buy the name that width back;
+ * the owner then judged it noise beside the reference data and cut it from the
+ * row entirely. The favourites FEATURE stays — rows starred before this still
+ * fill the rail's 常购 entry and /cuenta's 常购清单 link, and `toggleFavorite`
+ * is still a live server action — there is simply no toggle on the row. To
+ * restore it, this file's git history has the form: a 36px negative-margin hit
+ * box at the meta line's right edge.
  *
  * **The row owns its own insets and its own top rule** (`px-3 py-2.5 border-t`),
  * where it used to inherit both from the card the list was drawn on. There is no
@@ -96,9 +73,8 @@ import type { CustomerCatalogProduct } from "@/lib/supabase/public.types";
  * makes that rule full-bleed, as the design draws it.
  *
  * The 10px column gap is the design's, and on a phone it is not decoration
- * either: the two gaps are 20px of the 278px the row has inside its insets, and
- * they come out of the name like everything else here — the right-hand one is
- * now also the dead space between the `−` square and the star above it.
+ * either: the two gaps are 20px of the 274px the row has inside its insets, and
+ * they come out of the name like everything else here.
  */
 const ROW =
   "grid grid-cols-[2.75rem_minmax(0,1fr)_6rem] items-center gap-x-2.5 border-t border-[#F4F0EC] px-3 py-2.5";
@@ -119,12 +95,10 @@ const STEPPER_SLOT = "flex w-24 shrink-0 justify-end";
 export async function ProductRow({
   product,
   locale,
-  isFavorite,
   showPrices,
 }: {
   product: CustomerCatalogProduct;
   locale: Locale;
-  isFavorite: boolean;
   /** The owner's `show_prices` setting, as the page read it once for the request. */
   showPrices: boolean;
 }) {
@@ -160,7 +134,7 @@ export async function ProductRow({
             `break-words` is what makes the clamp honest on a LATIN name.
             `line-clamp` only ever ellipsises a line-COUNT overflow: a word with
             no break opportunity in it — ESPECIALIDADES, 14 characters, still
-            wider than the 118px this column gets on a phone — is one line that
+            wider than the 114px this column gets on a phone — is one line that
             overflows sideways, so the clamp has nothing to count and the word is
             cut mid-glyph with no ellipsis at all. Allowing the break puts the
             rest of the word on line two, where the clamp can do its job. Chinese
@@ -170,13 +144,7 @@ export async function ProductRow({
           {name}
         </p>
 
-        {/* A `div`, not a `p`, ONLY because the favourite `form` below is one of
-            its children: `p` may contain nothing but phrasing content, so the
-            HTML parser closes it the moment it meets a `<form>`. The server
-            markup would then say one thing and React's tree another, and
-            hydration breaks on the row every product in the catalogue uses. The
-            name and the price stay `p` — nothing interactive lives in them. */}
-        <div className="mt-0.5 flex items-center gap-1.5 text-xs text-muted">
+        <p className="mt-0.5 flex items-center gap-1.5 text-xs text-muted">
           {/* `1-002 · CAJA×24`: the factor is what turns the price below into an
               offer a restaurant can judge. It is silent at 1 — see `unitLabel`.
               One line, truncated: this is reference detail, and a second line of
@@ -184,20 +152,16 @@ export async function ProductRow({
           <span className="truncate">
             {product.codart} · {unitLabel(product.unit, product.units_per_case)}
           </span>
-          {/* AT MOST ONE badge, and 断货 wins. Now that the star shares this
-              line, the meta row has the name column's 118px to spend, and a row
-              that is both weighed and out of stock wanted more than that: in
-              Spanish, `Por peso` 60 + `Agotado` 57 + the 36px star + three 6px
-              gaps ≈ 171px of content that cannot shrink (all three are
-              `shrink-0`, so only the codart can give). The line overflowed its
-              column and carried the star out past the edge every other row
-              aligns it to. So 称重 renders only while the product is AVAILABLE:
-              an out-of-stock row cannot be ordered, which makes how it is
-              weighed moot on it, while 断货 is the whole reason it looks the way
-              it does. One badge is then the worst case, and it fits — the wider
-              of the two, `Por peso` 60 + star 36 + two gaps 12 ≈ 108px in 118.
-              Badges keep their width either way — a truncated 断货 says nothing
-              — so it is the codart that gives way on a narrow screen. */}
+          {/* AT MOST ONE badge, and 断货 wins. A row that is both weighed and
+              out of stock wants more than the meta line has: in Spanish,
+              `Por peso` 60 + `Agotado` 57 + two 6px gaps ≈ 129px of content
+              that cannot shrink (both badges are `shrink-0`, so only the
+              codart can give) against the 114px the column gets on a phone.
+              So 称重 renders only while the product is AVAILABLE: an
+              out-of-stock row cannot be ordered, which makes how it is weighed
+              moot on it, while 断货 is the whole reason it looks the way it
+              does. Badges keep their width either way — a truncated 断货 says
+              nothing — so it is the codart that gives way on a narrow screen. */}
           {product.is_available && product.is_weighed && (
             <span className="shrink-0 rounded-md bg-amber-100 px-1.5 py-0.5 text-amber-800">
               {t("weighed")}
@@ -208,32 +172,7 @@ export async function ProductRow({
               {t("unavailable")}
             </span>
           )}
-          {/* The favourite, LAST on the line and pushed to its right edge. The
-              negative margin and `relative` are the whole trick that keeps a
-              36px target from making the row taller — see the note on `ROW`.
-              `flex` is here so the form's height is the button's 36px exactly,
-              rather than a line box that adds a stray pixel of descender space
-              under it and puts the star off the line's centre. */}
-          <form
-            action={toggleFavorite}
-            className="relative -my-2.5 ml-auto flex shrink-0"
-          >
-            <input type="hidden" name="product_id" value={id} />
-            <input type="hidden" name="locale" value={locale} />
-            <input type="hidden" name="on" value={isFavorite ? "0" : "1"} />
-            <button
-              type="submit"
-              aria-label={isFavorite ? t("favRemove") : t("favAdd")}
-              // Amber, not brand: a starred product is a state of the row, and
-              // the accent is spent on actions.
-              className={`inline-flex size-9 items-center justify-center rounded-full text-lg transition-colors ${
-                isFavorite ? "text-amber-500" : "text-muted/40 hover:text-muted"
-              }`}
-            >
-              ★
-            </button>
-          </form>
-        </div>
+        </p>
 
         {/* The price sits UNDER the name, inside the text column, rather than in
             a column of its own: at 375px a fourth track would have come out of
@@ -250,8 +189,8 @@ export async function ProductRow({
             ) : (
               // A note, not a figure, and sized like one. At the price's own
               // 14px semibold Archivo, "Precio pendiente" measures 109px
-              // against the 118px this column now gets — it clears the width
-              // by 9px, and it is on EVERY row until the owner's Wingest
+              // against the 114px this column now gets — it clears the width
+              // by 5px, and it is on EVERY row until the owner's Wingest
               // merge lands a tarifa, so the margin is worth having rather
               // than spending. At 12px it is 90px, which is the same one line
               // with room around it, and 12px is already the size the meta

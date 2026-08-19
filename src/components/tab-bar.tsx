@@ -7,7 +7,7 @@ import { usePathname } from "@/i18n/navigation";
 import { activeTab, type TabKey } from "@/lib/nav-tabs";
 
 /**
- * The phone's bottom TAB BAR: 分类 · 搜索 · 需求单 · 我的, the four screens this
+ * The phone's bottom TAB BAR: 分类 · 搜索 · 购物车 · 我的, the four screens this
  * portal is, one press apart at the bottom of the glass.
  *
  * It is the design's answer to a header the customer had to reach the top
@@ -43,11 +43,11 @@ import { activeTab, type TabKey } from "@/lib/nav-tabs";
  * is the tab's name.
  *
  * All four carry a `Tab` prefix, and that is what the split above costs in
- * names: `icons.tsx` also exports a `ClipboardIcon`, a DIFFERENT drawing of a
- * different clipboard on the 24-unit grid, and two glyphs of the same name in
- * one repo — one exported, one local — would be told apart only by which import
- * a file happened to have. The prefix says which vocabulary a glyph belongs to
- * at every use site. Local to this file; nothing here is exported.
+ * names: `icons.tsx` draws its own loupe and basket-adjacent glyphs on the
+ * 24-unit grid, and two glyphs of one name in one repo — one exported, one
+ * local — would be told apart only by which import a file happened to have.
+ * The prefix says which vocabulary a glyph belongs to at every use site.
+ * Local to this file; nothing here is exported.
  */
 const ICON = {
   viewBox: "0 0 17 17",
@@ -55,53 +55,60 @@ const ICON = {
   "aria-hidden": true,
 } as const;
 
+/**
+ * All four are drawn in ONE style — 1.7px strokes, round caps — because the
+ * first cut mixed a filled grid with three outline glyphs, and the owner read
+ * the odd ones as broken (a loupe with no handle is "a circle", shoulders with
+ * no head are "a headless person"). Each mark now carries the part that names
+ * it: the handle on the loupe, the handle and taper on the basket, the head on
+ * the person. Redrawn on the owner's review, 2026-08-19.
+ */
+const STROKE = {
+  fill: "none",
+  stroke: "currentColor",
+  strokeWidth: 1.7,
+  strokeLinecap: "round",
+  strokeLinejoin: "round",
+} as const;
+
 /** 分类 — the 2×2 grid every catalogue in this market uses. */
 function TabGridIcon() {
   return (
-    <svg {...ICON} fill="currentColor">
-      <rect x="0" y="0.25" width="7.25" height="7" rx="1.5" />
-      <rect x="9.75" y="0.25" width="7.25" height="7" rx="1.5" />
-      <rect x="0" y="9.75" width="7.25" height="7" rx="1.5" />
-      <rect x="9.75" y="9.75" width="7.25" height="7" rx="1.5" />
+    <svg {...ICON} {...STROKE}>
+      <rect x="1.1" y="1.1" width="6.1" height="6.1" rx="1.7" />
+      <rect x="9.8" y="1.1" width="6.1" height="6.1" rx="1.7" />
+      <rect x="1.1" y="9.8" width="6.1" height="6.1" rx="1.7" />
+      <rect x="9.8" y="9.8" width="6.1" height="6.1" rx="1.7" />
     </svg>
   );
 }
 
-/** 搜索 — the loupe, at this size its lens alone: 13px of circle. */
+/** 搜索 — the loupe: lens up and left, handle down to the corner. */
 function TabLoupeIcon() {
   return (
-    <svg {...ICON} fill="none" stroke="currentColor" strokeWidth={1.8}>
-      <circle cx="8.5" cy="8.5" r="5.6" />
+    <svg {...ICON} {...STROKE}>
+      <circle cx="7.3" cy="7.3" r="4.9" />
+      <path d="m11.1 11.1 4.2 4.2" />
     </svg>
   );
 }
 
-/** 需求单 — the clipboard the list is written on, its bottom corners rounder. */
-function TabCartIcon() {
+/** 购物车 — the shopping basket: a tapered body under an arched handle. */
+function TabBasketIcon() {
   return (
-    <svg
-      {...ICON}
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={1.8}
-      strokeLinejoin="round"
-    >
-      <path d="M3.9 1.9h9.2a3 3 0 0 1 3 3v5.2a5 5 0 0 1-5 5H5.9a5 5 0 0 1-5-5V4.9a3 3 0 0 1 3-3Z" />
+    <svg {...ICON} {...STROKE}>
+      <path d="M2.1 6.3h12.8l-1.35 6.8a2.5 2.5 0 0 1-2.45 2H5.9a2.5 2.5 0 0 1-2.45-2Z" />
+      <path d="M5.4 6.3 8.5 2l3.1 4.3" />
     </svg>
   );
 }
 
-/** 我的 — a pair of shoulders: the head-and-shoulders mark, minus the head. */
+/** 我的 — head and shoulders, head included. */
 function TabPersonIcon() {
   return (
-    <svg
-      {...ICON}
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={1.8}
-      strokeLinecap="round"
-    >
-      <path d="M1.9 16.1a6.6 6.2 0 0 1 13.2 0" />
+    <svg {...ICON} {...STROKE}>
+      <circle cx="8.5" cy="4.9" r="3.2" />
+      <path d="M2.5 15.9a6 5.8 0 0 1 12 0" />
     </svg>
   );
 }
@@ -115,7 +122,7 @@ function TabPersonIcon() {
 const TABS = [
   { key: "catalog", path: "catalogo", label: "tabCatalog", Icon: TabGridIcon },
   { key: "search", path: "buscar", label: "tabSearch", Icon: TabLoupeIcon },
-  { key: "cart", path: "carrito", label: "tabCart", Icon: TabCartIcon },
+  { key: "cart", path: "carrito", label: "tabCart", Icon: TabBasketIcon },
   { key: "account", path: "cuenta", label: "tabAccount", Icon: TabPersonIcon },
 ] as const satisfies ReadonlyArray<{
   key: TabKey;

@@ -26,14 +26,13 @@
     "tabsLabel": "页面导航",
     "tabCatalog": "分类",
     "tabSearch": "搜索",
-    "tabCart": "需求单",
+    "tabCart": "购物车",
     "tabAccount": "我的",
-    "cartWithCount": "需求单，{n} 种"
+    "cartWithCount": "购物车，{n} 种"
   },
   "catalog": {
     "searchPlaceholder": "搜索商品 / 品牌 / 规格",
     "searchButton": "搜索",
-    "notice": "提交需求单后由 DADA 客服确认排单，无需在线付款",
     "railLabel": "分类",
     "railAll": "全部",
     "railFavorites": "常购",
@@ -44,8 +43,6 @@
     "unavailable": "断货",
     "weighed": "称重",
     "noPrice": "价格待定",
-    "favAdd": "收藏",
-    "favRemove": "取消收藏",
     "pagerLabel": "分页",
     "prev": "上一页",
     "next": "下一页",
@@ -116,6 +113,7 @@
       "UNKNOWN": "提交失败，请稍后重试"
     },
     "goSubmit": "去提交",
+    "barTitle": "订单",
     "barSummary": "<n>{lines, number}</n> 种 · {units, number} 件"
   },
   "orders": {

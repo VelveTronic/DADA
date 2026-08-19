@@ -92,33 +92,15 @@ export default async function SearchPage({
     perf.step("settings", getSetting(supabase, "show_prices")),
   ]);
 
-  // ROUND TWO. The favourites are the one read that needed the profile — they
-  // are keyed by the restaurant's company. The gate is `pendingProducts`: a
-  // query was ISSUED, not rows came back. A search that matches nothing still
-  // pays this round trip, deliberately — the rows are not here yet to be
-  // counted, and waiting for them to decide would cost every search that DOES
-  // match a third round trip to draw its stars. A bare `/buscar` issues
-  // neither CATALOG query — only the guard's profile read and the settings
-  // read that every customer page already pays.
-  const pendingFavorites = pendingProducts
-    ? perf.step(
-        "favorites",
-        supabase
-          .from("favorites")
-          .select("product_id")
-          .eq("company_id", portalUser.company_id),
-      )
-    : null;
-
-  const [productsResult, favResult] = await Promise.all([
-    pendingProducts,
-    pendingFavorites,
-  ]);
+  // There is no round two: this page used to read the company's favourites
+  // here to draw a star on every result row, and the owner hid that star
+  // (2026-08-19, see `product-row.tsx`). The products query is the whole
+  // catalogue cost of a search now; a bare `/buscar` issues no catalogue query
+  // at all — only the guard's profile read and the settings read that every
+  // customer page already pays.
+  const productsResult = await pendingProducts;
 
   if (productsResult?.error) console.error("search query:", productsResult.error);
-  if (favResult?.error) console.error("search favorites query:", favResult.error);
-  // A failed favourites read means no stars, never a broken page.
-  const favoriteIds = new Set((favResult?.data ?? []).map((r) => r.product_id));
 
   const products: CustomerCatalogProduct[] = productsResult?.data ?? [];
   const count = productsResult?.count ?? 0;
@@ -343,7 +325,6 @@ export default async function SearchPage({
                     key={p.id as string}
                     product={p}
                     locale={locale}
-                    isFavorite={favoriteIds.has(p.id as string)}
                     showPrices={showPrices}
                   />
                 ))}

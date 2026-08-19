@@ -26,14 +26,13 @@
     "tabsLabel": "Navegación principal",
     "tabCatalog": "Catálogo",
     "tabSearch": "Buscar",
-    "tabCart": "Pedido",
+    "tabCart": "Carrito",
     "tabAccount": "Mi cuenta",
-    "cartWithCount": "Pedido, {n, plural, one {# artículo} other {# artículos}}"
+    "cartWithCount": "Carrito, {n, plural, one {# artículo} other {# artículos}}"
   },
   "catalog": {
     "searchPlaceholder": "Buscar producto, marca o formato",
     "searchButton": "Buscar",
-    "notice": "Tras enviar el pedido, DADA lo confirma y programa el reparto. Sin pago en línea.",
     "railLabel": "Categorías",
     "railAll": "Todo",
     "railFavorites": "Habituales",
@@ -44,8 +43,6 @@
     "unavailable": "Agotado",
     "weighed": "Por peso",
     "noPrice": "Precio pendiente",
-    "favAdd": "Añadir a favoritos",
-    "favRemove": "Quitar de favoritos",
     "pagerLabel": "Paginación",
     "prev": "Anterior",
     "next": "Siguiente",
@@ -116,6 +113,7 @@
       "UNKNOWN": "No se ha podido enviar el pedido. Inténtelo de nuevo."
     },
     "goSubmit": "Enviar",
+    "barTitle": "Pedido",
     "barSummary": "<n>{lines, number}</n> art. · {units, number} uds."
   },
   "orders": {

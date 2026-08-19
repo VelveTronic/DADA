@@ -9,7 +9,7 @@ import { useCart } from "./cart-provider";
 
 /**
  * The DEMAND BAR: a black pill floating over the phone's tab bar while there is
- * something to submit — 需求单 3 种 · 12 件 on the left, 去提交 on the right.
+ * something to submit — 订单 3 种 · 12 件 on the left, 去提交 on the right.
  *
  * It replaces the red pill that used to sit on the safe area, and the two
  * changes are the same change: this portal is a DEMAND LIST, not a checkout.
@@ -58,7 +58,6 @@ export function CartBar({
 }) {
   const { count, units, subtotalCents } = useCart();
   const t = useTranslations("cart");
-  const tNav = useTranslations("nav");
   // next-intl strips the locale prefix, so this is `/catalogo`, not `/zh/catalogo`.
   const tab = activeTab(usePathname());
 
@@ -66,15 +65,18 @@ export function CartBar({
 
   return (
     <div className="fixed inset-x-3.5 bottom-[calc(3.5rem+env(safe-area-inset-bottom)+0.5rem)] z-40 flex h-[50px] items-center justify-between rounded-xl bg-ink pl-4 pr-1.5 shadow-[0_10px_24px_-8px_rgba(28,25,23,.5)] lg:hidden">
-      {/* 需求单 — the tab's own word, not a second string saying the same thing.
-          The counts are one message so a translator keeps the two figures and
-          their units in one sentence; `<n>` is the design's typography on the
-          first of them (Archivo, 15px), which is a tag rather than a value
-          because only a tag can carry markup through a translation. Both
-          figures are `{…, number}` in the message: a bare argument is
-          stringified, and a weighed cart's 345.504 件 has to reach a Spanish
-          reader as 345,504 uds. — with a dot it is a different number
-          entirely. */}
+      {/* 订单 — the bar's OWN word, deliberately not the tab's. The owner split
+          the two on 2026-08-19: what floats here is the order being built
+          (订单 / Pedido), while the tab underneath names the place it lives
+          (购物车 / Carrito) — so the string is `cart.barTitle`, not
+          `nav.tabCart`. The counts are one message so a translator keeps the
+          two figures and their units in one sentence; `<n>` is the design's
+          typography on the first of them (Archivo, 15px), which is a tag
+          rather than a value because only a tag can carry markup through a
+          translation. Both figures are `{…, number}` in the message: a bare
+          argument is stringified, and a weighed cart's 345.504 件 has to reach
+          a Spanish reader as 345,504 uds. — with a dot it is a different
+          number entirely. */}
       {/* `min-w-0 truncate` against `shrink-0` on the button: a long Spanish
           summary with three figures on it (Pedido 12 art. · 345,5 uds. ·
           1.234,56 €) is wider than the 390px bar, and the half that must
@@ -82,7 +84,7 @@ export function CartBar({
           of the sentence — the amount — which is also the one figure the cart
           page repeats in full. */}
       <p className="min-w-0 truncate text-xs text-white">
-        {tNav("tabCart")}{" "}
+        {t("barTitle")}{" "}
         {t.rich("barSummary", {
           lines: count,
           units,

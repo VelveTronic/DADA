@@ -19,7 +19,7 @@ export type RailEntry = {
 
 /**
  * The catalogue's left rail: 全部, 常购, then every active category, as a column
- * of links in an 88px gutter (a full 13rem from `lg` up, where there is room for
+ * of links in a 92px gutter (a full 13rem from `lg` up, where there is room for
  * the longest Spanish category name on one line).
  *
  * **A rail, not the chip row it replaces.** The categories used to be a
@@ -37,7 +37,7 @@ export type RailEntry = {
  *
  * `min-h-11` is the 44px touch target; entries grow past it when a name wraps,
  * and 常购 always does — its count is stacked under the word rather than beside
- * it, because at 88px wide there is no beside.
+ * it, because at 92px wide there is no beside.
  */
 export async function CategoryRail({ entries }: { entries: RailEntry[] }) {
   const t = await getTranslations("catalog");
@@ -45,7 +45,17 @@ export async function CategoryRail({ entries }: { entries: RailEntry[] }) {
   return (
     <nav
       aria-label={t("railLabel")}
-      className="w-[88px] flex-none overflow-y-auto border-r border-border bg-surface-dim lg:w-52"
+      // 92px, and the scrollbar hidden the way the design's own `.rail` class
+      // hides it. Both numbers serve one requirement (owner, 2026-08-19): a rail
+      // entry must show AT LEAST five Chinese characters per line. 92 − 24 of
+      // `px-3` leaves 68px, and five CJK glyphs at 12.5px are 62.5 — met with
+      // real slack. The scrollbar is not cosmetics but the other half of the
+      // same budget: on Windows a classic scrollbar takes ~17px of LAYOUT width
+      // inside `overflow-y-auto`, which at 88px was squeezing the text to 47px —
+      // three characters — while phones (overlay scrollbars) never showed it.
+      // The column still scrolls; `RailAutoscroll` still lands the lit entry in
+      // view, which is also the affordance that says there is more below.
+      className="w-[92px] flex-none overflow-y-auto border-r border-border bg-surface-dim [scrollbar-width:none] lg:w-52 [&::-webkit-scrollbar]:hidden"
     >
       {entries.map((entry) => (
         <Link
@@ -80,8 +90,8 @@ export async function CategoryRail({ entries }: { entries: RailEntry[] }) {
             />
           )}
           {/* The label is a SPAN and not a bare text node, and the pair of
-              classes on it is what keeps a Spanish rail inside 88px. Five
-              category names have a word longer than the 64px between the
+              classes on it is what keeps a Spanish rail inside 92px. Five
+              category names have a word longer than the 68px between the
               gutters — Electrodomésticos wants 121px — and a bare text node is
               an anonymous FLEX ITEM, whose automatic minimum is its min-content
               width: the entry could not shrink under it, `break-words` alone
@@ -107,7 +117,7 @@ export async function CategoryRail({ entries }: { entries: RailEntry[] }) {
           scrolls to the glass. The tab bar covers its last entries always (top
           edge 57px + the safe area up from the glass) and the demand bar covers
           them too whenever the cart has something in it — that bar spans
-          x = 14…376 on a 390px phone and this rail is x = 0…88, so it is over
+          x = 14…376 on a 390px phone and this rail is x = 0…92, so it is over
           this column, not just the products. Same 7.5rem + `env()` as the pane
           tail: the two columns then reach their ends together instead of one
           stopping 120px short of the other. `lg` has neither bar. */}
