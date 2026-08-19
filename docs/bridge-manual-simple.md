@@ -1,0 +1,163 @@
+# DADA 桥接部署手册 · 简约版
+
+> 给 DADA 非技术同事看的版本：每条命令都标了**在哪台电脑上做**，照抄即可。
+> 想看原理、完整故障手册和沙盒测试流程，请看技术版：[bridge-runbook.md](bridge-runbook.md)（本文引用它的章节号，如「技术版 §⑤」）。
+
+---
+
+## 一、这是什么
+
+**桥接（dada-bridge）= 门户和 Wingest 之间的自动搬运工**，一个单文件小程序，装在 SERVER 上，定时自动跑：
+
+| 它做的事 | 多久一次 | 效果 |
+| --- | --- | --- |
+| 把门户里**已确认**的订单写进 Wingest（成为一张 Pedido，单号 `PORTAL-订单号`） | 每 1 分钟 | 员工不用再手工录单 |
+| 检查哪些 Pedido 已被开成 Albarán，把送货单号写回门户 | 每小时 | 客户在门户看到「已出单」 |
+| 把 Wingest 的价格、箱数、称重标志同步到门户商品目录 | 每天 06:30 | 门户价格永远跟 ERP 一致 |
+
+它**只新增** Pedido、只把计数器 +1——**改不动、删不掉** ERP 里已有的任何东西。库存、批次、开单照旧由员工在 Wingest 里操作，习惯完全不变。
+
+## 二、三台电脑，各管什么
+
+| 电脑 | 标记 | 在上面做什么 |
+| --- | --- | --- |
+| 老板的开发电脑（`F:\DADA Distribucion\DADA`） | 【开发机】 | 生成程序文件，拷给 SERVER |
+| ERP 服务器（RustDesk 远程过去） | 【SERVER】 | 桥接装在这里、跑在这里；SQL 授权也在这里 |
+| 任意办公工位（如 OSCAR） | 【工位】 | 照常用 Wingest：看到 `PORTAL-` 开头的 Pedido，用**单据表单上的 Albarán 按钮**转单 |
+| 任何浏览器 | 【浏览器】 | 门户员工后台：确认订单、看「桥接状态」卡片 |
+
+---
+
+## 三、一次性部署（按顺序，共 7 步）
+
+### 第 1 步【开发机】生成并拷贝程序
+
+```
+cd "F:\DADA Distribucion\DADA"
+pnpm bridge:build
+```
+
+把生成的 `F:\DADA Distribucion\DADA\bridge\dist\dada-bridge.js` 拷到 SERVER 的 `C:\dada\bridge\`。
+（⚠️ 以后每次门户代码更新过桥接，都要重新做这一步——旧程序配新数据库会出错。）
+
+### 第 2 步【SERVER】装 Node（装过就跳过）
+
+官网下载 Node.js LTS（≥22）的 MSI，一路下一步。装完在 CMD 确认：
+
+```
+node --version
+```
+
+显示 `v22.x` 或更高即可。
+
+### 第 3 步【SERVER】写配置文件
+
+用记事本新建 `C:\dada\bridge\bridge.env`，内容照抄下面，只需把两个 `<从保险库取>` 换成真实密钥：
+
+```ini
+SUPABASE_URL=https://gudiykhngonoqsjoigza.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=<从保险库取>
+
+WINGEST_SERVER=SERVER,50352
+WINGEST_DB=wgdemo
+WINGEST_USER=dada_bridge
+WINGEST_PASSWORD=<从保险库取>
+
+# 盖在 Pedido 上的 ERP 操作员代号（老板定，必须是 Wingest 里真实存在的用户，最长 4 位）
+BRIDGE_ERP_USER=SFY
+BRIDGE_CAN=B
+# 会计年度：2026 年填 26。每年 1 月 1 日前改成新年度！
+BRIDGE_EJE=26
+BRIDGE_ALLOW_HISTORICAL_EJE=false
+BRIDGE_ALM=00001
+BRIDGE_SERFAC=1
+CLAIM_LIMIT=20
+LEASE_SECONDS=300
+```
+
+三条铁律：**① 密钥不截图、不外传、不存副本；② `WINGEST_SERVER` 必须写 `SERVER,50352` 这种「逗号+端口」格式，绝不要写反斜杠实例名；③ `WINGEST_DB=wgdemo` 就是生产库**（想先在沙盒试，改成 `wg_test` 即可，程序连上后会自己核对库名，连错库会拒绝干活而不是写错地方）。
+
+### 第 4 步【SERVER】给 SQL 账号授权
+
+在 SSMS 里连上数据库，**完整执行技术版 §⑤ 的授权脚本**（对 `wgdemo` 库，给 `dada_bridge` 只读商品/客户/批次 + 只写 Pedido 三张表和计数器，最后收回 db_owner）。执行完跑脚本末尾的核对查询，确认权限列表和脚本一致。
+
+### 第 5 步【SERVER】手动跑一轮验证
+
+CMD 里逐条执行（此时门户里最好有一笔「已确认」的测试订单）：
+
+```
+node C:\dada\bridge\dada-bridge.js --help
+node C:\dada\bridge\dada-bridge.js orders
+node C:\dada\bridge\dada-bridge.js price-sync
+```
+
+- `orders` 期待看到 `injected …` 和结尾 `ok=true`（门户没有已确认订单时显示 `nothing to inject`，也算正常）。
+- 报错不用慌：错误信息会直接说明是哪一项配置不对（比如密码错、缺哪张表权限）。日志在 `C:\dada\bridge\bridge.log`，**密钥自动打码，整段复制发给技术支持是安全的**。
+
+### 第 6 步【SERVER】建三个定时任务
+
+以**管理员身份**打开 CMD，把 `SERVER\<账号>` 换成实际运行账号（普通本地账号即可，不要用管理员），逐条执行，提示时输入该账号密码：
+
+```
+schtasks /create /tn "DADA Bridge Orders" /tr "\"C:\Program Files\nodejs\node.exe\" \"C:\dada\bridge\dada-bridge.js\" orders" /sc minute /mo 1 /ru "SERVER\<账号>" /rp * /rl LIMITED /f
+```
+
+```
+schtasks /create /tn "DADA Bridge Albaran" /tr "\"C:\Program Files\nodejs\node.exe\" \"C:\dada\bridge\dada-bridge.js\" albaran-sync" /sc hourly /mo 1 /st 00:10 /ru "SERVER\<账号>" /rp * /rl LIMITED /f
+```
+
+```
+schtasks /create /tn "DADA Bridge Prices" /tr "\"C:\Program Files\nodejs\node.exe\" \"C:\dada\bridge\dada-bridge.js\" price-sync" /sc daily /mo 1 /st 06:30 /ru "SERVER\<账号>" /rp * /rl LIMITED /f
+```
+
+> SERVER 的时钟自 2026-08-18 起就是马德里时间，`06:30` 直接就是马德里早上六点半，无需换算。
+> 建完后建议按技术版 §② 给 `bridge.env` 加一层文件权限（icacls 三条命令），防止其他登录者看到密钥。
+
+### 第 7 步【浏览器】+【工位】盯着第一张真订单走完全程
+
+1. 【浏览器】客户（或测试账号）在门户下单 → 员工后台点「确认」；
+2. 等 1 分钟，【浏览器】员工后台首页「桥接状态」卡片 → **订单注入**一行变绿；
+3. 【工位】Wingest 里找到这张 Pedido（客户订单号一栏是 `PORTAL-xxxx`），核对客户、行数、**行金额**（门户每箱价×箱数 = ERP 的 SUBTOT，必须一分不差）；
+4. 【工位】照常用**表单上的 Albarán 按钮**转单（不要用批量转换入口）；
+5. 下一个整点后，【浏览器】门户里这张订单变「已出单」，带 ERP 单号和送货单号。
+
+五步全对 = 部署完成。✅
+
+---
+
+## 四、上线前的业务检查单（一次性）
+
+- [ ] **每家餐厅的门户账号都链接了正确的 Wingest 客户号（codcli）**——员工后台「用户管理」里核对。测试账号 cliente-test 目前链到 codcli=3（沙盒用），割接前改掉或停用。
+- [ ] **`BRIDGE_ERP_USER` 由老板定**：这个代号会盖在每张自动 Pedido 上，客户和业务都看得到。
+- [ ] **清理陈年未关闭的 Pedido**（状态 Abierto 的旧单）：它们会占用批次可用量，导致转单时报「库存不足」。让技术支持列一份清单再关。
+- [ ] **五个箱数系数可疑的商品**（2-006 / 9-018 / 9-087 / 9-097 / 9-100）目前在门户是停售状态：在 Wingest 里改好 UNILOT → 等一次价格同步 → 门户商品管理里重新上架。
+
+## 五、日常怎么看它活着（员工后台首页「桥接状态」卡片）
+
+| 颜色 | 意思 | 要做什么 |
+| --- | --- | --- |
+| 🟢 正常 | 一切正常 | 什么都不用做 |
+| 🟣 上一轮还在跑 | 忙，不是坏 | 不用管，一分钟后自己好 |
+| 🟡 有订单等待重试 | 有一张单没进去，程序自己在重试 | 观察；反复出现再找技术支持 |
+| 🔴 有订单需人工处理 / 失败 | 需要人管了 | 员工订单页看「注入失败」的错误说明；把 `bridge.log` 整段发给技术支持 |
+| 🟠 未运行 | 任务没跑（停了？服务器关了？） | 查 SERVER 开着没有、任务计划程序里三个任务是否启用 |
+
+## 六、出大事怎么办：一键停
+
+【SERVER】管理员 CMD，三条命令立即停掉全部自动化：
+
+```
+schtasks /change /tn "DADA Bridge Orders" /disable
+schtasks /change /tn "DADA Bridge Albaran" /disable
+schtasks /change /tn "DADA Bridge Prices" /disable
+```
+
+停掉后**什么都不会坏**：门户照常接单（订单停在「已确认」排队），ERP 里已写入的单一张不丢、不重复。问题查清后把 `/disable` 换成 `/enable` 逐条恢复，积压订单会自动按顺序补进 ERP，无需人工补录。
+
+## 七、红线（不要做的事）
+
+1. **不要**改 `bridge.env` 里的 `SUPABASE_URL`——程序只认这一个地址，改了直接罢工（防呆设计）。
+2. **不要**用 Wingest 的「批量创建 Albarán」转 `PORTAL-` 单（会无声失败），只用单据表单上的 Albarán 按钮。
+3. **不要**看到门户单没进 ERP 就手工照抄录一张——程序会自动重试并去重；手工单反而制造重复。先看状态卡，再看日志。
+4. **不要**复制、截图、外传 `bridge.env`。
+5. 每年 **1 月 1 日前**记得把 `BRIDGE_EJE` 改成新年度（技术版 §⑥），否则新年第一张订单会被安全拦下（报 `EJE_YEAR_MISMATCH`，不丢单，改完即恢复）。
