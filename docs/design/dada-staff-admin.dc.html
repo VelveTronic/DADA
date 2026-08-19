@@ -1,0 +1,681 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700;900&family=Archivo:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  *{box-sizing:border-box}
+  body{margin:0;background:#F1EEEB;font-family:'Noto Sans SC','PingFang SC','Microsoft YaHei',sans-serif;-webkit-font-smoothing:antialiased;color:#1C1917}
+  a{color:#E0231C;text-decoration:none}
+  a:hover{color:#B31710}
+  .pane::-webkit-scrollbar{width:8px}
+  .pane::-webkit-scrollbar-thumb{background:#DCD6D0;border-radius:4px}
+</style>
+</helmet>
+
+<div style="padding:48px 48px 72px;display:flex;flex-direction:column;gap:26px">
+  <div style="display:flex;align-items:flex-end;gap:22px;flex-wrap:wrap">
+    <div style="display:flex;align-items:center;gap:12px">
+      <div style="width:38px;height:38px;border-radius:50%;background:#E0231C;color:#fff;display:flex;align-items:center;justify-content:center;font-size:19px;font-weight:700;line-height:1">東</div>
+      <div style="font-family:Archivo,sans-serif;font-weight:700;font-size:26px;letter-spacing:-.01em">DADA</div>
+    </div>
+    <div style="height:38px;width:1px;background:#DCD6D0"></div>
+    <div style="display:flex;flex-direction:column;gap:4px">
+      <div style="font-size:20px;font-weight:700">商家端后台 · 电脑 Web</div>
+      <div style="font-size:13px;color:#8C857E">点左侧导航切换六个页面 · 1440 × 940</div>
+    </div>
+  </div>
+
+  <div style="width:1440px;height:940px;background:#fff;border-radius:14px;overflow:hidden;display:flex;box-shadow:0 26px 70px -24px rgba(40,26,20,.4),0 0 0 1px rgba(28,25,23,.08)">
+
+    <div style="width:236px;flex:none;background:#FBFAF9;border-right:1px solid #EDE9E5;display:flex;flex-direction:column">
+      <div style="height:64px;flex:none;display:flex;align-items:center;gap:10px;padding:0 18px;border-bottom:1px solid #EDE9E5">
+        <div style="width:28px;height:28px;border-radius:50%;background:#E0231C;color:#fff;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;line-height:1">東</div>
+        <div style="font-family:Archivo,sans-serif;font-weight:700;font-size:18px">DADA</div>
+        <div style="font-size:10.5px;color:#8C857E;border:1px solid #E4DED8;border-radius:4px;padding:2px 5px;margin-left:2px">商家</div>
+      </div>
+
+      <div style="padding:14px 14px 10px;flex:none">
+        <div style="height:34px;border-radius:8px;background:#F4F0EC;display:flex;align-items:center;gap:8px;padding:0 10px">
+          <div style="width:12px;height:12px;border:1.5px solid #A8A099;border-radius:50%"></div>
+          <div style="font-size:12.5px;color:#A8A099;flex:1">搜索订单 / 商品 / 客户</div>
+          <div style="font-family:Archivo,sans-serif;font-size:11px;color:#B8B0A8">⌘K</div>
+        </div>
+      </div>
+
+      <div style="flex:1;min-height:0;overflow-y:auto;padding:4px 10px;display:flex;flex-direction:column;gap:2px">
+        <sc-for list="{{ nav }}" as="n" hint-placeholder-count="6">
+          <div onClick="{{ n.onPick }}" style="{{ n.style }}">
+            <div style="width:18px;height:18px;flex:none;display:flex;align-items:center;justify-content:center">{{ n.icon }}</div>
+            <div style="flex:1">{{ n.label }}</div>
+            <sc-if value="{{ n.badge }}" hint-placeholder-val="{{ true }}"><div style="min-width:19px;height:19px;border-radius:10px;background:#E0231C;color:#fff;font-family:Archivo,sans-serif;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;padding:0 5px">{{ n.badge }}</div></sc-if>
+          </div>
+        </sc-for>
+
+        <div style="height:1px;background:#EDE9E5;margin:12px 8px"></div>
+        <div style="padding:0 12px 8px;font-size:11px;color:#B8B0A8;font-weight:600;letter-spacing:.04em">今日</div>
+        <div style="padding:0 12px;display:flex;flex-direction:column;gap:9px">
+          <div style="display:flex;align-items:center;justify-content:space-between;font-size:12px;color:#57504A"><div>待报价</div><div style="font-family:Archivo,sans-serif;font-weight:600;color:#E0231C">5</div></div>
+          <div style="display:flex;align-items:center;justify-content:space-between;font-size:12px;color:#57504A"><div>待发货</div><div style="font-family:Archivo,sans-serif;font-weight:600">8</div></div>
+          <div style="display:flex;align-items:center;justify-content:space-between;font-size:12px;color:#57504A"><div>缺货预警</div><div style="font-family:Archivo,sans-serif;font-weight:600">6</div></div>
+        </div>
+      </div>
+
+      <div style="flex:none;border-top:1px solid #EDE9E5;padding:12px 14px;display:flex;align-items:center;gap:10px">
+        <div style="width:30px;height:30px;border-radius:50%;background:#EFE9E3;color:#57504A;font-size:12px;font-weight:600;display:flex;align-items:center;justify-content:center;flex:none">王</div>
+        <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:2px">
+          <div style="font-size:12.5px;font-weight:600">王丽</div>
+          <div style="font-size:11px;color:#A8A099">订单专员</div>
+        </div>
+        <div style="color:#C9C1BA;font-size:14px">⌄</div>
+      </div>
+    </div>
+
+    <div class="pane" style="flex:1;min-width:0;background:#FCFBFA;overflow-y:auto">
+
+      <sc-if value="{{ isHome }}" hint-placeholder-val="{{ true }}">
+        <div style="padding:26px 28px 34px;display:flex;flex-direction:column;gap:18px">
+          <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:20px">
+            <div style="display:flex;flex-direction:column;gap:6px">
+              <div style="font-size:22px;font-weight:700">今日概览</div>
+              <div style="font-size:13px;color:#8C857E">2026 年 8 月 18 日 星期二 · 截单时间 15:00 前</div>
+            </div>
+            <div style="display:flex;gap:10px">
+              <div style="height:36px;padding:0 14px;border-radius:8px;border:1px solid #E4DED8;background:#fff;font-size:13px;color:#57504A;display:flex;align-items:center;gap:8px">今日 <span style="color:#B8B0A8">⌄</span></div>
+              <div style="height:36px;padding:0 16px;border-radius:8px;background:#E0231C;color:#fff;font-size:13px;font-weight:600;display:flex;align-items:center">批量报价 5 单</div>
+            </div>
+          </div>
+
+          <div style="display:grid;grid-template-columns:repeat(4,1fr);border:1px solid #EDE9E5;border-radius:12px;background:#fff;overflow:hidden">
+            <sc-for list="{{ stats }}" as="s" hint-placeholder-count="4">
+              <div style="padding:18px 20px;border-right:1px solid #EDE9E5;display:flex;flex-direction:column;gap:10px">
+                <div style="font-size:12.5px;color:#79726B">{{ s.label }}</div>
+                <div style="display:flex;align-items:flex-end;gap:8px">
+                  <div style="font-family:Archivo,sans-serif;font-size:34px;font-weight:700;line-height:1;font-variant-numeric:tabular-nums">{{ s.n }}</div>
+                  <div style="{{ s.deltaStyle }}">{{ s.delta }}</div>
+                </div>
+                <div style="font-size:11.5px;color:#A8A099">{{ s.sub }}</div>
+              </div>
+            </sc-for>
+          </div>
+
+          <div style="display:grid;grid-template-columns:1fr 380px;gap:18px;align-items:start">
+
+            <div style="display:flex;flex-direction:column;gap:18px">
+              <div style="border:1px solid #EDE9E5;border-radius:12px;background:#fff">
+                <div style="padding:16px 20px;border-bottom:1px solid #EDE9E5;display:flex;align-items:baseline;justify-content:space-between">
+                  <div style="font-size:15px;font-weight:700">订单状态漏斗</div>
+                  <div style="font-size:12px;color:#A8A099">本周 · 共 58 单</div>
+                </div>
+                <div style="padding:18px 20px;display:flex;flex-direction:column;gap:14px">
+                  <sc-for list="{{ funnel }}" as="f" hint-placeholder-count="4">
+                    <div style="display:flex;align-items:center;gap:14px">
+                      <div style="width:76px;flex:none;font-size:13px;color:#57504A">{{ f.label }}</div>
+                      <div style="flex:1;height:26px;background:#F4F0EC;border-radius:6px;overflow:hidden">
+                        <div style="{{ f.barStyle }}"></div>
+                      </div>
+                      <div style="width:46px;flex:none;text-align:right;font-family:Archivo,sans-serif;font-size:16px;font-weight:600;font-variant-numeric:tabular-nums">{{ f.n }}</div>
+                      <div style="width:64px;flex:none;text-align:right;font-size:11.5px;color:#A8A099">{{ f.hint }}</div>
+                    </div>
+                  </sc-for>
+                </div>
+              </div>
+
+              <div style="border:1px solid #EDE9E5;border-radius:12px;background:#fff;overflow:hidden">
+                <div style="padding:16px 20px;border-bottom:1px solid #EDE9E5;display:flex;align-items:baseline;justify-content:space-between">
+                  <div style="font-size:15px;font-weight:700">最近订单</div>
+                  <div onClick="{{ goOrders }}" style="font-size:12.5px;color:#E0231C;font-weight:600;cursor:pointer">全部订单 →</div>
+                </div>
+                <div style="display:grid;grid-template-columns:170px 1fr 90px 130px 110px;padding:0 20px;height:40px;align-items:center;background:#FBFAF9;border-bottom:1px solid #EDE9E5;font-size:11.5px;color:#8C857E">
+                  <div>单号</div><div>客户 / 门店</div><div>商品</div><div>提交时间</div><div style="text-align:right">状态</div>
+                </div>
+                <sc-for list="{{ recentOrders }}" as="o" hint-placeholder-count="6">
+                  <div style="display:grid;grid-template-columns:170px 1fr 90px 130px 110px;padding:0 20px;height:54px;align-items:center;border-bottom:1px solid #F4F0EC;font-size:13px">
+                    <div style="font-family:Archivo,sans-serif;font-size:12.5px;color:#57504A">{{ o.no }}</div>
+                    <div style="display:flex;flex-direction:column;gap:3px;min-width:0">
+                      <div style="font-weight:600;font-size:13px">{{ o.client }}</div>
+                      <div style="font-size:11.5px;color:#A8A099">{{ o.store }}</div>
+                    </div>
+                    <div style="font-family:Archivo,sans-serif;color:#57504A;font-size:12.5px">{{ o.kinds }} 种</div>
+                    <div style="font-size:12.5px;color:#79726B">{{ o.time }}</div>
+                    <div style="display:flex;justify-content:flex-end"><div style="{{ o.tagStyle }}">{{ o.status }}</div></div>
+                  </div>
+                </sc-for>
+              </div>
+            </div>
+
+            <div style="display:flex;flex-direction:column;gap:18px">
+              <div style="border:1px solid #FBE4E2;border-radius:12px;background:#FFF8F7;overflow:hidden">
+                <div style="padding:16px 18px;border-bottom:1px solid #FBE4E2;display:flex;align-items:center;justify-content:space-between">
+                  <div style="font-size:15px;font-weight:700;color:#B31710">缺货 / 库存预警</div>
+                  <div style="font-family:Archivo,sans-serif;font-size:13px;font-weight:700;color:#B31710">6</div>
+                </div>
+                <sc-for list="{{ stockAlerts }}" as="a" hint-placeholder-count="6">
+                  <div style="padding:12px 18px;border-bottom:1px solid #FBE9E7;display:flex;align-items:center;gap:12px">
+                    <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:3px">
+                      <div style="font-size:13px;font-weight:600">{{ a.name }}</div>
+                      <div style="font-size:11.5px;color:#8C857E">{{ a.spec }}</div>
+                    </div>
+                    <div style="{{ a.tagStyle }}">{{ a.state }}</div>
+                  </div>
+                </sc-for>
+                <div style="padding:12px 18px;font-size:12.5px;color:#B31710;font-weight:600">去补货 →</div>
+              </div>
+
+              <div style="border:1px solid #EDE9E5;border-radius:12px;background:#fff;overflow:hidden">
+                <div style="padding:16px 18px;border-bottom:1px solid #EDE9E5;font-size:15px;font-weight:700">待处理事项</div>
+                <sc-for list="{{ todos }}" as="t" hint-placeholder-count="3">
+                  <div style="padding:13px 18px;border-bottom:1px solid #F4F0EC;display:flex;align-items:center;gap:12px">
+                    <div style="width:6px;height:6px;border-radius:50%;background:#E0231C;flex:none"></div>
+                    <div style="flex:1;font-size:13px">{{ t.text }}</div>
+                    <div style="font-size:11.5px;color:#A8A099">{{ t.time }}</div>
+                  </div>
+                </sc-for>
+              </div>
+            </div>
+          </div>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ isOrders }}" hint-placeholder-val="{{ false }}">
+        <div style="padding:26px 28px 34px;display:flex;flex-direction:column;gap:18px">
+          <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:20px">
+            <div style="display:flex;flex-direction:column;gap:6px">
+              <div style="font-size:22px;font-weight:700">订单</div>
+              <div style="font-size:13px;color:#8C857E">客户提交需求单 → 商家报价 → 客户确认 → 发货</div>
+            </div>
+            <div style="display:flex;gap:10px">
+              <div style="height:36px;padding:0 14px;border-radius:8px;border:1px solid #E4DED8;background:#fff;font-size:13px;color:#57504A;display:flex;align-items:center">导出 Excel</div>
+              <div style="height:36px;padding:0 16px;border-radius:8px;background:#E0231C;color:#fff;font-size:13px;font-weight:600;display:flex;align-items:center">代客下单</div>
+            </div>
+          </div>
+
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+            <sc-for list="{{ orderFilters }}" as="f" hint-placeholder-count="5">
+              <div style="{{ f.style }}">{{ f.label }}</div>
+            </sc-for>
+            <div style="margin-left:auto;display:flex;gap:10px">
+              <div style="height:34px;width:230px;border-radius:8px;border:1px solid #E4DED8;background:#fff;display:flex;align-items:center;gap:8px;padding:0 10px">
+                <div style="width:12px;height:12px;border:1.5px solid #A8A099;border-radius:50%"></div>
+                <div style="font-size:12.5px;color:#A8A099">搜单号 / 客户 / 电话</div>
+              </div>
+              <div style="height:34px;padding:0 12px;border-radius:8px;border:1px solid #E4DED8;background:#fff;font-size:12.5px;color:#57504A;display:flex;align-items:center;gap:8px">08-11 ~ 08-18 <span style="color:#B8B0A8">⌄</span></div>
+            </div>
+          </div>
+
+          <div style="border:1px solid #EDE9E5;border-radius:12px;background:#fff;overflow:hidden">
+            <div style="display:grid;grid-template-columns:26px 168px 1fr 78px 78px 132px 104px 130px;padding:0 18px;height:42px;align-items:center;background:#FBFAF9;border-bottom:1px solid #EDE9E5;font-size:11.5px;color:#8C857E;gap:8px">
+              <div style="width:14px;height:14px;border:1.5px solid #D6CFC8;border-radius:3px"></div>
+              <div>单号</div><div>客户 / 门店</div><div>种类</div><div>件数</div><div>提交时间</div><div>状态</div><div style="text-align:right">操作</div>
+            </div>
+            <sc-for list="{{ orders }}" as="o" hint-placeholder-count="9">
+              <div style="display:grid;grid-template-columns:26px 168px 1fr 78px 78px 132px 104px 130px;padding:0 18px;min-height:58px;align-items:center;border-bottom:1px solid #F4F0EC;gap:8px" style-hover="background:#FCFBFA">
+                <div style="width:14px;height:14px;border:1.5px solid #D6CFC8;border-radius:3px"></div>
+                <div style="display:flex;flex-direction:column;gap:3px">
+                  <div style="font-family:Archivo,sans-serif;font-size:12.5px;font-weight:600">{{ o.no }}</div>
+                  <div style="font-size:11px;color:#A8A099">{{ o.channel }}</div>
+                </div>
+                <div style="display:flex;flex-direction:column;gap:3px;min-width:0">
+                  <div style="font-size:13.5px;font-weight:600">{{ o.client }}</div>
+                  <div style="font-size:11.5px;color:#A8A099">{{ o.store }} · {{ o.contact }}</div>
+                </div>
+                <div style="font-family:Archivo,sans-serif;font-size:13px;font-variant-numeric:tabular-nums">{{ o.kinds }}</div>
+                <div style="font-family:Archivo,sans-serif;font-size:13px;font-variant-numeric:tabular-nums">{{ o.units }}</div>
+                <div style="font-size:12.5px;color:#79726B">{{ o.time }}</div>
+                <div><div style="{{ o.tagStyle }}">{{ o.status }}</div></div>
+                <div style="display:flex;justify-content:flex-end;gap:8px">
+                  <div style="{{ o.ctaStyle }}">{{ o.cta }}</div>
+                  <div style="height:30px;padding:0 10px;border-radius:7px;border:1px solid #E4DED8;font-size:12px;color:#57504A;display:flex;align-items:center">详情</div>
+                </div>
+              </div>
+            </sc-for>
+            <div style="padding:14px 18px;display:flex;align-items:center;justify-content:space-between">
+              <div style="font-size:12px;color:#8C857E">共 58 单 · 已选 0</div>
+              <div style="display:flex;gap:6px;align-items:center">
+                <div style="width:30px;height:30px;border-radius:7px;border:1px solid #E4DED8;display:flex;align-items:center;justify-content:center;font-size:12px;color:#79726B">‹</div>
+                <div style="width:30px;height:30px;border-radius:7px;background:#1C1917;color:#fff;display:flex;align-items:center;justify-content:center;font-family:Archivo,sans-serif;font-size:12.5px">1</div>
+                <div style="width:30px;height:30px;border-radius:7px;border:1px solid #E4DED8;display:flex;align-items:center;justify-content:center;font-family:Archivo,sans-serif;font-size:12.5px;color:#57504A">2</div>
+                <div style="width:30px;height:30px;border-radius:7px;border:1px solid #E4DED8;display:flex;align-items:center;justify-content:center;font-family:Archivo,sans-serif;font-size:12.5px;color:#57504A">3</div>
+                <div style="width:30px;height:30px;border-radius:7px;border:1px solid #E4DED8;display:flex;align-items:center;justify-content:center;font-size:12px;color:#79726B">›</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ isProducts }}" hint-placeholder-val="{{ false }}">
+        <div style="padding:26px 28px 34px;display:flex;flex-direction:column;gap:18px">
+          <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:20px">
+            <div style="display:flex;flex-direction:column;gap:6px">
+              <div style="font-size:22px;font-weight:700">商品</div>
+              <div style="font-size:13px;color:#8C857E">共 294 个商品 · 10 个一级分类 · 客户端不显示价格</div>
+            </div>
+            <div style="display:flex;gap:10px">
+              <div style="height:36px;padding:0 14px;border-radius:8px;border:1px solid #E4DED8;background:#fff;font-size:13px;color:#57504A;display:flex;align-items:center">批量导入</div>
+              <div style="height:36px;padding:0 16px;border-radius:8px;background:#E0231C;color:#fff;font-size:13px;font-weight:600;display:flex;align-items:center">＋ 新建商品</div>
+            </div>
+          </div>
+
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+            <sc-for list="{{ productFilters }}" as="f" hint-placeholder-count="6">
+              <div style="{{ f.style }}">{{ f.label }}</div>
+            </sc-for>
+            <div style="margin-left:auto;height:34px;width:230px;border-radius:8px;border:1px solid #E4DED8;background:#fff;display:flex;align-items:center;gap:8px;padding:0 10px">
+              <div style="width:12px;height:12px;border:1.5px solid #A8A099;border-radius:50%"></div>
+              <div style="font-size:12.5px;color:#A8A099">搜商品名 / 规格</div>
+            </div>
+          </div>
+
+          <div style="border:1px solid #EDE9E5;border-radius:12px;background:#fff;overflow:hidden">
+            <div style="display:grid;grid-template-columns:1fr 120px 150px 70px 110px 96px 120px;padding:0 18px;height:42px;align-items:center;background:#FBFAF9;border-bottom:1px solid #EDE9E5;font-size:11.5px;color:#8C857E;gap:10px">
+              <div>商品</div><div>分类</div><div>规格</div><div>单位</div><div>库存</div><div>状态</div><div style="text-align:right">操作</div>
+            </div>
+            <sc-for list="{{ products }}" as="p" hint-placeholder-count="9">
+              <div style="display:grid;grid-template-columns:1fr 120px 150px 70px 110px 96px 120px;padding:0 18px;min-height:64px;align-items:center;border-bottom:1px solid #F4F0EC;gap:10px" style-hover="background:#FCFBFA">
+                <div style="display:flex;align-items:center;gap:12px;min-width:0">
+                  <div style="width:44px;height:44px;border-radius:7px;flex:none;background:repeating-linear-gradient(135deg,#F1EEEB 0 5px,#E7E2DD 5px 10px)"></div>
+                  <div style="display:flex;flex-direction:column;gap:3px;min-width:0">
+                    <div style="font-size:13.5px;font-weight:600">{{ p.name }}</div>
+                    <div style="font-family:Archivo,sans-serif;font-size:11px;color:#A8A099">SKU {{ p.sku }}</div>
+                  </div>
+                </div>
+                <div style="font-size:12.5px;color:#57504A">{{ p.cat }}</div>
+                <div style="font-size:12.5px;color:#57504A">{{ p.spec }}</div>
+                <div style="font-size:12.5px;color:#57504A">{{ p.unit }}</div>
+                <div style="{{ p.stockStyle }}">{{ p.stock }}</div>
+                <div><div style="{{ p.statusStyle }}">{{ p.status }}</div></div>
+                <div style="display:flex;justify-content:flex-end;gap:10px;font-size:12.5px">
+                  <div style="color:#E0231C;font-weight:600">编辑</div>
+                  <div style="color:#79726B">下架</div>
+                </div>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ isCats }}" hint-placeholder-val="{{ false }}">
+        <div style="padding:26px 28px 34px;display:flex;flex-direction:column;gap:18px">
+          <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:20px">
+            <div style="display:flex;flex-direction:column;gap:6px">
+              <div style="font-size:22px;font-weight:700">分类</div>
+              <div style="font-size:13px;color:#8C857E">左侧顺序即客户端点货台的竖排顺序，拖动可调整</div>
+            </div>
+            <div style="height:36px;padding:0 16px;border-radius:8px;background:#E0231C;color:#fff;font-size:13px;font-weight:600;display:flex;align-items:center">＋ 新建一级分类</div>
+          </div>
+
+          <div style="display:grid;grid-template-columns:340px 1fr;gap:18px;align-items:start">
+            <div style="border:1px solid #EDE9E5;border-radius:12px;background:#fff;overflow:hidden">
+              <div style="padding:14px 18px;border-bottom:1px solid #EDE9E5;font-size:13px;font-weight:700;display:flex;justify-content:space-between">
+                <div>一级分类</div><div style="color:#A8A099;font-weight:500">10</div>
+              </div>
+              <sc-for list="{{ catRows }}" as="c" hint-placeholder-count="10">
+                <div style="{{ c.rowStyle }}">
+                  <div style="color:#C9C1BA;font-size:13px;letter-spacing:-2px">⋮⋮</div>
+                  <div style="flex:1;font-size:13.5px">{{ c.name }}</div>
+                  <div style="font-family:Archivo,sans-serif;font-size:12px;color:#A8A099">{{ c.n }} 个商品</div>
+                  <div style="{{ c.chevron }}">›</div>
+                </div>
+              </sc-for>
+            </div>
+
+            <div style="display:flex;flex-direction:column;gap:18px">
+              <div style="border:1px solid #EDE9E5;border-radius:12px;background:#fff;overflow:hidden">
+                <div style="padding:16px 20px;border-bottom:1px solid #EDE9E5;display:flex;align-items:center;justify-content:space-between">
+                  <div style="display:flex;flex-direction:column;gap:5px">
+                    <div style="font-size:16px;font-weight:700">饮料酒水</div>
+                    <div style="font-size:12px;color:#8C857E">54 个商品 · 6 个子分类 · 客户端排序第 7 位</div>
+                  </div>
+                  <div style="display:flex;gap:10px">
+                    <div style="height:32px;padding:0 12px;border-radius:7px;border:1px solid #E4DED8;font-size:12.5px;color:#57504A;display:flex;align-items:center">重命名</div>
+                    <div style="height:32px;padding:0 12px;border-radius:7px;border:1px solid #E4DED8;font-size:12.5px;color:#57504A;display:flex;align-items:center">隐藏</div>
+                  </div>
+                </div>
+                <div style="padding:18px 20px;display:flex;flex-direction:column;gap:14px">
+                  <div style="font-size:12.5px;font-weight:600;color:#79726B">子分类</div>
+                  <div style="display:flex;flex-wrap:wrap;gap:10px">
+                    <sc-for list="{{ subCats }}" as="s" hint-placeholder-count="6">
+                      <div style="height:34px;padding:0 14px;border-radius:17px;background:#F6F3F1;font-size:12.5px;color:#57504A;display:flex;align-items:center;gap:8px">{{ s.name }} <span style="font-family:Archivo,sans-serif;color:#A8A099;font-size:11.5px">{{ s.n }}</span></div>
+                    </sc-for>
+                    <div style="height:34px;padding:0 14px;border-radius:17px;border:1px dashed #D6CFC8;font-size:12.5px;color:#79726B;display:flex;align-items:center">＋ 添加</div>
+                  </div>
+                </div>
+              </div>
+
+              <div style="border:1px solid #EDE9E5;border-radius:12px;background:#fff;overflow:hidden">
+                <div style="padding:14px 20px;border-bottom:1px solid #EDE9E5;font-size:13px;font-weight:700">分类内商品（拖动排序）</div>
+                <sc-for list="{{ catProducts }}" as="p" hint-placeholder-count="6">
+                  <div style="padding:11px 20px;border-bottom:1px solid #F4F0EC;display:flex;align-items:center;gap:12px">
+                    <div style="color:#C9C1BA;font-size:13px;letter-spacing:-2px">⋮⋮</div>
+                    <div style="width:34px;height:34px;border-radius:6px;flex:none;background:repeating-linear-gradient(135deg,#F1EEEB 0 5px,#E7E2DD 5px 10px)"></div>
+                    <div style="flex:1;font-size:13px;font-weight:600">{{ p.name }}</div>
+                    <div style="font-size:12px;color:#8C857E">{{ p.spec }}</div>
+                    <div style="{{ p.statusStyle }}">{{ p.status }}</div>
+                  </div>
+                </sc-for>
+              </div>
+            </div>
+          </div>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ isClients }}" hint-placeholder-val="{{ false }}">
+        <div style="padding:26px 28px 34px;display:flex;flex-direction:column;gap:18px">
+          <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:20px">
+            <div style="display:flex;flex-direction:column;gap:6px">
+              <div style="font-size:22px;font-weight:700">客户</div>
+              <div style="font-size:13px;color:#8C857E">86 家餐厅 · 本月下单 62 家</div>
+            </div>
+            <div style="display:flex;gap:10px">
+              <div style="height:36px;padding:0 14px;border-radius:8px;border:1px solid #E4DED8;background:#fff;font-size:13px;color:#57504A;display:flex;align-items:center">导出名单</div>
+              <div style="height:36px;padding:0 16px;border-radius:8px;background:#E0231C;color:#fff;font-size:13px;font-weight:600;display:flex;align-items:center">＋ 新建客户</div>
+            </div>
+          </div>
+
+          <div style="display:grid;grid-template-columns:repeat(3,1fr);border:1px solid #EDE9E5;border-radius:12px;background:#fff;overflow:hidden">
+            <sc-for list="{{ clientStats }}" as="s" hint-placeholder-count="3">
+              <div style="padding:16px 20px;border-right:1px solid #EDE9E5;display:flex;flex-direction:column;gap:8px">
+                <div style="font-size:12.5px;color:#79726B">{{ s.label }}</div>
+                <div style="font-family:Archivo,sans-serif;font-size:26px;font-weight:700;line-height:1">{{ s.n }}</div>
+              </div>
+            </sc-for>
+          </div>
+
+          <div style="border:1px solid #EDE9E5;border-radius:12px;background:#fff;overflow:hidden">
+            <div style="display:grid;grid-template-columns:1fr 84px 150px 130px 96px 100px 110px;padding:0 18px;height:42px;align-items:center;background:#FBFAF9;border-bottom:1px solid #EDE9E5;font-size:11.5px;color:#8C857E;gap:10px">
+              <div>客户</div><div>门店</div><div>联系人</div><div>本月单量</div><div>结算</div><div>状态</div><div style="text-align:right">操作</div>
+            </div>
+            <sc-for list="{{ clients }}" as="c" hint-placeholder-count="8">
+              <div style="display:grid;grid-template-columns:1fr 84px 150px 130px 96px 100px 110px;padding:0 18px;min-height:60px;align-items:center;border-bottom:1px solid #F4F0EC;gap:10px" style-hover="background:#FCFBFA">
+                <div style="display:flex;align-items:center;gap:12px;min-width:0">
+                  <div style="width:34px;height:34px;border-radius:50%;background:#F4F0EC;color:#79726B;font-size:12.5px;font-weight:600;display:flex;align-items:center;justify-content:center;flex:none">{{ c.initial }}</div>
+                  <div style="display:flex;flex-direction:column;gap:3px;min-width:0">
+                    <div style="font-size:13.5px;font-weight:600">{{ c.name }}</div>
+                    <div style="font-family:Archivo,sans-serif;font-size:11px;color:#A8A099">{{ c.code }}</div>
+                  </div>
+                </div>
+                <div style="font-family:Archivo,sans-serif;font-size:13px">{{ c.stores }}</div>
+                <div style="display:flex;flex-direction:column;gap:3px">
+                  <div style="font-size:12.5px">{{ c.contact }}</div>
+                  <div style="font-family:Archivo,sans-serif;font-size:11.5px;color:#A8A099">{{ c.phone }}</div>
+                </div>
+                <div style="display:flex;align-items:center;gap:8px">
+                  <div style="font-family:Archivo,sans-serif;font-size:14px;font-weight:600">{{ c.month }}</div>
+                  <div style="font-size:11.5px;color:#A8A099">单</div>
+                </div>
+                <div style="font-size:12.5px;color:#57504A">{{ c.pay }}</div>
+                <div><div style="{{ c.tagStyle }}">{{ c.status }}</div></div>
+                <div style="display:flex;justify-content:flex-end;gap:10px;font-size:12.5px">
+                  <div style="color:#E0231C;font-weight:600">代下单</div>
+                  <div style="color:#79726B">详情</div>
+                </div>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ isSettings }}" hint-placeholder-val="{{ false }}">
+        <div style="padding:26px 28px 40px;display:flex;flex-direction:column;gap:18px;max-width:940px">
+          <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:20px">
+            <div style="display:flex;flex-direction:column;gap:6px">
+              <div style="font-size:22px;font-weight:700">设置</div>
+              <div style="font-size:13px;color:#8C857E">供应商资料、下单规则与通知</div>
+            </div>
+            <div style="height:36px;padding:0 16px;border-radius:8px;background:#E0231C;color:#fff;font-size:13px;font-weight:600;display:flex;align-items:center">保存修改</div>
+          </div>
+
+          <div style="border:1px solid #EDE9E5;border-radius:12px;background:#fff;overflow:hidden">
+            <div style="padding:16px 20px;border-bottom:1px solid #EDE9E5;font-size:15px;font-weight:700">供应商资料</div>
+            <div style="padding:20px;display:grid;grid-template-columns:1fr 1fr;gap:18px 24px">
+              <div style="display:flex;flex-direction:column;gap:8px">
+                <div style="font-size:12.5px;color:#79726B">公司名称</div>
+                <input defaultValue="东达食品供应链有限公司" style="height:38px;border:1px solid #E4DED8;border-radius:8px;padding:0 12px;font-size:13.5px;font-family:inherit;color:#1C1917;outline:none">
+              </div>
+              <div style="display:flex;flex-direction:column;gap:8px">
+                <div style="font-size:12.5px;color:#79726B">客服电话</div>
+                <input defaultValue="400 826 1188" style="height:38px;border:1px solid #E4DED8;border-radius:8px;padding:0 12px;font-size:13.5px;font-family:Archivo,sans-serif;color:#1C1917;outline:none">
+              </div>
+              <div style="display:flex;flex-direction:column;gap:8px">
+                <div style="font-size:12.5px;color:#79726B">仓库地址</div>
+                <input defaultValue="北京市朝阳区十八里店南桥 3 号库" style="height:38px;border:1px solid #E4DED8;border-radius:8px;padding:0 12px;font-size:13.5px;font-family:inherit;color:#1C1917;outline:none">
+              </div>
+              <div style="display:flex;flex-direction:column;gap:8px">
+                <div style="font-size:12.5px;color:#79726B">客户端标识</div>
+                <div style="height:38px;border:1px solid #E4DED8;border-radius:8px;display:flex;align-items:center;gap:10px;padding:0 12px">
+                  <div style="width:22px;height:22px;border-radius:50%;background:#E0231C;color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center">東</div>
+                  <div style="font-family:Archivo,sans-serif;font-weight:700;font-size:14px">DADA</div>
+                  <div style="margin-left:auto;font-size:12px;color:#E0231C;font-weight:600">更换</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div style="border:1px solid #EDE9E5;border-radius:12px;background:#fff;overflow:hidden">
+            <div style="padding:16px 20px;border-bottom:1px solid #EDE9E5;font-size:15px;font-weight:700">下单规则</div>
+            <sc-for list="{{ rules }}" as="r" hint-placeholder-count="4">
+              <div style="padding:16px 20px;border-bottom:1px solid #F4F0EC;display:flex;align-items:center;gap:20px">
+                <div style="flex:1;display:flex;flex-direction:column;gap:5px">
+                  <div style="font-size:13.5px;font-weight:600">{{ r.title }}</div>
+                  <div style="font-size:12px;color:#8C857E;line-height:1.5">{{ r.desc }}</div>
+                </div>
+                <sc-if value="{{ r.isToggle }}" hint-placeholder-val="{{ true }}">
+                  <div style="{{ r.trackStyle }}"><div style="{{ r.knobStyle }}"></div></div>
+                </sc-if>
+                <sc-if value="{{ r.value }}" hint-placeholder-val="{{ true }}">
+                  <div style="height:36px;min-width:120px;border:1px solid #E4DED8;border-radius:8px;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:0 12px;font-size:13px">{{ r.value }} <span style="color:#B8B0A8">⌄</span></div>
+                </sc-if>
+              </div>
+            </sc-for>
+          </div>
+
+          <div style="border:1px solid #EDE9E5;border-radius:12px;background:#fff;overflow:hidden">
+            <div style="padding:16px 20px;border-bottom:1px solid #EDE9E5;font-size:15px;font-weight:700">通知</div>
+            <sc-for list="{{ notifs }}" as="r" hint-placeholder-count="3">
+              <div style="padding:16px 20px;border-bottom:1px solid #F4F0EC;display:flex;align-items:center;gap:20px">
+                <div style="flex:1;display:flex;flex-direction:column;gap:5px">
+                  <div style="font-size:13.5px;font-weight:600">{{ r.title }}</div>
+                  <div style="font-size:12px;color:#8C857E;line-height:1.5">{{ r.desc }}</div>
+                </div>
+                <div style="{{ r.trackStyle }}"><div style="{{ r.knobStyle }}"></div></div>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </sc-if>
+
+    </div>
+  </div>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1560,&quot;height&quot;:1100}}">
+class Component extends DCLogic {
+  state = { page: 'home' };
+
+  go(p) { this.setState({ page: p }); }
+
+  tag(kind) {
+    const map = {
+      quote: 'background:#FDECEA;color:#B31710;',
+      confirm: 'background:#FFF4E6;color:#B26A00;',
+      ship: 'background:#EEF2F7;color:#3E5A78;',
+      done: 'background:#F0F4F0;color:#4A6A4E;',
+      off: 'background:#F4F0EC;color:#79726B;'
+    };
+    return 'display:inline-flex;align-items:center;font-size:11.5px;font-weight:600;border-radius:6px;padding:4px 8px;width:fit-content;' + map[kind];
+  }
+
+  chip(label, on) {
+    return {
+      label,
+      style: 'height:34px;padding:0 14px;border-radius:8px;font-size:12.5px;display:flex;align-items:center;cursor:pointer;'
+        + (on ? 'background:#1C1917;color:#fff;font-weight:600;' : 'background:#fff;border:1px solid #E4DED8;color:#57504A;')
+    };
+  }
+
+  toggle(on, extra) {
+    return Object.assign({
+      isToggle: true,
+      trackStyle: 'width:44px;height:26px;border-radius:13px;flex:none;padding:3px;display:flex;'
+        + (on ? 'background:#E0231C;justify-content:flex-end;' : 'background:#E4DED8;justify-content:flex-start;'),
+      knobStyle: 'width:20px;height:20px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.2)'
+    }, extra);
+  }
+
+  renderVals() {
+    const p = this.state.page;
+    const svg = (c, body) => React.createElement('svg', {
+      width: 17, height: 17, viewBox: '0 0 20 20', fill: 'none',
+      stroke: c, strokeWidth: 1.6, strokeLinecap: 'round', strokeLinejoin: 'round'
+    }, body.map((d, i) => React.createElement('path', { key: i, d })));
+
+    const paths = {
+      home: ['M3 8.5 10 3l7 5.5', 'M5 8.5V17h10V8.5'],
+      orders: ['M6 3h8v14H6z', 'M8.5 7h3', 'M8.5 10h3', 'M8.5 13h2'],
+      products: ['M10 2.5 17 6v8l-7 3.5L3 14V6z', 'M3 6l7 3.5L17 6', 'M10 9.5v8'],
+      cats: ['M3 4.5h5v5H3z', 'M12 4.5h5v5h-5z', 'M3 12.5h5v5H3z', 'M12 12.5h5v5h-5z'],
+      clients: ['M7.5 9a2.75 2.75 0 1 0 0-5.5 2.75 2.75 0 0 0 0 5.5z', 'M2.5 17c0-2.8 2.2-4.5 5-4.5s5 1.7 5 4.5', 'M14 4.2a2.6 2.6 0 0 1 0 4.9', 'M15.5 12.8c1.3.6 2 1.9 2 3.4'],
+      settings: ['M10 12.6a2.6 2.6 0 1 0 0-5.2 2.6 2.6 0 0 0 0 5.2z', 'M16 12.2a6.4 6.4 0 0 0 0-4.4l-1.6.3-1-1 .3-1.6a6.4 6.4 0 0 0-3.7-1.2 6.4 6.4 0 0 0-3.7 1.2l.3 1.6-1 1-1.6-.3a6.4 6.4 0 0 0 0 4.4l1.6-.3 1 1-.3 1.6a6.4 6.4 0 0 0 3.7 1.2 6.4 6.4 0 0 0 3.7-1.2l-.3-1.6 1-1z']
+    };
+
+    const nav = [
+      { id: 'home', label: '首页', badge: '' },
+      { id: 'orders', label: '订单', badge: 5 },
+      { id: 'products', label: '商品', badge: '' },
+      { id: 'cats', label: '分类', badge: '' },
+      { id: 'clients', label: '客户', badge: '' },
+      { id: 'settings', label: '设置', badge: '' }
+    ].map(n => {
+      const on = n.id === p;
+      return Object.assign({}, n, {
+        onPick: () => this.go(n.id),
+        icon: svg(on ? '#E0231C' : '#8C857E', paths[n.id]),
+        style: 'height:38px;border-radius:8px;padding:0 12px;display:flex;align-items:center;gap:10px;font-size:13.5px;cursor:pointer;'
+          + (on ? 'background:#FDECEA;color:#E0231C;font-weight:700;' : 'color:#42403D;font-weight:400;')
+      });
+    });
+
+    return {
+      nav,
+      isHome: p === 'home', isOrders: p === 'orders', isProducts: p === 'products',
+      isCats: p === 'cats', isClients: p === 'clients', isSettings: p === 'settings',
+      goOrders: () => this.go('orders'),
+
+      stats: [
+        { label: '今日订单', n: 24, delta: '+3', sub: '截单前还有 5 小时 20 分', deltaStyle: 'font-size:12px;font-weight:600;color:#4A6A4E;padding-bottom:3px' },
+        { label: '待报价', n: 5, delta: '需处理', sub: '最早一单已等待 42 分钟', deltaStyle: 'font-size:12px;font-weight:600;color:#B31710;padding-bottom:3px' },
+        { label: '待发货', n: 8, delta: '', sub: '3 单为明早 7 点前到货', deltaStyle: 'display:none' },
+        { label: '缺货预警', n: 6, delta: '', sub: '2 个常购商品库存为 0', deltaStyle: 'display:none' }
+      ],
+      funnel: [
+        { label: '待报价', n: 5, hint: '平均 26 分', barStyle: 'width:12%;height:100%;background:#E0231C;border-radius:6px' },
+        { label: '待客户确认', n: 3, hint: '平均 1.2 小时', barStyle: 'width:8%;height:100%;background:#F0806A;border-radius:6px' },
+        { label: '待发货', n: 8, hint: '今日出车 3 趟', barStyle: 'width:19%;height:100%;background:#C4B7AC;border-radius:6px' },
+        { label: '已完成', n: 42, hint: '签收率 100%', barStyle: 'width:100%;height:100%;background:#1C1917;border-radius:6px' }
+      ],
+      recentOrders: [
+        { no: 'DD-20260818-014', client: '东记火锅', store: '朝阳店', kinds: 8, time: '今天 09:12', status: '待报价', tagStyle: this.tag('quote') },
+        { no: 'DD-20260818-013', client: '巷子里烤肉', store: '望京店', kinds: 12, time: '今天 08:55', status: '待报价', tagStyle: this.tag('quote') },
+        { no: 'DD-20260818-012', client: '小富贵川菜', store: '国贸店', kinds: 6, time: '今天 08:31', status: '待确认', tagStyle: this.tag('confirm') },
+        { no: 'DD-20260818-011', client: '一碗鲜面馆', store: '双井店', kinds: 9, time: '今天 07:48', status: '待发货', tagStyle: this.tag('ship') },
+        { no: 'DD-20260817-036', client: '悦茶饮品', store: '三里屯店', kinds: 4, time: '昨天 20:41', status: '待报价', tagStyle: this.tag('quote') },
+        { no: 'DD-20260817-035', client: '老张海鲜', store: '亚运村店', kinds: 15, time: '昨天 19:02', status: '已完成', tagStyle: this.tag('done') }
+      ],
+      stockAlerts: [
+        { name: '本地小青菜', spec: '10 斤 / 箱', state: '库存 0', tagStyle: this.tag('quote') },
+        { name: '打包盒 750 ml', spec: '300 套 / 箱', state: '库存 0', tagStyle: this.tag('quote') },
+        { name: '鲜鸡蛋', spec: '30 斤 / 箱', state: '仅 4 箱', tagStyle: this.tag('confirm') },
+        { name: '可乐 罐装', spec: '330 ml × 24 / 箱', state: '仅 6 箱', tagStyle: this.tag('confirm') },
+        { name: '冻虾仁 41/50', spec: '2 kg / 袋', state: '仅 8 袋', tagStyle: this.tag('confirm') },
+        { name: 'PE 保鲜膜', spec: '30 cm × 500 m / 卷', state: '仅 5 卷', tagStyle: this.tag('confirm') }
+      ],
+      todos: [
+        { text: '东记火锅 催报价（第 2 次）', time: '11 分钟前' },
+        { text: '巷子里烤肉 修改了收货时段', time: '32 分钟前' },
+        { text: '新客户「豆先生早餐」待审核', time: '今天 08:10' }
+      ],
+
+      orderFilters: [this.chip('全部 58', false), this.chip('待报价 5', true), this.chip('待确认 3', false), this.chip('待发货 8', false), this.chip('已完成 42', false)],
+      orders: [
+        { no: 'DD-20260818-014', channel: '手机端', client: '东记火锅', store: '朝阳店', contact: '李经理', kinds: 8, units: 13, time: '今天 09:12', status: '待报价', tagStyle: this.tag('quote'), cta: '报价', ctaStyle: 'height:30px;padding:0 12px;border-radius:7px;background:#E0231C;color:#fff;font-size:12px;font-weight:600;display:flex;align-items:center' },
+        { no: 'DD-20260818-013', channel: '手机端', client: '巷子里烤肉', store: '望京店', contact: '孙店长', kinds: 12, units: 22, time: '今天 08:55', status: '待报价', tagStyle: this.tag('quote'), cta: '报价', ctaStyle: 'height:30px;padding:0 12px;border-radius:7px;background:#E0231C;color:#fff;font-size:12px;font-weight:600;display:flex;align-items:center' },
+        { no: 'DD-20260818-012', channel: '手机端', client: '小富贵川菜', store: '国贸店', contact: '陈老板', kinds: 6, units: 9, time: '今天 08:31', status: '待确认', tagStyle: this.tag('confirm'), cta: '催确认', ctaStyle: 'height:30px;padding:0 12px;border-radius:7px;border:1px solid #E0231C;color:#E0231C;font-size:12px;font-weight:600;display:flex;align-items:center' },
+        { no: 'DD-20260818-011', channel: '客服代下', client: '一碗鲜面馆', store: '双井店', contact: '王姐', kinds: 9, units: 16, time: '今天 07:48', status: '待发货', tagStyle: this.tag('ship'), cta: '排车', ctaStyle: 'height:30px;padding:0 12px;border-radius:7px;border:1px solid #E4DED8;color:#57504A;font-size:12px;font-weight:600;display:flex;align-items:center' },
+        { no: 'DD-20260817-036', channel: '手机端', client: '悦茶饮品', store: '三里屯店', contact: '刘主管', kinds: 4, units: 6, time: '昨天 20:41', status: '待报价', tagStyle: this.tag('quote'), cta: '报价', ctaStyle: 'height:30px;padding:0 12px;border-radius:7px;background:#E0231C;color:#fff;font-size:12px;font-weight:600;display:flex;align-items:center' },
+        { no: 'DD-20260817-035', channel: '手机端', client: '老张海鲜', store: '亚运村店', contact: '张老板', kinds: 15, units: 31, time: '昨天 19:02', status: '已完成', tagStyle: this.tag('done'), cta: '复制单', ctaStyle: 'height:30px;padding:0 12px;border-radius:7px;border:1px solid #E4DED8;color:#57504A;font-size:12px;font-weight:600;display:flex;align-items:center' },
+        { no: 'DD-20260817-034', channel: '手机端', client: '南门砂锅', store: '和平里店', contact: '赵师傅', kinds: 7, units: 11, time: '昨天 17:26', status: '已完成', tagStyle: this.tag('done'), cta: '复制单', ctaStyle: 'height:30px;padding:0 12px;border-radius:7px;border:1px solid #E4DED8;color:#57504A;font-size:12px;font-weight:600;display:flex;align-items:center' },
+        { no: 'DD-20260817-033', channel: '手机端', client: '悦茶饮品', store: '朝阳大悦城店', contact: '刘主管', kinds: 5, units: 8, time: '昨天 16:04', status: '已完成', tagStyle: this.tag('done'), cta: '复制单', ctaStyle: 'height:30px;padding:0 12px;border-radius:7px;border:1px solid #E4DED8;color:#57504A;font-size:12px;font-weight:600;display:flex;align-items:center' },
+        { no: 'DD-20260817-032', channel: '客服代下', client: '东记火锅', store: '亦庄店', contact: '李经理', kinds: 10, units: 19, time: '昨天 14:37', status: '已完成', tagStyle: this.tag('done'), cta: '复制单', ctaStyle: 'height:30px;padding:0 12px;border-radius:7px;border:1px solid #E4DED8;color:#57504A;font-size:12px;font-weight:600;display:flex;align-items:center' }
+      ],
+
+      productFilters: [this.chip('全部 294', true), this.chip('蔬果 42', false), this.chip('肉禽蛋 28', false), this.chip('饮料酒水 54', false), this.chip('一次性用品 31', false), this.chip('厨房五金 26', false)],
+      products: [
+        { name: '山东大白菜', sku: 'VG-1042', cat: '蔬果', spec: '25 斤 / 袋 · 净菜', unit: '袋', stock: '128 袋', status: '在售', statusStyle: this.tag('done'), stockStyle: 'font-family:Archivo,sans-serif;font-size:13px;color:#42403D' },
+        { name: '本地小青菜', sku: 'VG-1051', cat: '蔬果', spec: '10 斤 / 箱', unit: '箱', stock: '0 箱', status: '缺货', statusStyle: this.tag('quote'), stockStyle: 'font-family:Archivo,sans-serif;font-size:13px;color:#B31710;font-weight:600' },
+        { name: '冷鲜猪五花', sku: 'MT-2007', cat: '肉禽蛋', spec: '10 斤 / 件', unit: '件', stock: '46 件', status: '在售', statusStyle: this.tag('done'), stockStyle: 'font-family:Archivo,sans-serif;font-size:13px;color:#42403D' },
+        { name: '鲜鸡蛋', spec: '30 斤 / 箱', sku: 'MT-2019', cat: '肉禽蛋', unit: '箱', stock: '4 箱', status: '库存低', statusStyle: this.tag('confirm'), stockStyle: 'font-family:Archivo,sans-serif;font-size:13px;color:#B26A00;font-weight:600' },
+        { name: '泰国香米', sku: 'GR-3004', cat: '米面粮油', spec: '25 kg / 袋', unit: '袋', stock: '92 袋', status: '在售', statusStyle: this.tag('done'), stockStyle: 'font-family:Archivo,sans-serif;font-size:13px;color:#42403D' },
+        { name: '海天金标生抽', sku: 'SC-4011', cat: '调味酱料', spec: '1.9 L × 6 / 箱', unit: '箱', stock: '75 箱', status: '在售', statusStyle: this.tag('done'), stockStyle: 'font-family:Archivo,sans-serif;font-size:13px;color:#42403D' },
+        { name: '可乐 罐装', sku: 'DK-5002', cat: '饮料酒水', spec: '330 ml × 24 / 箱', unit: '箱', stock: '6 箱', status: '库存低', statusStyle: this.tag('confirm'), stockStyle: 'font-family:Archivo,sans-serif;font-size:13px;color:#B26A00;font-weight:600' },
+        { name: '打包盒 750 ml', sku: 'DP-6003', cat: '一次性用品', spec: '300 套 / 箱', unit: '箱', stock: '0 箱', status: '缺货', statusStyle: this.tag('quote'), stockStyle: 'font-family:Archivo,sans-serif;font-size:13px;color:#B31710;font-weight:600' },
+        { name: 'PE 保鲜膜', sku: 'HW-8006', cat: '厨房五金', spec: '30 cm × 500 m / 卷', unit: '卷', stock: '5 卷', status: '已下架', statusStyle: this.tag('off'), stockStyle: 'font-family:Archivo,sans-serif;font-size:13px;color:#A8A099' }
+      ],
+
+      catRows: [
+        { name: '蔬果', n: 42 }, { name: '肉禽蛋', n: 28 }, { name: '水产', n: 16 }, { name: '米面粮油', n: 23 },
+        { name: '调味酱料', n: 37 }, { name: '冷冻半成品', n: 19 }, { name: '饮料酒水', n: 54, on: true },
+        { name: '一次性用品', n: 31 }, { name: '清洁用品', n: 18 }, { name: '厨房五金', n: 26 }
+      ].map(c => Object.assign({}, c, {
+        rowStyle: 'padding:13px 18px;border-bottom:1px solid #F4F0EC;display:flex;align-items:center;gap:12px;cursor:pointer;'
+          + (c.on ? 'background:#FDECEA;color:#B31710;font-weight:700;' : ''),
+        chevron: 'font-size:14px;' + (c.on ? 'color:#E0231C;' : 'color:#C9C1BA;')
+      })),
+      subCats: [{ name: '碳酸饮料', n: 12 }, { name: '瓶装水', n: 8 }, { name: '果汁', n: 9 }, { name: '茶饮原料', n: 11 }, { name: '啤酒', n: 10 }, { name: '咖啡', n: 4 }],
+      catProducts: [
+        { name: '可乐 罐装', spec: '330 ml × 24 / 箱', status: '在售', statusStyle: this.tag('done') },
+        { name: '可乐 大瓶', spec: '1.25 L × 12 / 箱', status: '在售', statusStyle: this.tag('done') },
+        { name: '饮用纯净水', spec: '550 ml × 24 / 箱', status: '在售', statusStyle: this.tag('done') },
+        { name: '鲜橙汁', spec: '1 L × 12 / 箱', status: '在售', statusStyle: this.tag('done') },
+        { name: '青岛啤酒', spec: '500 ml × 12 / 箱', status: '在售', statusStyle: this.tag('done') },
+        { name: '柠檬茶浓浆', spec: '2 kg × 6 / 箱', status: '新品', statusStyle: this.tag('confirm') }
+      ],
+
+      clientStats: [{ label: '合作餐厅', n: 86 }, { label: '本月下单客户', n: 62 }, { label: '月结客户', n: 41 }],
+      clients: [
+        { initial: '东', name: '东记火锅', code: 'C-10286', stores: 3, contact: '李经理', phone: '138 0013 8000', month: 14, pay: '月结', status: '活跃', tagStyle: this.tag('done') },
+        { initial: '巷', name: '巷子里烤肉', code: 'C-10312', stores: 2, contact: '孙店长', phone: '139 1122 3344', month: 11, pay: '月结', status: '活跃', tagStyle: this.tag('done') },
+        { initial: '悦', name: '悦茶饮品', code: 'C-10355', stores: 6, contact: '刘主管', phone: '136 5566 7788', month: 22, pay: '月结', status: '活跃', tagStyle: this.tag('done') },
+        { initial: '小', name: '小富贵川菜', code: 'C-10401', stores: 1, contact: '陈老板', phone: '137 8899 0011', month: 6, pay: '现结', status: '活跃', tagStyle: this.tag('done') },
+        { initial: '一', name: '一碗鲜面馆', code: 'C-10422', stores: 1, contact: '王姐', phone: '135 2233 4455', month: 9, pay: '现结', status: '活跃', tagStyle: this.tag('done') },
+        { initial: '老', name: '老张海鲜', code: 'C-10467', stores: 1, contact: '张老板', phone: '134 6677 8899', month: 4, pay: '月结', status: '待跟进', tagStyle: this.tag('confirm') },
+        { initial: '南', name: '南门砂锅', code: 'C-10489', stores: 2, contact: '赵师傅', phone: '133 4455 6677', month: 3, pay: '现结', status: '待跟进', tagStyle: this.tag('confirm') },
+        { initial: '豆', name: '豆先生早餐', code: 'C-10503', stores: 1, contact: '周经理', phone: '132 7788 9900', month: 0, pay: '待定', status: '待审核', tagStyle: this.tag('off') }
+      ],
+
+      rules: [
+        this.toggle(true, { title: '需求单模式', desc: '客户端不显示价格，客户提交后由商家报价确认', value: '' }),
+        { title: '每日截单时间', desc: '超过该时间的订单默认排入次日配送', value: '15:00', isToggle: false, trackStyle: 'display:none', knobStyle: 'display:none' },
+        { title: '最小起订量', desc: '低于该件数的需求单需客服人工确认', value: '5 件', isToggle: false, trackStyle: 'display:none', knobStyle: 'display:none' },
+        this.toggle(false, { title: '允许客户自行修改已提交订单', desc: '关闭时，客户改单需联系客服', value: '' })
+      ],
+      notifs: [
+        this.toggle(true, { title: '新需求单提醒', desc: '客户提交后立即通知订单专员' }),
+        this.toggle(true, { title: '缺货预警', desc: '库存低于阈值时每天 08:00 汇总一次' }),
+        this.toggle(false, { title: '客户催单短信提醒', desc: '客户点「催一下报价」时发短信给负责人' })
+      ]
+    };
+  }
+}
+
+</script>
+</body>
+</html>
