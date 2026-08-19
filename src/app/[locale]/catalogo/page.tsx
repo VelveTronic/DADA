@@ -386,9 +386,9 @@ export default async function CatalogPage({
               57 + S up from the glass; the demand bar sits at
               `calc(3.5rem + S + 0.5rem)` = 64 + S and is 50px tall, so ITS top
               edge is 114 + S (`tab-bar.tsx`, `cart/cart-bar.tsx`). A tail of a
-              fixed 112px cleared that only at S = 0 — the desktop emulation it
-              was measured on — and buried the last row under the demand bar by
-              34px on the phones this portal is actually used from. 7.5rem + S
+              fixed 112px never cleared that: even at S = 0 a flush star box
+              sat 2px under the bar, and on a notched phone (S = 34) the row's
+              box fell 36px short. 7.5rem + S
               is 120 + S, which is 6px clear of 114 + S at EVERY inset.
 
               7.5rem and not 7rem, i.e. the row's own `py-2.5` is not clearance

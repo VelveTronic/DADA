@@ -186,13 +186,14 @@ export default async function SearchPage({
           `min-h-dvh` is for the screen this page is MOST often on: a bare
           `/buscar`, opened from the catalogue's search box, is a field and
           nothing else, and a sheet only as tall as that field ends in a hard
-          beige edge 145px down the phone that reads as a page which failed to
-          load (the shell's header is 61px — `py-2` around a 44px icon row, plus
-          its hairline — and this sheet, without its tail, is 60px: 4 above the
+          beige edge ~105px down the phone that reads as a page which failed to
+          load (the phone header is 45px — `py-2` around the 28px logo row plus
+          its hairline; the 44px icon row is desktop-only since the shell split
+          — and this sheet, without its tail, is 60px: 4 above the
           form row, the row's 44 — its `items-center` line is as tall as the
           取消 link's `h-11`, not the 40px field — and 12 below it). It costs an
           empty screen the ability to be flicked past its content by the shell's
-          header plus `<main>`'s own bottom inset: 61 + 72 = ~133px on a phone
+          header plus `<main>`'s own bottom inset: 45 + 72 = ~117px on a phone
           (plus the safe area, which rides in that inset), 61 + 64 = ~125px on a
           desktop. The alternative was subtracting those two by hand here,
           which is a number about the SHELL and would go stale inside it.
