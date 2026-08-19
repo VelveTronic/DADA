@@ -97,8 +97,9 @@ export default async function SearchPage({
   // query was ISSUED, not rows came back. A search that matches nothing still
   // pays this round trip, deliberately — the rows are not here yet to be
   // counted, and waiting for them to decide would cost every search that DOES
-  // match a third round trip to draw its stars. A bare `/buscar` issues neither
-  // query: it is a field and a list of words, and it costs the database nothing.
+  // match a third round trip to draw its stars. A bare `/buscar` issues
+  // neither CATALOG query — only the guard's profile read and the settings
+  // read that every customer page already pays.
   const pendingFavorites = pendingProducts
     ? perf.step(
         "favorites",
@@ -185,10 +186,12 @@ export default async function SearchPage({
           `min-h-dvh` is for the screen this page is MOST often on: a bare
           `/buscar`, opened from the catalogue's search box, is a field and
           nothing else, and a sheet only as tall as that field ends in a hard
-          beige edge 141px down the phone that reads as a page which failed to
+          beige edge 145px down the phone that reads as a page which failed to
           load (the shell's header is 61px — `py-2` around a 44px icon row, plus
-          its hairline — and this sheet is 80px: 4 above the field, its 40, 12
-          below it, and the 24px tail). It costs an empty screen the ability to be flicked ~125px (the
+          its hairline — and this sheet is 84px: 4 above the form row, the row's
+          44 — its `items-center` line is as tall as the 取消 link's `h-11`, not
+          the 40px field — 12 below it, and the 24px tail). It costs an empty
+          screen the ability to be flicked ~125px (the
           shell's header plus `<main>`'s own bottom inset) past its content; the
           alternative was subtracting those two by hand here, which is a number
           about the SHELL and would go stale inside it. */}
