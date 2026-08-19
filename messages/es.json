@@ -43,6 +43,17 @@
     "next": "Siguiente",
     "pageOf": "Página {page} de {total}"
   },
+  "search": {
+    "title": "Buscar",
+    "placeholder": "Buscar productos",
+    "cancel": "Cancelar",
+    "clear": "Borrar",
+    "clearHistory": "Borrar historial de búsqueda",
+    "history": "Búsquedas recientes",
+    "results": "Resultados",
+    "resultCount": "{n, plural, one {# producto} other {# productos}}",
+    "empty": "No encontramos productos para esa búsqueda"
+  },
   "cart": {
     "title": "Carrito",
     "add": "Añadir al carrito: {name}",
