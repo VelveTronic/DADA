@@ -16,13 +16,21 @@ import { getSetting } from "@/lib/settings";
 import type { PublicOrder } from "@/lib/supabase/public.types";
 import { PUBLIC_ORDER_COLUMNS } from "@/lib/supabase/public.types";
 import type { OrderCardLine } from "./order-card";
-import { OrderCard } from "./order-card";
+import { OrderCard, THUMB_LIMIT } from "./order-card";
 import { OrderTabs } from "./order-tabs";
 
 export const dynamic = "force-dynamic";
 
 /** A restaurant's own history, newest first; older orders live in the ERP. */
 const PAGE_SIZE = 50;
+
+/**
+ * The line read's own ceiling, set to PostgREST's `max_rows` rather than left to
+ * it. Asking for the cap makes it this file's decision instead of a server
+ * setting's, and it is what the `order_id`-first sort below is FOR — see the
+ * note there for what a capped page actually looks like on screen.
+ */
+const LINES_LIMIT = 1000;
 
 /** One line, plus the order it belongs to — the key this page groups on. */
 type HistoryLine = OrderCardLine & { order_id: string };
@@ -85,9 +93,11 @@ export default async function OrdersPage({
   // TWO more reads for the whole page, not two per card. The lines are what the
   // cards count, list and reorder from; the photos are the one live thing on a
   // card, looked up separately because the order's snapshot has never carried
-  // an image. Both are `.in(…)` over every order on screen, so a history of
-  // fifty costs the same three round trips as a history of one — and an empty
-  // page (a filter with no matches, a restaurant's first visit) skips both.
+  // an image. Both are a single `.in(…)` — over every order on screen, and over
+  // the products those orders can actually SHOW — so a history of fifty costs
+  // the same three round trips as a history of one, and an empty page (a filter
+  // with no matches, a restaurant's first visit) skips both. Both are also
+  // BOUNDED: see the two notes below for what each one refuses to grow into.
   const orderIds = orders.map((order) => order.id);
   const linesByOrder = new Map<string, OrderCardLine[]>();
   const images = new Map<string, string | null>();
@@ -108,7 +118,32 @@ export default async function OrdersPage({
         // Ordered by a column this select does not ask for, which PostgREST
         // allows: `sort_order` is how the customer built the order, and it is
         // the order the panel and the photo strip both read in.
-        .order("sort_order", { ascending: true }),
+        //
+        // `order_id` FIRST, and the explicit cap, are ONE decision: what a
+        // truncated page is allowed to look like. PostgREST caps a response at
+        // `max_rows` (1000 — `supabase/config.toml`, and the same default in
+        // the cloud project) whether or not this asks for a limit, so fifty
+        // orders long enough to average twenty lines already reach it.
+        //
+        // Under a global `sort_order` the rows that fall off the end are the
+        // deepest line of EVERY order at once, so all fifty cards quietly count
+        // short and every one of them is wrong. Grouping by `order_id` first
+        // makes the cut fall between orders instead: every order before it is
+        // whole, every order after it has NO lines and renders the no-counts
+        // state this card documents (`hasLines` in `order-card.tsx`), and at
+        // most ONE order — the one the boundary lands inside — is short. Fifty
+        // wrong cards become one. The trade is that `order_id` is a uuid, so
+        // WHICH orders end up past the cut is arbitrary rather than the oldest;
+        // that is acceptable precisely because the ones past it say nothing
+        // instead of saying something false. The secondary `sort_order` keeps
+        // each card's own lines in the order the customer built them, which is
+        // what the panel and the photo strip read.
+        //
+        // The `.limit` is written out so the number lives in this file next to
+        // the reasoning, rather than only in a server's config.
+        .order("order_id", { ascending: true })
+        .order("sort_order", { ascending: true })
+        .limit(LINES_LIMIT),
     );
     if (itemResult.error) console.error("order lines query:", itemResult.error);
 
@@ -119,13 +154,26 @@ export default async function OrdersPage({
       else linesByOrder.set(line.order_id, [line]);
     }
 
-    // Distinct products only: fifty orders of the same six articles are six ids
-    // on the wire. The customer-safe priced view, asked for nothing but the
-    // photo — this page prices nothing from the catalogue, every amount on it is
-    // the order's own snapshot.
+    // Distinct products among the lines that can actually DRAW one, which is a
+    // far smaller set than "every product on the page": only the first
+    // `THUMB_LIMIT` lines of a card reach the photo strip, and the detail panel
+    // renders no images at all. Asked over every line instead, a history of
+    // fifty varied orders reaches a couple of hundred distinct products, and
+    // this read sends them as one `id=in.(…)` — 37 bytes per uuid, so ~200 of
+    // them is ~7.4KB of query string, right at the 8KB request line a proxy
+    // will refuse with 414. That failure is silent by design here (a
+    // `console.error` and an empty map), so it would surface as fifty cards of
+    // blank boxes and nothing else. Bounded this way the read is at most
+    // 50 × 3 ids, and still deduplicated: fifty orders of the same six articles
+    // are six ids on the wire.
+    //
+    // The customer-safe priced view, asked for nothing but the photo — this
+    // page prices nothing from the catalogue, every amount on it is the order's
+    // own snapshot.
     const productIds = [
       ...new Set(
-        lines
+        [...linesByOrder.values()]
+          .flatMap((group) => group.slice(0, THUMB_LIMIT))
           .map((line) => line.product_id)
           .filter((id): id is string => id != null),
       ),

@@ -5,7 +5,7 @@ import { refresh, revalidatePath } from "next/cache";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { routing } from "@/i18n/routing";
-import { getSessionUser } from "@/lib/auth/session";
+import { requireCompanyUser } from "@/lib/auth/guards";
 import type { Cart, ReorderLine } from "@/lib/cart";
 import {
   CART_COOKIE,
@@ -170,25 +170,36 @@ export async function clearCart(locale: string): Promise<{ ok: true }> {
  * resolve them again at submit (CLAUDE.md). The customer still presses
  * 提交需求单 themselves.
  *
- * **Four reads in three rounds, none of them trusted from the form.** The
- * ownership check and the lines go out together; everything else has to wait for
- * what the read before it answered. The company is read
- * server-side from `portal_users` (the form carries an order id and a locale,
- * and that is all it is allowed to carry), the order is then confirmed to BELONG
- * to that company, and the products are checked against `products_priced` for
- * whether they can still be ordered at all. `orders_read` and `order_items_read`
- * already narrow both tables to the caller's own restaurant — `order_items` is
- * customer-readable through its parent order's company (migration
- * `20260815101406`) — so the explicit `company_id` filter is the same
- * belt-and-suspenders the history page uses: it says out loud whose order is
- * being copied.
+ * **Four reads in three rounds, none of them trusted from the form.** The gate
+ * goes first and answers WHO is asking; the ownership check and the lines then
+ * go out together; the products wait for what the lines named. The company id
+ * comes from the gate's own `portal_users` row (the form carries an order id and
+ * a locale, and that is all it is allowed to carry), the order is then confirmed
+ * to BELONG to that company, and the products are checked against
+ * `products_priced` for whether they can still be ordered at all. `orders_read`
+ * and `order_items_read` already narrow both tables to the caller's own
+ * restaurant — `order_items` is customer-readable through its parent order's
+ * company (migration `20260815101406`) — so the explicit `company_id` filter is
+ * the same belt-and-suspenders the history page uses: it says out loud whose
+ * order is being copied.
  *
- * **Every refusal is silent and lands on the history.** A missing session, an
- * order id that is not this restaurant's, a read that failed: all of them go
- * back to `/pedidos` with no banner, because there is nothing the customer can
- * do about any of them and a crafted POST deserves no answer. What DOES get
- * reported is the honest partial: how many lines were added and how many could
- * not be, which is the pair the cart page's banner reads.
+ * **Refusals: the gate's, then the silent ones.** A missing session or a
+ * deactivated account or restaurant is `requireCompanyUser`'s answer and takes
+ * the portal's ordinary route out (`/login`, `/login?error=inactive`) — the same
+ * one every other customer screen takes, rather than a bounce that leaves a
+ * disabled restaurant pressing a button that quietly does nothing. Everything
+ * after the gate lands back on `/pedidos` with no banner: an order id that is
+ * not this restaurant's, and any of the three reads FAILING.
+ *
+ * **A failed read bails; it never continues on what it did not get.** Both of
+ * the later reads would otherwise produce a confident lie — an empty line list
+ * merges to `?readded=0&skipped=0`, which draws no banner at all and leaves the
+ * customer believing the copy happened, and an empty orderable set skips every
+ * line and blames a catalogue that was never actually asked. Neither is
+ * something the customer can act on, so both go back the way a stranger's order
+ * id does. What DOES get reported is the honest partial: how many lines were
+ * added and how many could not be, which is the pair the cart page's banner
+ * reads.
  */
 export async function reorderIntoCart(formData: FormData): Promise<void> {
   const perf = perfRun("action:cart.reorder");
@@ -200,20 +211,16 @@ export async function reorderIntoCart(formData: FormData): Promise<void> {
   // comes back as a cast error rather than as no rows.
   if (!isUuid(orderId)) redirect(historyHref);
 
-  const user = await perf.step("session", getSessionUser());
-  if (!user) redirect(`/${locale}/login`);
-
+  // The portal's own gate, the one `/perfil`'s writes enter through: it proves
+  // the session, refuses a deactivated user or restaurant the standard way, and
+  // hands back the `portal_users` row this copy is scoped to — which is what
+  // the hand-rolled `getSessionUser` + `portal_users` pair this replaced never
+  // checked. Its two segments are timed by `perfStep` rather than by the run
+  // above, so under `PERF_LOG=1` they may print on a line of their own instead
+  // of this one (see the note on `slot` in `perf.ts`); the three reads that
+  // follow are the ones this action is actually judged on.
+  const { portalUser } = await requireCompanyUser(locale);
   const supabase = await createServerSupabase();
-  const { data: portalUser, error: profileError } = await perf.step(
-    "profile",
-    supabase
-      .from("portal_users")
-      .select("company_id")
-      .eq("id", user.id)
-      .maybeSingle(),
-  );
-  if (profileError) console.error("reorderIntoCart profile:", profileError);
-  if (!portalUser) redirect(historyHref);
 
   // Both on the wire together. The lines can be fetched before the ownership
   // check has answered because `order_items_read` is the thing that actually
@@ -242,7 +249,15 @@ export async function reorderIntoCart(formData: FormData): Promise<void> {
   ]);
   if (orderResult.error) console.error("reorderIntoCart order:", orderResult.error);
   if (!orderResult.data) redirect(historyHref);
-  if (itemResult.error) console.error("reorderIntoCart lines:", itemResult.error);
+  if (itemResult.error) {
+    // Out the same door as a stranger's order id, and for the same reason:
+    // there is nothing left to copy. Falling through with no lines would merge
+    // to `?readded=0&skipped=0` — the one pair the banner renders NOTHING for —
+    // so the customer would land on a cart that did not change and be told
+    // nothing went wrong.
+    console.error("reorderIntoCart lines:", itemResult.error);
+    redirect(historyHref);
+  }
 
   // `order_items.product_id` is a NULLABLE column (`0003_orders.sql`) — the line
   // is a snapshot and keeps its codart, name and price whatever happens to the
@@ -269,7 +284,14 @@ export async function reorderIntoCart(formData: FormData): Promise<void> {
         .select("id, is_orderable")
         .in("id", productIds),
     );
-    if (error) console.error("reorderIntoCart products:", error);
+    if (error) {
+      // Same bail as the lines read. An empty `orderableIds` is not "nothing is
+      // orderable" — it is "nobody asked" — and merging on it would skip every
+      // line and put 已下架 in front of the customer about articles the
+      // catalogue still sells.
+      console.error("reorderIntoCart products:", error);
+      redirect(historyHref);
+    }
     for (const product of data ?? []) {
       // The view widens every column to `| null`; keying off the narrowed value
       // avoids a cast, exactly as the cart page does it.

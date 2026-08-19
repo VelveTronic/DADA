@@ -96,11 +96,14 @@ export type ReorderResult = { cart: Cart; added: number; skipped: number };
  * **Merge, never replace.** The cart is the customer's current intention and a
  * reorder is a shortcut for filling it, so a product that is ALREADY in the cart
  * keeps the quantity they last typed: the past order does not get to overwrite
- * this week's 3 cajas with last week's 12. Those lines count as `skipped`, which
- * is what the banner on the cart page reports.
+ * this week's 3 cajas with last week's 12. Those lines count as `skipped` — a
+ * deliberate outcome rather than a failure, and the reason `cart.reorderSkipped`
+ * names 已在需求单 / "ya en el pedido" alongside the two that really are
+ * refusals. A banner that blamed only the catalogue would be describing a
+ * different function from this one.
  *
- * Three things are refused, all counted the same way because the customer's
- * answer to each is the same — look at the cart:
+ * Three things are refused outright, all counted the same way because the
+ * customer's answer to each is the same — look at the cart:
  *
  *  - a product no longer orderable (`orderableIds` is what the caller read back
  *    from `products_priced`; a discontinued or paused article is not in it, and

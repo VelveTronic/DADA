@@ -101,7 +101,7 @@
     "writeFailed": "No se ha podido actualizar el pedido. Inténtelo de nuevo.",
     "success": "Pedido enviado. Número {n}",
     "reorderAdded": "{n, plural, one {# artículo añadido} other {# artículos añadidos}}",
-    "reorderSkipped": "{n, plural, one {# artículo no se ha podido añadir (no disponible o pedido lleno)} other {# artículos no se han podido añadir (no disponibles o pedido lleno)}}",
+    "reorderSkipped": "{n, plural, one {# artículo no se ha añadido (ya en el pedido, no disponible o pedido lleno)} other {# artículos no se han añadido (ya en el pedido, no disponibles o pedido lleno)}}",
     "errors": {
       "NO_ACTIVE_COMPANY": "Su cuenta todavía no está activada. Contacte con DADA.",
       "COMPANY_NOT_LINKED": "La cuenta no está vinculada al ERP. Contacte con DADA.",
@@ -131,6 +131,7 @@
     "kindsUnits": "{lines, plural, one {# artículo} other {# artículos}} · {units, plural, one {# ud.} other {# uds.}}",
     "note": "Nota: {text}",
     "detail": "Ver detalle",
+    "detailFor": "Ver el detalle del pedido {number}",
     "reorder": "Repetir pedido",
     "reorderFor": "Repetir el pedido {n}",
     "orderNumber": "Pedido {n}",

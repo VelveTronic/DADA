@@ -39,8 +39,13 @@ const THUMB_PX = 44;
  * to the configured 64 and 128 (see the note above), against 48/96 for the 44px
  * row — which is why it is a second size rather than a new single size for
  * everything.
+ *
+ * EXPORTED, unlike its 44px sibling: the row default needs no name at the call
+ * site (`size` is optional and defaults to it), but the order card has to ask
+ * for this one out loud, and a bare `size={50}` there would be a second place
+ * naming a thumbnail size — exactly what the box note below forbids.
  */
-const THUMB_LG_PX = 50;
+export const THUMB_LG_PX = 50;
 
 export type ThumbSize = typeof THUMB_PX | typeof THUMB_LG_PX;
 
@@ -48,7 +53,8 @@ export type ThumbSize = typeof THUMB_PX | typeof THUMB_LG_PX;
  * The box itself, shared by the photo and the empty slot so a product without
  * one keeps its row aligned with every other row. The classes ARE the two
  * constants above — Tailwind cannot read them, so the pairs are kept next to
- * each other and nothing else in the portal names a thumbnail size.
+ * each other, and the numbers 44 and 50 appear nowhere else in the portal: a
+ * caller that wants the large one imports `THUMB_LG_PX` rather than retyping it.
  */
 const THUMB_BOX = "shrink-0 rounded-lg border border-border bg-border";
 const THUMB_BOX_SIZE: Record<ThumbSize, string> = {

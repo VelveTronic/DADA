@@ -5,9 +5,12 @@ import { getTranslations } from "next-intl/server";
  *
  * `reorderIntoCart` merges a past order into the cart and redirects here with
  * the two counts it ended up with, so this is the whole report: how many
- * products were added, and how many could not be. The second half is not an
- * error — a discontinued article and a full demand list are both ordinary — but
- * it is never silent either: a customer who pressed 再来一单 on an eight-line
+ * products were added, and how many were not. The second half is not an error —
+ * `mergeReorderLines` skips a line for three ordinary reasons, and the message
+ * names all three because the customer's next move depends on which it was: the
+ * product is ALREADY in the cart (their own quantity stood, and this is the
+ * common one), the article is no longer orderable, or the 60-line cart is full.
+ * It is never silent either: a customer who pressed 再来一单 on an eight-line
  * order and got six lines has to be told, or they submit a short order believing
  * it is last week's.
  *

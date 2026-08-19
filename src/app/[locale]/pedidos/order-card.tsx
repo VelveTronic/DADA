@@ -1,6 +1,6 @@
 import { getTranslations } from "next-intl/server";
 import { OrderStatusBadge } from "@/components/order-status-badge";
-import { ProductThumb } from "@/components/product-thumb";
+import { ProductThumb, THUMB_LG_PX } from "@/components/product-thumb";
 import { CARD } from "@/components/ui";
 import { localizedName, unitLabel } from "@/lib/catalog/display";
 import { formatEuros } from "@/lib/money";
@@ -27,8 +27,14 @@ export type OrderCardLine = Pick<
   | "line_total_cents"
 >;
 
-/** How many photos the strip shows before it stops. The design draws three. */
-const THUMB_LIMIT = 3;
+/**
+ * How many photos the strip shows before it stops. The design draws three.
+ *
+ * Exported because the page's thumbnail read is bounded by it: a line past the
+ * third can never draw a photo on this card (and the detail panel draws none at
+ * all), so there is no reason to ask the catalogue about its product.
+ */
+export const THUMB_LIMIT = 3;
 
 /**
  * ONE order in a restaurant's history: what it was, what state it is in, and the
@@ -75,10 +81,22 @@ export async function OrderCard({
   // into a second namespace.
   const tCart = await getTranslations("cart");
 
-  // Same locale mapping as `formatEuros` and `formatOrderDate`, so the three
-  // kinds of figure on this card cannot disagree about whether two and a half
-  // kilos is written 2.5 or 2,5. Built once per card rather than per line.
+  // The per-LINE quantity in the panel, mapped exactly as `formatEuros` and
+  // `formatOrderDate` map theirs, so the amount and the money on one line cannot
+  // disagree about whether two and a half kilos is written 2.5 or 2,5. Built
+  // once per card rather than per line. The 合计 N 件 figure in the header does
+  // NOT come through here: next-intl formats it inside the ICU message from the
+  // bare `zh`/`es` locale, so that one agrees with these by CLDR rather than by
+  // construction.
   const qtyFormat = new Intl.NumberFormat(locale === "zh" ? "zh-CN" : "es-ES");
+
+  // An order always HAS lines, so an empty list is the page's line read having
+  // failed. Everything on this card that would otherwise ASSERT something about
+  // them hangs off this one flag — the 共 N 种 figure and the disclosure — because
+  // 共 0 种 · 合计 0 件 is not a degraded card, it is a false statement about a
+  // real order. The photo strip needs no flag: `slice(0, THUMB_LIMIT)` of an
+  // empty list already draws no boxes, so the row loses the strip on its own.
+  const hasLines = lines.length > 0;
 
   return (
     <li className={`${CARD} flex flex-col gap-3 p-3.5`}>
@@ -110,17 +128,19 @@ export async function OrderCard({
             // key unique if an order ever carries the same article twice.
             key={`${line.codart}-${index}`}
             src={line.product_id ? images.get(line.product_id) : null}
-            size={50}
+            size={THUMB_LG_PX}
           />
         ))}
 
         <div className="flex min-w-0 flex-1 flex-col gap-1 pl-1">
-          <p className="text-[13px] font-semibold">
-            {t("kindsUnits", {
-              lines: lines.length,
-              units: orderUnits(lines.map((line) => line.qty)),
-            })}
-          </p>
+          {hasLines && (
+            <p className="text-[13px] font-semibold">
+              {t("kindsUnits", {
+                lines: lines.length,
+                units: orderUnits(lines.map((line) => line.qty)),
+              })}
+            </p>
+          )}
           {/* `text-muted` and not the design's lighter grey: `--color-faint` is
               documented as never being for anything a customer has to READ, and
               the ERP document numbers on this line are precisely what a
@@ -160,14 +180,23 @@ export async function OrderCard({
             read that failed — and a 查看详情 that opens on nothing is worse than
             a card that does not offer it. 再来一单 stays: it re-reads the lines
             server-side and would answer honestly either way. */}
-        {lines.length > 0 && (
+        {hasLines && (
           <details className="group min-w-0 flex-1">
             {/* The summary IS the outlined 查看详情 button. `flex` also removes
                 the disclosure triangle in every engine that draws one as a
                 `list-item` marker; the WebKit pseudo-element is the one that
                 needs saying out loud. The chevron is decoration — the
-                disclosure's own state is announced by the element. */}
-            <summary className="flex h-9 w-fit cursor-pointer list-none items-center rounded-lg border border-border-strong px-3.5 text-xs font-semibold text-ink-soft transition-colors hover:text-ink [&::-webkit-details-marker]:hidden">
+                disclosure's own state is announced by the element.
+
+                The accessible name carries the order, for the same reason
+                再来一单's does: a screen reader's list of controls is fifty
+                identical 查看详情 in a row otherwise, and this one is the
+                summary — the thing a reader lands on to decide whether to open
+                it. The visible label stays the short one. */}
+            <summary
+              aria-label={t("detailFor", { number: order.order_number })}
+              className="flex h-9 w-fit cursor-pointer list-none items-center rounded-lg border border-border-strong px-3.5 text-xs font-semibold text-ink-soft transition-colors hover:text-ink [&::-webkit-details-marker]:hidden"
+            >
               {t("detail")}
               <span
                 aria-hidden
