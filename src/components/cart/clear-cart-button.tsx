@@ -56,10 +56,15 @@ export function ClearCartButton() {
   // stale:
   //
   //  - a list that LOST or GAINED a line under an armed button is not the list
-  //    the customer armed it over, so the count stops matching and the arming
-  //    lapses for free. In practice the blur below usually gets there first —
-  //    pressing a `×` or a `−` moves focus off this control — and this is what
-  //    holds where nothing was pressed at all;
+  //    the customer armed it over, so the count stops matching and the button
+  //    SUSPENDS. Suspends, not lapses: nothing nulls `arming`, so if the count
+  //    comes back — a failed line write reverting its optimistic change — the
+  //    armed state returns without a press. The window is small and
+  //    self-sealing: `armed` flipping true re-runs the timer effect, which
+  //    gives the returned state the same 4 seconds it gives a fresh one. In
+  //    practice the blur below usually gets there first — pressing a `×` or a
+  //    `−` moves focus off this control — and this is what holds where nothing
+  //    was pressed at all;
   //  - the confirming press spends the arming outright. Returning null further
   //    down does NOT unmount this component — React keeps the instance at that
   //    position in the tree, hooks and all — so a plain `armed` boolean would

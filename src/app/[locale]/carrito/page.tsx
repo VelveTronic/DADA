@@ -288,15 +288,18 @@ export default async function CartPage({
               baseline with different ascents. Either way it is the BUTTON that
               sets this bar's height.
 
-              BLOCKED, the bar grows by one line: the `role="status"` sentence is
-              16px of `text-xs` leading + 8px of `py-1` + the 8px `mb-2` under it
-              = 32px, so 93 + max(14, S) — 107px, and 127px at S = 34. `pb-36` is
-              144px, which clears that by the same 17px. The reservation is a
+              BLOCKED, the bar grows: the `role="status"` sentence is `text-xs`
+              (16px a line) + 8px of `py-1` + the 8px `mb-2` under it. zh stays
+              on one line (32px extra — 107px measured), but the es wordings run
+              to ~77 characters, which wrap to TWO lines in the 342px the bar's
+              paddings leave at 390px: 48px extra, so the tallest bar is
+              61 + 48 + max(14, S) — 123px, and 143px at S = 34. `pb-40` is
+              160px, which clears that worst case by 17px. The reservation is a
               ternary rather than the taller class always, because the amber line
-              is the exception on this screen and 32px of dead scroll under every
+              is the exception on this screen and 48px of dead scroll under every
               ordinary cart is a cost paid by the customers whose order is
               fine. */}
-          <div className={blockedMessage ? "pb-36" : "pb-28"}>
+          <div className={blockedMessage ? "pb-40" : "pb-28"}>
             <ul className={`${CARD} mt-4 divide-y divide-border px-4`}>
               {rows.map((row) => {
                 const name = localizedName(row.product?.name, locale);
