@@ -32,7 +32,14 @@ export function DisplayNameForm({
   labels: { displayName: string; displayNameHint: string; save: string };
 }) {
   return (
-    <form action={updateDisplayName} className="mt-4">
+    // The card this sits in pads its own ROWS rather than its box (design 07's
+    // section head and key/value rows run to the card's edge and draw their own
+    // rules), so the form carries the gutter and the rule that separates it from
+    // the row above. Class names only — nothing about the submit changed.
+    <form
+      action={updateDisplayName}
+      className="border-t border-border px-4 py-4"
+    >
       <input type="hidden" name="locale" value={locale} />
       <label className="flex flex-col gap-1 text-sm">
         {labels.displayName}
@@ -83,7 +90,11 @@ export function PasswordForm({
   const eyes = { show: labels.showPassword, hide: labels.hidePassword };
 
   return (
-    <form action={changePassword} className="mt-4 grid max-w-sm gap-3">
+    // Same gutter and rule as the form above, for the same reason.
+    <form
+      action={changePassword}
+      className="grid max-w-sm gap-3 border-t border-border px-4 py-4"
+    >
       <input type="hidden" name="locale" value={locale} />
 
       <label className="flex flex-col gap-1 text-sm">
