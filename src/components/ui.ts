@@ -137,13 +137,56 @@ export const STEPPER_INC =
  * a plausible order of 120 cajas into `12…`; `max-w-7` is the next native
  * Tailwind step up and buys the whole three-digit range for two pixels.
  *
- * Nothing is lost when it does abbreviate. The number is the full text of the
- * `aria-live` span this class is on, so a screen reader announces the exact
- * quantity; the cart cookie stores it exactly; and the cart page — where a
- * four-figure order line is actually read and edited — has room to show it.
- * This catalogue box is the one place a figure is shortened, and it is
- * shortened because the pixels it would take back come straight off the product
- * name (see the width arithmetic on `ROW` in `product-row.tsx`).
+ * **Four digits are abbreviated in every LIST, this one and the cart's.** That
+ * used to read "the cart page has room to show it", and it was true only while
+ * the cart drew its own 96px number box; since design 02 that page carries this
+ * same stepper, so a four-figure quantity is ellipsised on both screens — the
+ * 34.75px measured above against this 28px box.
+ *
+ * What is not lost is the QUANTITY: the figure is the full text of the
+ * `aria-live` span this class is on, so a screen reader announces it exactly,
+ * the cookie stores it exactly, and the line's own amount is computed from it
+ * and not from what fits here. The pixels a wider box would take back come
+ * straight off the product name (see the width arithmetic on `ROW` in
+ * `product-row.tsx`), and the four-digit line is the rarest thing on either
+ * screen — 9999 is the cookie's cap.
+ *
+ * Where an exact figure is READ and TYPED is the cart page, in the editable
+ * centre below — the one box in the portal a customer can put 24 into instead
+ * of pressing `+` twenty-four times.
  */
 export const STEPPER_QTY =
   "min-w-6 max-w-7 truncate text-center font-num text-[15px] font-semibold tabular-nums";
+
+/**
+ * The same figure, on the cart page, as a box the customer can type in
+ * (`QtyStepper`'s `editable` mode — the catalogue keeps the span above).
+ *
+ * Everything that makes it look like the span is copied from it: the numeral
+ * face, 15px/600, tabular figures, centred. Preflight gives a form control
+ * `font: inherit; color: inherit; background-color: transparent`
+ * (`node_modules/tailwindcss/preflight.css`), so the box inherits the row's ink
+ * on the row's ground and draws no border, no fill and no chrome of its own —
+ * `− 12 +` is the same drawing on both screens.
+ *
+ * Three deliberate differences, and only three:
+ *
+ *  - **`w-7` fixed (28px), not `min-w-6 max-w-7`.** The span may grow with its
+ *    digits because nothing is pointing at it: it sits at the 24px floor
+ *    through two digits and widens to 26.06 at three. A box being typed INTO
+ *    must not resize under the caret — that same third digit would nudge the
+ *    `+` two pixels while a thumb is over it — so it takes the ceiling and
+ *    holds it. 28px is what the 96px slot is sized against either way, so no
+ *    row is any wider than before.
+ *  - **the spinners are off.** `type="number"` earns the numeric keypad on a
+ *    phone and the browser's own digit filtering, and costs a pair of
+ *    increment arrows that WebKit and Gecko would draw inside 28px, on top of
+ *    the figure, beside the two 32px squares that already do exactly that job.
+ *  - **a brand focus ring.** The box has no resting outline to thicken, so
+ *    focus is drawn rather than restyled: 2px of `--color-brand` (#E0231C,
+ *    4.7:1 on the card's white — contrast is symmetric, so it is the figure
+ *    `globals.css` records for white ON that fill — where WCAG 2.2 asks 3:1 of
+ *    a non-text indicator) with a 1px offset that keeps it clear of the glyphs.
+ */
+export const STEPPER_QTY_INPUT =
+  "w-7 truncate text-center font-num text-[15px] font-semibold tabular-nums [appearance:textfield] focus-visible:rounded-sm focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-brand [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none";

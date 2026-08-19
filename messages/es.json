@@ -78,6 +78,7 @@
     "qty": "Cantidad",
     "qtyFor": "Cantidad: {name}",
     "decreaseFor": "Quitar una unidad: {name}",
+    "increaseFor": "Añadir una unidad: {name}",
     "update": "Actualizar",
     "remove": "Quitar",
     "removeFor": "Quitar: {name}",

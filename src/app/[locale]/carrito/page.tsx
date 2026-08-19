@@ -4,18 +4,18 @@ import { cookies } from "next/headers";
 import Link from "next/link";
 import { submitOrder } from "@/app/actions/checkout";
 import { AppShell } from "@/components/app-shell";
+import { CartBarFigures } from "@/components/cart/cart-bar-figures";
 import {
   CartLine,
   CartQtyInput,
   CartRemoveButton,
-  CartSubtotal,
 } from "@/components/cart/cart-line";
 import { ClearCartButton } from "@/components/cart/clear-cart-button";
 import { QtyStepper } from "@/components/cart/qty-stepper";
 import { ProductThumb } from "@/components/product-thumb";
 import { BTN_PRIMARY, CARD, FIELD } from "@/components/ui";
 import { beginCompanyUser, finishCompanyUser } from "@/lib/auth/guards";
-import { CART_COOKIE, cartUnits, parseCart } from "@/lib/cart";
+import { CART_COOKIE, parseCart } from "@/lib/cart";
 import { localizedName, unitLabel } from "@/lib/catalog/display";
 import { formatEuros, lineTotalCents } from "@/lib/money";
 import {
@@ -155,13 +155,13 @@ export default async function CartPage({
       return (a.product?.codart ?? "").localeCompare(b.product?.codart ?? "");
     });
 
-  // The SERVER's answer, and now only for the submit button and the banner
-  // beside it. The subtotal on screen comes from the provider (`CartSubtotal`),
-  // so it cannot lag an optimistically removed row — but whether checkout is
-  // OPEN is the one thing that must not move optimistically: a button enabled
-  // ahead of the cookie is a button that submits an order the server is about
-  // to refuse. It settles a beat later, conservatively, which is the right way
-  // round.
+  // The SERVER's answer, and now ONLY for the submit button and the sentence
+  // that explains it. Every figure in the bar comes from the provider
+  // (`CartBarFigures`), so none of them can lag an optimistically removed row —
+  // but whether checkout is OPEN is the one thing that must not move
+  // optimistically: a button enabled ahead of the cookie is a button that
+  // submits an order the server is about to refuse. It settles a beat later,
+  // conservatively, which is the right way round.
   const priceable =
     rows.length > 0 && rows.every((row) => row.totalCents != null);
 
@@ -191,10 +191,10 @@ export default async function CartPage({
   // itself here instead (`cart/cart-bar.tsx`), because this page's own submit
   // bar is at the bottom of the same screen and says the same figures.
   //
-  // With the owner's switch OFF the map is not built at all: the subtotal row
-  // and every line amount are omitted server-side, so the only consumer left
-  // (`CartSubtotal`) never renders, and there is no reason to ship the tarifa
-  // into the browser to be discarded. Same rule as the catalogue's.
+  // With the owner's switch OFF the map is not built at all: every line amount
+  // is omitted server-side and the bar's own tail says 无需付款 instead of a
+  // total, so there is no reason to ship the tarifa into the browser to be
+  // discarded. Same rule as the catalogue's.
   const cartPrices: Record<string, number> | undefined = showPrices ? {} : undefined;
   if (cartPrices) {
     for (const row of rows) {
@@ -203,21 +203,6 @@ export default async function CartPage({
       }
     }
   }
-
-  // The submit bar's two figures, and both are the SERVER's — `rows.length` is
-  // the cookie's line count and `cartUnits` adds the same cookie's quantities up
-  // (rounded to the cookie's own three decimals, so a weighed 2 + 0.75 reads
-  // 2.75 and never 2.7500000000000004).
-  //
-  // Deliberately not the provider's optimistic mirror, which the rows and the
-  // subtotal beside them DO use. The button between them is server truth — it is
-  // enabled only once the cookie the server read can actually be ordered (see
-  // `priceable` above) — so the count next to it is read as a description of
-  // what that button will submit. Two figures that ran ahead of it would say a
-  // different cart is about to be sent than the one that is. The cost is one
-  // beat of lag after a removal: the row vanishes at once, the figures settle
-  // when the cookie's render lands, which is the same beat the button takes.
-  const units = cartUnits(cart);
 
   const today = madridDay(new Date());
   // Minted per render, and the page is force-dynamic: resubmitting the SAME
@@ -250,7 +235,7 @@ export default async function CartPage({
         <h1 className="min-w-0 truncate text-lg font-bold">{t("title")}</h1>
         {/* Renders nothing at all on an empty cart, which is why the row needs
             no placeholder beside the title. */}
-        <ClearCartButton locale={locale} />
+        <ClearCartButton />
       </div>
 
       {error && (
@@ -287,14 +272,31 @@ export default async function CartPage({
               is precisely where the tab bar is not drawn).
 
               The bar measures, from the glass up: 1px of hairline + 12px of
-              `pt-3` + the 48px submit button, which is the tallest thing in it
-              (the count column is a 28px line over a 13px one = 41px) + its
-              bottom padding, `max(0.875rem, env(safe-area-inset-bottom))`. That
-              is 61 + max(14, S), so 75px on a phone with no home indicator and
-              95px on one with S = 34. `pb-28` is 112px, which clears the taller
-              of the two by 17px — and the shell's own 72 + S underneath it is
-              margin on top of that, not the reservation. */}
-          <div className="pb-28">
+              `pt-3` + the 48px submit button, which is the tallest thing in the
+              controls row + its bottom padding, `max(0.875rem,
+              env(safe-area-inset-bottom))`. That is 61 + max(14, S): 75px on a
+              phone with no home indicator, 95px on one with S = 34. `pb-28` is
+              112px, which clears the taller of the two by 17px — and the shell's
+              own 72 + S underneath it is margin on top of that, not the
+              reservation.
+
+              The figures column beside the button is shorter, measured at 45.5px
+              on a 390px phone: a 28px first line (`text-xs` copy around the
+              18px/28px `text-lg` count) over a second that computes 16.5px — the
+              11px type at the 1.5 line-height preflight puts on `html` — and
+              draws 17.5, because the Archivo amount and the CJK words share one
+              baseline with different ascents. Either way it is the BUTTON that
+              sets this bar's height.
+
+              BLOCKED, the bar grows by one line: the `role="status"` sentence is
+              16px of `text-xs` leading + 8px of `py-1` + the 8px `mb-2` under it
+              = 32px, so 93 + max(14, S) — 107px, and 127px at S = 34. `pb-36` is
+              144px, which clears that by the same 17px. The reservation is a
+              ternary rather than the taller class always, because the amber line
+              is the exception on this screen and 32px of dead scroll under every
+              ordinary cart is a cost paid by the customers whose order is
+              fine. */}
+          <div className={blockedMessage ? "pb-36" : "pb-28"}>
             <ul className={`${CARD} mt-4 divide-y divide-border px-4`}>
               {rows.map((row) => {
                 const name = localizedName(row.product?.name, locale);
@@ -315,7 +317,14 @@ export default async function CartPage({
                   // long note on `ROW` in `product-row.tsx` — this is the same
                   // shape at this page's own measurements, and 254px is what the
                   // name and the controls divide between them on a 390px phone
-                  // (390 − 32 page − 32 card − 48 thumb − 24 of column gaps).
+                  // (390 − 32 page − 32 card − 48 thumb TRACK − 24 of column
+                  // gaps). 48 is the TRACK: the photo in it is 44px
+                  // (`ProductThumb` — the design's thumbnail, and the same one
+                  // the catalogue draws in a 2.75rem track). A grid item with a
+                  // definite width sits at the start of its column, so the spare
+                  // 4px falls to the RIGHT of the picture and widens the gap
+                  // before the name; the 254px is unaffected either way, since
+                  // it counts the whole track.
                   <CartLine
                     key={row.productId}
                     productId={row.productId}
@@ -391,27 +400,36 @@ export default async function CartPage({
                         would be busywork.
 
                         WHICH control is the one thing this page still decides
-                        for itself: whole-unit lines get the catalogue's `− n +`,
-                        so the same product is edited the same way on both
-                        screens, and WEIGHED lines keep the typed box, because a
-                        stepper cannot express 2.75 kg. Both are 96px wide (the
-                        box stacks its 更新 underneath on a phone — see
-                        `cart-line.tsx`), so the name column is the same width on
-                        every row of the list. */}
+                        for itself: whole-unit lines get the catalogue's `− n +`
+                        with a typed centre (`editable`), so the same product is
+                        edited the same way on both screens and 24 cajas is still
+                        one entry rather than 24 taps; WEIGHED lines keep the
+                        typed box, because a stepper cannot express 2.75 kg. Both
+                        are 96px wide (the box stacks its 更新 underneath on a
+                        phone — see `cart-line.tsx`), so every row that can be
+                        ordered gives its name the same 118px. A row that cannot
+                        has only the 36px `×` here, and its name takes the other
+                        100px back (218 of the 254): this track is `auto` where
+                        the catalogue's is fixed, because nothing on this page
+                        GROWS on a press — the reason that one is fixed is the
+                        stepper appearing under the customer's finger, which
+                        cannot happen on a list of lines already in the cart. */}
                     <div className="flex items-center gap-1">
                       {orderable &&
                         (weighed ? (
-                          <CartQtyInput
-                            productId={row.productId}
-                            name={name}
-                            weighed
-                          />
+                          <CartQtyInput productId={row.productId} name={name} />
                         ) : (
                           <QtyStepper
                             productId={row.productId}
                             name={name}
                             priced={priced}
                             showPrices={showPrices}
+                            // THE cart page's stepper: its centre figure is a
+                            // box the quantity can be typed into, and its `+`
+                            // says 增加数量 rather than 加入需求单 on the page
+                            // that IS the 需求单. The catalogue's stepper passes
+                            // neither and is unchanged.
+                            editable
                           />
                         ))}
                       <CartRemoveButton productId={row.productId} name={name} />
@@ -437,15 +455,6 @@ export default async function CartPage({
               <span aria-hidden>+</span>
               {t("keepAdding")}
             </Link>
-
-            {blockedMessage && (
-              <p
-                role="status"
-                className="mt-4 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800"
-              >
-                {blockedMessage}
-              </p>
-            )}
 
             {/* No line inputs: submitOrder reads them from the httpOnly cookie,
                 so nothing here can add a product or set a price.
@@ -542,68 +551,72 @@ export default async function CartPage({
               anchored to. Every clearance above is written against the same
               expression. */}
           <div className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-surface px-4 pt-3 pb-[max(0.875rem,env(safe-area-inset-bottom))]">
-            <div className="mx-auto flex max-w-5xl items-center justify-between gap-3">
-              <div className="min-w-0">
-                {/* Both figures are the server's — see the note where `units` is
-                    computed. `<n>` is a TAG rather than a value because only a
-                    tag can carry markup through a translation, and the count and
-                    its unit have to stay in one sentence for a translator (the
-                    Spanish one is a plural). */}
-                <p className="truncate text-xs text-muted">
-                  {t.rich("kindsCount", {
-                    lines: rows.length,
-                    n: (chunks) => (
-                      <b className="font-num text-lg font-bold tabular-nums">
-                        {chunks}
-                      </b>
-                    ),
-                  })}
-                </p>
-                {/* The mockup paints this line in the design's faintest grey,
-                    and this is one of the places the repo does not follow it.
-                    `text-faint` is #A8A099, 2.58:1 on the white bar, and
-                    `globals.css` licenses that token for placeholders and for
-                    text that repeats what a label already said — neither of
-                    which this line is any more. The subtotal row is GONE from
-                    this page, so the amount at the end of it is the only place
-                    the cart's money is written, and 合计 N 件 is the only place
-                    the units are. `text-muted` is the same warm grey a shade
-                    darker (5.57:1 on white) and clears AA. Same call as the tab
-                    bar's labels and the /cuenta card. */}
-                <p className="truncate text-[11px] text-muted">
-                  {t("unitsTotal", { n: units })}
-                  {" · "}
-                  {showPrices ? (
-                    <>
-                      {/* The visible 小计 label went with the subtotal row this
-                          bar replaced, so it is said here for screen readers
-                          only: an amount at the end of a line of counts does not
-                          say what it is the total of. */}
-                      <span className="sr-only">{t("subtotal")}: </span>
-                      <CartSubtotal locale={locale} />
-                    </>
-                  ) : (
-                    // Not a blank where the money was: with the owner's switch
-                    // off this portal is a demand list, and saying so is the
-                    // point of the line.
-                    t("noPayment")
-                  )}
-                </p>
-              </div>
+            <div className="mx-auto max-w-5xl">
+              {/* WHY THE REFUSAL IS IN THE BAR. It used to sit in the flow, at
+                  the foot of the list — which on a full cart is fifteen rows
+                  above the dead button it explains, off screen, while the button
+                  itself is pinned in front of the customer with nothing but a
+                  `title` tooltip a phone never shows. A sentence that explains a
+                  control belongs beside that control. Here it is always in the
+                  same frame as the button it is about, and the clearance above
+                  is written against the taller bar it makes.
 
-              {/* Outside its own form, and joined back to it by `form=`. The
-                  DISABLED state is the server's answer and only the server's:
-                  a button enabled ahead of the cookie is a button that submits
-                  an order the server is about to refuse (see `priceable`). */}
-              <button
-                form="checkout-form"
-                type="submit"
-                disabled={!priceable}
-                title={blockedMessage ?? undefined}
-                className="h-12 max-w-[196px] flex-1 rounded-[11px] bg-brand text-[15px] font-semibold text-white shadow-[0_6px_16px_-6px_rgba(224,35,28,.6)] transition-colors hover:bg-brand-ink disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                {t("submitOrder")}
-              </button>
+                  `role="status"` and not `alert`: this is a state the page was
+                  rendered in, not something that just went wrong — the customer
+                  did nothing to be interrupted for, and polite is what gets it
+                  read after whatever they were already reading. It is the
+                  banner's own amber, one type size down, because it is now a
+                  caption on a control rather than a block on the page. The
+                  `?error=` banner at the top of the page is a different thing
+                  and stays where it is: that one is the answer to a submit that
+                  already happened. */}
+              {blockedMessage && (
+                <p
+                  role="status"
+                  className="mb-2 rounded-lg bg-amber-50 px-2 py-1 text-xs text-amber-800"
+                >
+                  {blockedMessage}
+                </p>
+              )}
+
+              <div className="flex items-center justify-between gap-3">
+                {/* Every figure on this side is the PROVIDER's, on one clock —
+                    see `cart-bar-figures.tsx`. The button beside it is the
+                    server's, deliberately, and that split is the whole design of
+                    this bar. */}
+                <CartBarFigures locale={locale} showPrices={showPrices} />
+
+                {/* Outside its own form, and joined back to it by `form=`. The
+                    DISABLED state is the server's answer and only the server's:
+                    a button enabled ahead of the cookie is a button that submits
+                    an order the server is about to refuse (see `priceable`).
+
+                    Composed from `BTN_PRIMARY` rather than spelled out again:
+                    this is the portal's one accent button and there must be ONE
+                    source for what that looks like — the fill, the hover, the
+                    disabled treatment and the weight all arrive from it, and a
+                    change to the accent reaches this screen with the rest. The
+                    concession is 1px of radius: `BTN_PRIMARY` is `rounded-[10px]`
+                    and the mockup draws 11 here. Overriding it would put two
+                    arbitrary one-class utilities on the same element, whose
+                    winner is decided by their order in the generated stylesheet
+                    rather than by the order they are written in — the trap
+                    `ui.ts` documents at `ICON_BTN_BASE`, and not a trap worth
+                    springing for a pixel nobody can see. Its `px-4 py-2` are
+                    inert here: `h-12` fixes the box at 48px and the flex
+                    centring places the label in it, so the padding only insets a
+                    22.5px line inside 48px of height and leaves the 15px label
+                    room to spare inside 196px of width in both languages. */}
+                <button
+                  form="checkout-form"
+                  type="submit"
+                  disabled={!priceable}
+                  title={blockedMessage ?? undefined}
+                  className={`${BTN_PRIMARY} inline-flex h-12 max-w-[196px] flex-1 items-center justify-center text-[15px] shadow-[0_6px_16px_-6px_rgba(224,35,28,.6)]`}
+                >
+                  {t("submitOrder")}
+                </button>
+              </div>
             </div>
           </div>
         </>

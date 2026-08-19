@@ -226,7 +226,7 @@ export async function AppShell({
   );
 
   return (
-    <CartProvider cart={cart} prices={cartPrices ?? {}}>
+    <CartProvider cart={cart} prices={cartPrices ?? {}} locale={locale}>
       {viewport ? <div className="flex h-dvh flex-col">{frame}</div> : frame}
     </CartProvider>
   );

@@ -78,6 +78,7 @@
     "qty": "数量",
     "qtyFor": "数量：{name}",
     "decreaseFor": "减少数量：{name}",
+    "increaseFor": "增加数量：{name}",
     "update": "更新",
     "remove": "移除",
     "removeFor": "移除：{name}",

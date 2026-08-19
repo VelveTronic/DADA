@@ -11,7 +11,11 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { setCartLineQty, type CartErrorCode } from "@/app/actions/cart";
+import {
+  clearCart,
+  setCartLineQty,
+  type CartErrorCode,
+} from "@/app/actions/cart";
 import { cartUnits, trySetQty, type Cart } from "@/lib/cart";
 import { cartSubtotalCents } from "@/lib/money";
 
@@ -38,6 +42,15 @@ import { cartSubtotalCents } from "@/lib/money";
  * and dropping the optimistic layer IS the revert — all that is left for this
  * file to do is say why, which is what `error` carries.
  *
+ * `clearAll` is the same pipeline with `clearCart` in the middle (which
+ * revalidates BOTH cart paths instead of refreshing one — see the note on the
+ * action). Every write the browser can make is in this file, and that is
+ * deliberate: a component that called a cart action itself would be a second
+ * writer with no optimistic layer and, worse, no catch — an uncaught rejection
+ * inside a transition takes the whole route to the error boundary, and this
+ * portal draws no `error.tsx` anywhere. A failed cart write must cost a banner,
+ * never the screen.
+ *
  * Borrowed wholesale from TOKACHI's cart (`components/cart/cart-context.tsx`,
  * `quick-add-button.tsx`): press-to-stepper in place, feedback that stays on
  * the page, a header count and a bottom bar reading one shared value. What is
@@ -48,6 +61,18 @@ import { cartSubtotalCents } from "@/lib/money";
 
 /** `full`/`qty` come from the server; `writeFailed` is a request that never landed. */
 export type CartError = CartErrorCode | "writeFailed";
+
+/**
+ * What one optimistic change can be. A union and not a second `useOptimistic`:
+ * a hook owns exactly ONE base state, so a clear kept in its own would paint
+ * over a cart the line-level one had already changed (or the other way round)
+ * and the two mirrors would disagree the moment a press landed inside a clear's
+ * round trip. Both writes the browser can make go through the same reducer,
+ * which is also why both settle onto the same cookie.
+ */
+type CartChange =
+  | { kind: "qty"; productId: string; qty: number }
+  | { kind: "clear" };
 
 type CartContextValue = {
   /** 0 when the product is not in the cart. Fractions are real (weighed goods). */
@@ -66,6 +91,13 @@ type CartContextValue = {
   subtotalCents: number | null;
   /** Absolute quantity for one line; 0 removes it. Optimistic, then authoritative. */
   setQty: (productId: string, qty: number) => void;
+  /**
+   * Empty the whole cart — 清空, and nothing else calls it. Same mechanism as
+   * `setQty` down to the catch: the failure surface is this provider's banner,
+   * never a thrown promise, so a clear that never landed cannot take the page
+   * down with it.
+   */
+  clearAll: () => void;
   /** The last refusal, or null. Cleared by the next write that succeeds. */
   error: CartError | null;
 };
@@ -85,6 +117,7 @@ export function useCart(): CartContextValue {
 export function CartProvider({
   cart,
   prices,
+  locale,
   children,
 }: {
   /** The server-parsed cookie. New object every render; that is the point. */
@@ -96,12 +129,21 @@ export function CartProvider({
    * an empty map buys a page that renders no amounts at all.
    */
   prices: Record<string, number>;
+  /**
+   * Only `clearAll` needs it, and only to name the two paths that action
+   * revalidates. It is a prop rather than a hook read for the same reason every
+   * other cart leaf takes one: the shell already has it, and the action
+   * re-narrows whatever arrives anyway (`safeLocale`).
+   */
+  locale: string;
   children: ReactNode;
 }) {
   const [optimisticCart, applyChange] = useOptimistic(
     cart,
-    (current: Cart, change: { productId: string; qty: number }) =>
-      trySetQty(current, change.productId, change.qty),
+    (current: Cart, change: CartChange): Cart =>
+      change.kind === "clear"
+        ? {}
+        : trySetQty(current, change.productId, change.qty),
   );
   const [error, setError] = useState<CartError | null>(null);
 
@@ -116,7 +158,7 @@ export function CartProvider({
       startTransition(async () => {
         // On the current frame, before the await — `useOptimistic` setters are
         // not deferred the way `useState` setters inside a transition are.
-        applyChange({ productId, qty });
+        applyChange({ kind: "qty", productId, qty });
         try {
           const result = await setCartLineQty(productId, qty);
           setError(result.ok ? null : result.code);
@@ -131,6 +173,28 @@ export function CartProvider({
     [applyChange],
   );
 
+  const clearAll = useCallback(() => {
+    startTransition(async () => {
+      // The same frame, the same order, the same catch as `setQty` above — the
+      // one difference is that there is no refusal to render: `clearCart`
+      // cannot say no (an empty cart is always a legal cart), so the only thing
+      // that can go wrong is the trip itself.
+      //
+      // The optimistic empty is not decoration either. It is what makes 清空
+      // take the list, the bar's figures and the button off screen on the press
+      // rather than a round trip later — and, when the write fails, dropping
+      // this layer at the end of the transition IS the revert: every line comes
+      // back off the cookie that was never written, under the banner below.
+      applyChange({ kind: "clear" });
+      try {
+        await clearCart(locale);
+        setError(null);
+      } catch {
+        setError("writeFailed");
+      }
+    });
+  }, [applyChange, locale]);
+
   const value = useMemo<CartContextValue>(
     () => ({
       qtyOf: (productId: string) => optimisticCart[productId] ?? 0,
@@ -138,9 +202,10 @@ export function CartProvider({
       units: cartUnits(optimisticCart),
       subtotalCents: cartSubtotalCents(optimisticCart, prices),
       setQty,
+      clearAll,
       error,
     }),
-    [optimisticCart, prices, setQty, error],
+    [optimisticCart, prices, setQty, clearAll, error],
   );
 
   return <CartContext.Provider value={value}>{children}</CartContext.Provider>;
