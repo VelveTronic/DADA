@@ -22,6 +22,7 @@
     "account": "Mi cuenta",
     "addresses": "Mi dirección de entrega",
     "profile": "Mis datos",
+    "headerLabel": "Navegación superior",
     "tabsLabel": "Navegación",
     "tabCatalog": "Catálogo",
     "tabSearch": "Buscar",
@@ -45,6 +46,7 @@
     "noPrice": "Precio pendiente",
     "favAdd": "Añadir a favoritos",
     "favRemove": "Quitar de favoritos",
+    "pagerLabel": "Paginación",
     "prev": "Anterior",
     "next": "Siguiente",
     "pageOf": "Página {page} de {total}"

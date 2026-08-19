@@ -52,9 +52,11 @@ export default async function ProfilePage({
   const nameResult = isProfileResult(rawNameText) ? rawNameText : null;
   const pwdResult = isProfileResult(rawPwdText) ? rawPwdText : null;
 
-  // This page prices nothing, but the phone's cart bar rides under every
-  // customer page — and with the owner's switch off it must not show the
-  // subtotal slot at all, here as anywhere else.
+  // This page prices nothing, and no bar over it prices anything either: the
+  // demand bar draws on 分类 and 搜索 alone (`cart/cart-bar.tsx`). The switch is
+  // read because `AppShell` takes it from every customer page — one contract
+  // rather than a prop each page decides whether to honour — so it is threaded
+  // through here and nothing downstream of it draws.
   //
   // It used to be read on a line of its own, AFTER the guard had finished: a
   // page whose whole content is already in hand paying a second full round trip

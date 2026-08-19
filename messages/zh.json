@@ -22,6 +22,7 @@
     "account": "我的账号",
     "addresses": "我的配送地址",
     "profile": "我的信息",
+    "headerLabel": "顶部导航",
     "tabsLabel": "页面导航",
     "tabCatalog": "分类",
     "tabSearch": "搜索",
@@ -45,6 +46,7 @@
     "noPrice": "价格待定",
     "favAdd": "收藏",
     "favRemove": "取消收藏",
+    "pagerLabel": "分页",
     "prev": "上一页",
     "next": "下一页",
     "pageOf": "第 {page} 页 / 共 {total} 页"

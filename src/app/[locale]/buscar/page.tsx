@@ -192,17 +192,27 @@ export default async function SearchPage({
           form row, the row's 44 — its `items-center` line is as tall as the
           取消 link's `h-11`, not the 40px field — and 12 below it). It costs an
           empty screen the ability to be flicked past its content by the shell's
-          header plus `<main>`'s own bottom inset: ~133px on a phone, ~125px on
-          a desktop. The alternative was subtracting those two by hand here,
+          header plus `<main>`'s own bottom inset: 61 + 72 = ~133px on a phone
+          (plus the safe area, which rides in that inset), 61 + 64 = ~125px on a
+          desktop. The alternative was subtracting those two by hand here,
           which is a number about the SHELL and would go stale inside it.
 
           The sheet's bottom PADDING is what the phone's two floating bars need
-          under the last row: they reach 114px up from the glass between them —
-          the tab bar's 56px row and its hairline, a 7px gap, and the 50px
-          demand bar (`tab-bar.tsx`, `cart/cart-bar.tsx`) — and 144px of white
-          is that with the design's own tail on top of it, so the sheet does not
-          end where its last row does. The desktop has neither bar; 64px is its
-          tail. */}
+          under the last row. What they need is 114px + `env(safe-area-inset-
+          bottom)` up from the glass: the tab bar is 1px of hairline over a 56px
+          row over the inset, then a 7px gap, then the 50px demand bar
+          (`tab-bar.tsx`, `cart/cart-bar.tsx`).
+
+          What is actually reserved is more than that, and deliberately: this
+          screen is `layout="page"`, so `<main>` ALSO pays its own
+          `4.5rem + env(…)` under the sheet (`app-shell.tsx`) — that padding is
+          outside this element, not instead of it. The two stack: 144px of
+          sheet + 72px + the inset of `<main>` = 216px + the inset below the
+          last row, against 114px + the inset needed. The excess is dead scroll
+          and it is accepted — the plan fixed the sheet at 144, and the point of
+          the number is that the white surface always outruns the bars rather
+          than ending under them, which a tighter figure would only just do.
+          The desktop has neither bar; 64px is its tail. */}
       <div className="-mx-4 min-h-dvh bg-surface pb-36 lg:pb-16">
         {/* A plain GET form, submitting to this same page. Enter (the phone
             keyboard's 搜索 key) is what submits it, and the result is an
@@ -340,7 +350,14 @@ export default async function SearchPage({
             )}
 
             {totalPages > 1 && (
-              <nav className="flex items-center justify-center gap-2 py-4 text-sm">
+              // NAMED, from the catalogue's namespace like the three strings
+              // inside it: a screen reader meets this landmark beside the
+              // `role="search"` form and the tab bar, and "navigation" alone
+              // would not say which of them it is.
+              <nav
+                aria-label={tCatalog("pagerLabel")}
+                className="flex items-center justify-center gap-2 py-4 text-sm"
+              >
                 {/* Two anchors at the bottom of a fifty-row list, thumbed on a
                     phone: 44px tall and padded wide enough to hit without
                     aiming. The catalogue's pager, with the search in the href. */}

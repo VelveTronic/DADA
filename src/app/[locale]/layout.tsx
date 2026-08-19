@@ -31,11 +31,21 @@ const archivo = Archivo({
 
 /**
  * `viewport-fit=cover` is what makes `env(safe-area-inset-*)` report real
- * numbers. Without it iOS answers 0 for all four, so the mobile cart bar's
- * `pb-[max(0.75rem,env(safe-area-inset-bottom))]` silently collapses to the
- * 0.75rem floor and the bar sits under the home indicator on every notched
- * iPhone. Next's defaults for width and initial-scale are kept; this only adds
- * the fit.
+ * numbers. Without it iOS answers 0 for all four, and everything the phone's
+ * bottom edge is built out of silently collapses to its zero case: the tab
+ * bar's `pb-[env(safe-area-inset-bottom)]` — the strip of white that keeps the
+ * home indicator off four 56px targets — becomes no padding at all; the demand
+ * bar's `bottom-[calc(3.5rem+env(…)+0.5rem)]` and the catalogue's two
+ * `h-[calc(7.5rem+env(…))]` scroll tails all lose the same term at once, so the
+ * bars sit under the indicator and the content sits under the bars.
+ *
+ * Every one of those is an `env()` ADDED to a fixed number rather than a floor
+ * under one, which is the other half of the arrangement: there is no
+ * `max(…, env())` anywhere on this edge to make a missing inset look survivable
+ * on a desktop while it is 34px short on the hardware. Turn this off and the
+ * layout is wrong everywhere, visibly, at once.
+ *
+ * Next's defaults for width and initial-scale are kept; this only adds the fit.
  */
 export const viewport: Viewport = { viewportFit: "cover" };
 

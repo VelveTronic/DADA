@@ -30,13 +30,24 @@ import { useCart } from "./cart-provider";
  * entirely — not a dash where the figure was, which would read as "we could not
  * work it out" rather than "prices are off".
  *
+ * **去提交 is 38px, not the portal's 44px.** That is the design's own CTA height
+ * inside a 50px bar, and it is the one place this repo's touch-target convention
+ * knowingly yields: a 44px button would leave 3px of bar above and below it,
+ * which is the bar's whole vertical slop spent on a control that is already the
+ * largest thing on the phone's bottom edge, unmissable against black and with no
+ * second control anywhere near it to be confused with. It clears WCAG 2.2 AA's
+ * 24px minimum with room to spare.
+ *
  * It reserves NO space in the flow. It is fixed, and its offset is written from
- * the tab bar's own height — `3.5rem` is that bar's `h-14`, and the half-rem on
- * top is the gap the design floats it by (7px of it visible, since the tab
- * bar's hairline sits above the 56px row). The pair therefore reaches 114px up
- * from the glass, and every page under this shell pays for that in bottom
- * padding: `app-shell.tsx` for the portal, `catalogo/page.tsx` and
- * `buscar/page.tsx` for the two screens this bar actually appears on.
+ * the tab bar's own anchor — `3.5rem` is that bar's `h-14`, `env(…)` is the same
+ * safe area that bar pads itself by, and the half-rem on top is the gap the
+ * design floats it by (7px of it visible, since the tab bar's hairline sits
+ * above the 56px row). The pair therefore reaches 114px + the safe area up from
+ * the glass, and the clearance for it is paid by the two screens this bar
+ * actually appears on: `catalogo/page.tsx`, in the pane tail and the rail tail,
+ * and `buscar/page.tsx`, in the sheet's own bottom padding. `app-shell.tsx`'s
+ * `<main>` inset is NOT that — it is the tab bar's, on every customer page,
+ * including the ones this bar never draws on.
  */
 export function CartBar({
   locale,

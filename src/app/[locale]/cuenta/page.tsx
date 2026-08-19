@@ -73,10 +73,11 @@ function ProfileIcon() {
  * 我的 — the account hub: who this restaurant is, three figures about its
  * orders, and the four places the rest of the portal lives.
  *
- * It is the fourth tab of the phone's bottom bar (Task 5) and the storefront
- * menu's first entry, and it exists so a customer on a phone has ONE screen that
- * answers "where is everything" — the desktop header's dropdown cannot be that
- * screen, and the pages it leads to are otherwise unreachable by thumb.
+ * It is the fourth tab of the phone's bottom bar (`tab-bar.tsx`, 我的) and the
+ * storefront menu's first entry, and it exists so a customer on a phone has ONE
+ * screen that answers "where is everything" — the desktop header's dropdown
+ * cannot be that screen, and the pages it leads to are otherwise unreachable by
+ * thumb.
  *
  * **The red card is the header.** The design paints the whole top of the phone
  * brand red, status bar included; that is mockup chrome. Here it is an ordinary

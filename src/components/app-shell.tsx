@@ -177,11 +177,21 @@ export async function AppShell({
           it pads its own contents.
 
           In page mode the bottom inset is the phone's TAB BAR plus a finger's
-          breathing room — 56px of bar, 16px of air, and the safe area under
-          both — so the last card on a page is never pinned against a fixed
-          control. The desktop keeps the 64px it always had: no tab bar there.
-          The two screens that also float the demand bar over this (`/catalogo`,
-          `/buscar`) add the rest of its 114px themselves. */}
+          breathing room: `4.5rem + env(safe-area-inset-bottom)` is 72px + the
+          inset, against a bar that is 57px + the same inset (1px of hairline,
+          a 56px row, and the safe area as padding under it) — 15px of air, so
+          the last card on a page is never pinned against a fixed control. The
+          desktop keeps the 64px it always had: no tab bar there.
+
+          It is the inset for the TAB BAR only, and the demand bar is nobody's
+          business here — the two screens that float one (`/catalogo`,
+          `/buscar`) each answer for it themselves, in different places.
+          `/catalogo` never receives this padding at all: it is the viewport
+          layout, where `<main>` has no insets, and its pane tail provides the
+          whole 120px + inset on its own. `/buscar` IS in page mode and does
+          receive it — but its sheet's own `pb-36` sits INSIDE `<main>`, i.e.
+          above this padding rather than instead of it, so that screen's last
+          row has both. See the note on the sheet in `buscar/page.tsx`. */}
       <main
         className={
           viewport

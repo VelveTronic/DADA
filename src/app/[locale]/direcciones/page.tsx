@@ -39,8 +39,11 @@ export default async function AddressesPage({
   const t = await getTranslations("addresses");
 
   // The profile row and the owner's price switch race; neither waits on the
-  // other. The switch matters here only for the phone's cart bar, which rides
-  // under every customer page including this one.
+  // other. The switch is read here because `AppShell`'s contract asks every
+  // customer page for it — NOT because this screen shows a price or floats a
+  // bar. The demand bar renders on 分类 and 搜索 only (`cart/cart-bar.tsx`
+  // returns null on every other tab), so on this page the setting is threaded
+  // through and nothing downstream of it draws.
   const [portalUser, showPrices] = await Promise.all([
     finishCompanyUser(pendingUser, locale),
     perf.step("settings", getSetting(supabase, "show_prices")),

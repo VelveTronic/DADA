@@ -41,7 +41,15 @@ export function StorefrontNav({
   return (
     // No `ml-auto`: the shell wraps this row and does the pushing, because on a
     // phone the wrapper is what is hidden and a hidden element pushes nothing.
-    <nav className="flex items-center gap-0.5 sm:gap-1">
+    //
+    // NAMED, because it is not the only `<nav>` a customer page has: the bottom
+    // tab bar is one, the catalogue's rail and its pager are two more, and an
+    // unlabelled landmark reaches a screen reader's list of them as a bare
+    // "navigation" with nothing to tell it from the rest.
+    <nav
+      aria-label={t("headerLabel")}
+      className="flex items-center gap-0.5 sm:gap-1"
+    >
       <Link
         href={`/${locale}/catalogo`}
         aria-label={t("shop")}

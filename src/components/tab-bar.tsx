@@ -41,6 +41,13 @@ import { activeTab, type TabKey } from "@/lib/nav-tabs";
  * (`currentColor`, so the active rule below reaches the icon without the icon
  * knowing anything about state), and `aria-hidden`, because the label under it
  * is the tab's name.
+ *
+ * All four carry a `Tab` prefix, and that is what the split above costs in
+ * names: `icons.tsx` also exports a `ClipboardIcon`, a DIFFERENT drawing of a
+ * different clipboard on the 24-unit grid, and two glyphs of the same name in
+ * one repo — one exported, one local — would be told apart only by which import
+ * a file happened to have. The prefix says which vocabulary a glyph belongs to
+ * at every use site. Local to this file; nothing here is exported.
  */
 const ICON = {
   viewBox: "0 0 17 17",
@@ -49,7 +56,7 @@ const ICON = {
 } as const;
 
 /** 分类 — the 2×2 grid every catalogue in this market uses. */
-function GridIcon() {
+function TabGridIcon() {
   return (
     <svg {...ICON} fill="currentColor">
       <rect x="0" y="0.25" width="7.25" height="7" rx="1.5" />
@@ -61,7 +68,7 @@ function GridIcon() {
 }
 
 /** 搜索 — the loupe, at this size its lens alone: 13px of circle. */
-function LoupeIcon() {
+function TabLoupeIcon() {
   return (
     <svg {...ICON} fill="none" stroke="currentColor" strokeWidth={1.8}>
       <circle cx="8.5" cy="8.5" r="5.6" />
@@ -70,7 +77,7 @@ function LoupeIcon() {
 }
 
 /** 需求单 — the clipboard the list is written on, its bottom corners rounder. */
-function ClipboardIcon() {
+function TabCartIcon() {
   return (
     <svg
       {...ICON}
@@ -85,7 +92,7 @@ function ClipboardIcon() {
 }
 
 /** 我的 — a pair of shoulders: the head-and-shoulders mark, minus the head. */
-function PersonIcon() {
+function TabPersonIcon() {
   return (
     <svg
       {...ICON}
@@ -106,10 +113,10 @@ function PersonIcon() {
  * compile error against the message file rather than a raw key on the glass.
  */
 const TABS = [
-  { key: "catalog", path: "catalogo", label: "tabCatalog", Icon: GridIcon },
-  { key: "search", path: "buscar", label: "tabSearch", Icon: LoupeIcon },
-  { key: "cart", path: "carrito", label: "tabCart", Icon: ClipboardIcon },
-  { key: "account", path: "cuenta", label: "tabAccount", Icon: PersonIcon },
+  { key: "catalog", path: "catalogo", label: "tabCatalog", Icon: TabGridIcon },
+  { key: "search", path: "buscar", label: "tabSearch", Icon: TabLoupeIcon },
+  { key: "cart", path: "carrito", label: "tabCart", Icon: TabCartIcon },
+  { key: "account", path: "cuenta", label: "tabAccount", Icon: TabPersonIcon },
 ] as const satisfies ReadonlyArray<{
   key: TabKey;
   /** The path under the locale prefix, which is also what `activeTab` reads. */
@@ -152,8 +159,19 @@ export function TabBar({ locale }: { locale: string }) {
               // said in WORDS here instead — and only when there is one. With
               // an empty cart the visible label is already the whole name.
               aria-label={badge ? t("cartWithCount", { n: count }) : undefined}
+              // The mockup paints the three inactive tabs in the design's
+              // faintest grey, and this is one of the places the repo does not
+              // follow it: `text-faint` is #A8A099, 2.58:1 on the white bar,
+              // and these are 10.5px labels and 17px glyphs — AA wants 4.5:1 of
+              // the words and 3:1 of the marks — on the ONLY navigation a phone
+              // gets. `text-muted` (#6E6760, 5.57:1) is the same warm grey a
+              // shade darker and clears both. Same call as Task 1's chips and
+              // the /cuenta card: AA over mockup literalism. `faint` keeps the
+              // uses `globals.css` licenses it for — placeholders and
+              // supplementary counts, text that repeats what a label already
+              // said — and the name of a screen is neither.
               className={`relative flex h-14 flex-1 flex-col items-center justify-center gap-1 text-[10.5px] ${
-                active ? "font-semibold text-brand-ink" : "text-faint"
+                active ? "font-semibold text-brand-ink" : "text-muted"
               }`}
             >
               <Icon />

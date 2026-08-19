@@ -102,6 +102,19 @@ export async function CategoryRail({ entries }: { entries: RailEntry[] }) {
           </span>
         </Link>
       ))}
+      {/* The rail's own tail, and it needs one for the same reason the pane
+          beside it does: 63 entries with NOTHING after them, in a column that
+          scrolls to the glass. The tab bar covers its last entries always (top
+          edge 57px + the safe area up from the glass) and the demand bar covers
+          them too whenever the cart has something in it — that bar spans
+          x = 14…376 on a 390px phone and this rail is x = 0…88, so it is over
+          this column, not just the products. Same 7.5rem + `env()` as the pane
+          tail: the two columns then reach their ends together instead of one
+          stopping 120px short of the other. `lg` has neither bar. */}
+      <div
+        aria-hidden
+        className="h-[calc(7.5rem+env(safe-area-inset-bottom))] lg:h-0"
+      />
       <RailAutoscroll />
     </nav>
   );

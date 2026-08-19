@@ -341,7 +341,13 @@ export default async function CatalogPage({
           )}
 
           {totalPages > 1 && (
-            <nav className="flex items-center justify-center gap-2 py-4 text-sm">
+            // NAMED: this page carries three `<nav>` landmarks (the rail, the
+            // tab bar, and this), and an unlabelled one is a bare "navigation"
+            // in a screen reader's landmark list.
+            <nav
+              aria-label={t("pagerLabel")}
+              className="flex items-center justify-center gap-2 py-4 text-sm"
+            >
               {/* Two anchors at the bottom of a fifty-row list, thumbed on a
                   phone: 44px tall and padded wide enough to hit without aiming.
                   Outlined now, because on a bare white pane the card edge that
@@ -372,15 +378,33 @@ export default async function CatalogPage({
               this pane on a phone — the ONLY reservation either of them gets,
               since both are fixed and neither is in anyone's flow.
 
-              The pair reaches 114px up from the glass: the tab bar's 56px row
-              and its hairline, a 7px gap, and the 50px demand bar above it
-              (`tab-bar.tsx`, `cart/cart-bar.tsx`). `h-28` is 112px, and the two
-              missing pixels are covered by the row's own `py-2.5`: measured at
-              390×844 with fifty rows, the last row's CONTENT ends 122px above
-              the glass, 8px clear of the demand bar's top edge.
+              Both bars are anchored on the SAFE AREA, so this tail has to be
+              too. `layout.tsx` asks for `viewport-fit=cover`, which is what
+              makes `env(safe-area-inset-bottom)` report a real number (34px on
+              a notched iPhone, 0 on everything else — call it S). The tab bar
+              is 1px of hairline + a 56px row + S of padding, so its top edge is
+              57 + S up from the glass; the demand bar sits at
+              `calc(3.5rem + S + 0.5rem)` = 64 + S and is 50px tall, so ITS top
+              edge is 114 + S (`tab-bar.tsx`, `cart/cart-bar.tsx`). A tail of a
+              fixed 112px cleared that only at S = 0 — the desktop emulation it
+              was measured on — and buried the last row under the demand bar by
+              34px on the phones this portal is actually used from. 7.5rem + S
+              is 120 + S, which is 6px clear of 114 + S at EVERY inset.
+
+              7.5rem and not 7rem, i.e. the row's own `py-2.5` is not clearance
+              and cannot be spent here: the star's hit box is 36px with
+              `-my-2.5` on it (`product-row.tsx`), so on a row with a two-line
+              name and no price line — the shape every row takes while the
+              owner's price switch is off — the box's bottom edge lands flush
+              with the row's own bottom edge. The tail is the whole margin
+              there, and 112 + S would put a pressable star under the bar.
+
               Desktop has neither bar and keeps a small tail so the list does not
               end flush against the window. */}
-          <div aria-hidden className="h-28 lg:h-8" />
+          <div
+            aria-hidden
+            className="h-[calc(7.5rem+env(safe-area-inset-bottom))] lg:h-8"
+          />
         </div>
       </div>
     </AppShell>
