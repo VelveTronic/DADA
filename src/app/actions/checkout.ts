@@ -158,9 +158,9 @@ export async function submitOrder(formData: FormData) {
 
   // Same writer as the cart's own actions, so the cookie flags and the paths
   // revalidated after a checkout can never drift from the ones set on an add.
-  const reset = new FormData();
-  reset.set("locale", locale);
-  await clearCart(reset);
+  // The locale is already narrowed by `safeLocale` above; `clearCart` narrows
+  // whatever it is handed again, since its other caller is a browser.
+  await clearCart(locale);
 
   const created = outcome.orderNumber;
   redirect(

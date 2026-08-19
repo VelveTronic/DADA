@@ -10,7 +10,7 @@ import { usePathname } from "@/i18n/navigation";
 import { activeTab } from "@/lib/nav-tabs";
 
 /**
- * The storefront header's right-hand side: 商店, 搜索, 购物车, 用户 — icons only,
+ * The storefront header's right-hand side: 商店, 搜索, 需求单, 用户 — icons only,
  * at 44px each, and on the DESKTOP only. Below `lg` the shell hides this row
  * and the bottom `TabBar` is the navigation (see `app-shell.tsx`); the four
  * icons and the four tabs point at the same four screens.

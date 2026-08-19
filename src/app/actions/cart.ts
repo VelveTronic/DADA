@@ -125,9 +125,31 @@ export async function setCartLineQty(
   return { ok: true };
 }
 
-/** Empty the cart. Also the post-checkout reset. */
-export async function clearCart(formData: FormData) {
-  const locale = safeLocale(formData.get("locale"));
+/**
+ * Empty the cart. The 清空 button on the cart page, and the post-checkout reset.
+ *
+ * Same guard/cookie shape as its sibling above: a plain argument rather than
+ * form data (both callers pass a value they already hold), the locale narrowed
+ * by `safeLocale` because a Server Function is reachable by a crafted POST, and
+ * `writeCart` as the one writer. It cannot be refused — an empty cart is always
+ * a legal cart, so there is no `CartWriteResult` branch to answer with — and it
+ * still answers in the sibling's shape so a caller awaiting either gets the
+ * same thing back.
+ *
+ * `revalidatePath` here and NOT the sibling's `refresh()`, which is the one
+ * place the two diverge. A cleared cart changes BOTH pages — the catalogue's
+ * steppers drop back to a lone `+` — and revalidating from a Server Function
+ * "updates the UI immediately (if viewing the affected path)"
+ * (`node_modules/next/dist/docs/01-app/03-api-reference/04-functions/revalidatePath.md`),
+ * so the press the customer just made re-renders `/carrito` into its empty
+ * state without this action having to know which of the two it was called from.
+ * That matters for the second caller: `submitOrder` clears on its way to
+ * `/pedidos`, where a `refresh()` of a route nobody is on would do nothing at
+ * all. One `+` cannot afford this pair (see the note above); one CLEAR — a
+ * press that happens at most once per order — can.
+ */
+export async function clearCart(locale: string): Promise<{ ok: true }> {
   await writeCart({});
-  revalidateCart(locale);
+  revalidateCart(safeLocale(locale));
+  return { ok: true };
 }
