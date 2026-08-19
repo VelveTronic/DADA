@@ -131,16 +131,24 @@ export async function ProductRow({
             the flavour — the part that tells two tins apart — and the clamp is
             what stops a 57-character name from making one row as tall as three.
 
+            MEDIUM and ink-soft, not the mockup's 600 near-black. The owner
+            reviewed a real list (2026-08-19) and read the bold titles as a wall
+            — worst on the all-caps Spanish names, where 600 at 14px sets
+            SOLID BLOCKS down the pane. 500 in Noto Sans (the body stack's new
+            Latin face) with the deep-grey `--color-ink-soft` keeps the name the
+            biggest thing on the row while the row stops shouting; hierarchy
+            over the 12px muted meta line below survives on size and weight.
+
             `break-words` is what makes the clamp honest on a LATIN name.
             `line-clamp` only ever ellipsises a line-COUNT overflow: a word with
-            no break opportunity in it — ESPECIALIDADES, 14 characters, still
-            wider than the 114px this column gets on a phone — is one line that
+            no break opportunity in it — ESPECIALIDADES, 14 characters, about as
+            wide as the 114px this column gets on a phone — is one line that
             overflows sideways, so the clamp has nothing to count and the word is
             cut mid-glyph with no ellipsis at all. Allowing the break puts the
             rest of the word on line two, where the clamp can do its job. Chinese
             never hit this (it breaks between any two characters), which is why
             the phone the bug was reported from never showed it. */}
-        <p className="line-clamp-2 text-sm leading-[1.35] font-semibold break-words">
+        <p className="line-clamp-2 text-sm leading-[1.35] font-medium break-words text-ink-soft">
           {name}
         </p>
 

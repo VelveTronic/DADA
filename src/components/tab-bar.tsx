@@ -17,7 +17,7 @@ import { activeTab, type TabKey } from "@/lib/nav-tabs";
  * navigation — see `app-shell.tsx`, which draws exactly one of the two.
  *
  * **Hidden on `/carrito` entirely.** That screen's own bottom edge belongs to
- * 提交需求单 (design 02), and a tab bar under a submit button is one press too
+ * 提交订单 (design 02), and a tab bar under a submit button is one press too
  * many next to the one press that matters. Every other customer screen has it,
  * including the ones with no tab of their own — `activeTab` answers null there
  * and nothing is lit.

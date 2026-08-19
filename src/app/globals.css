@@ -81,17 +81,25 @@
   --color-brand-ink: #b31710;
   --color-brand-soft: #fdecea;
   --radius-card: 14px;
-  /* Archivo — the ONE webfont, loaded once in `[locale]/layout.tsx` — is here
-     for NUMERALS: quantities, counts, money, order numbers. Tailwind turns this
-     key into the `font-num` utility. No CJK webfont is shipped; the body stack
-     below is whatever the customer's phone already has, which on the Chinese
-     Android and iOS handsets this portal is used on is the right face anyway. */
+  /* Archivo — loaded in `[locale]/layout.tsx` — is here for NUMERALS:
+     quantities, counts, money, order numbers. Tailwind turns this key into the
+     `font-num` utility. */
   --font-num: var(--font-archivo), ui-sans-serif, sans-serif;
 }
 
 body {
   background: var(--color-background);
   color: var(--color-ink);
-  font-family: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei",
-    "Noto Sans SC", sans-serif;
+  /* Noto Sans (latin subset only, loaded beside Archivo in
+     `[locale]/layout.tsx`) leads the stack so the LATIN half of this bilingual
+     catalogue — Spanish product names above all — stops rendering in whatever
+     Latin glyphs the first CJK face happens to carry: Microsoft YaHei's, on the
+     office Windows machines, which the owner read as cramped and heavy
+     (2026-08-19). Chinese text falls through it untouched to the system CJK
+     faces behind it — no CJK webfont is shipped, and on the Chinese Android and
+     iOS handsets this portal is used on those are the right faces anyway. Noto
+     Sans and Noto Sans SC are drawn as one family, so on devices that have the
+     SC face the two scripts share a visual line. */
+  font-family: var(--font-noto), "PingFang SC", "Hiragino Sans GB",
+    "Microsoft YaHei", "Noto Sans SC", sans-serif;
 }

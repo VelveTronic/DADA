@@ -51,7 +51,7 @@ export function SearchIcon() {
   );
 }
 
-/** 需求单 — a basket, which is what a restaurant fills here. */
+/** 购物车 — a basket, which is what a restaurant fills here. */
 export function CartIcon() {
   return (
     <svg {...ICON_PROPS}>

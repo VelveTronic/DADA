@@ -235,7 +235,7 @@ export default async function CartPage({
     >
       {/* The screen's own title row, and on a phone its only way OUT: the tab
           bar hides itself on `/carrito` (`tab-bar.tsx` — that bottom edge
-          belongs to 提交需求单), so without this link a customer who opened the
+          belongs to 提交订单), so without this link a customer who opened the
           demand list has nothing but the browser's own back gesture to leave it
           with. The chevron is a 44px target with the glyph centred in it, pulled
           back into the page gutter by `-ml-2.5` so the mark itself lines up with
@@ -359,12 +359,13 @@ export default async function CartPage({
                     <ProductThumb src={row.product?.image_url} />
 
                     <div className="min-w-0">
-                      {/* Two lines then an ellipsis, and `break-words` so the
-                          clamp is honest on a Spanish name that has no break
-                          opportunity in it — both exactly as the catalogue row
-                          does it, because this is the same product in the same
-                          list. */}
-                      <p className="line-clamp-2 text-sm leading-[1.35] font-semibold break-words">
+                      {/* Two lines then an ellipsis, `break-words` so the clamp
+                          is honest on a Spanish name with no break opportunity
+                          in it, and the same medium ink-soft the catalogue row
+                          sets — all exactly as `product-row.tsx` does it (and
+                          for the owner's same 2026-08-19 reason), because this
+                          is the same product in the same list. */}
+                      <p className="line-clamp-2 text-sm leading-[1.35] font-medium break-words text-ink-soft">
                         {name || "—"}
                       </p>
                       <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted">
@@ -450,8 +451,8 @@ export default async function CartPage({
                             showPrices={showPrices}
                             // THE cart page's stepper: its centre figure is a
                             // box the quantity can be typed into, and its `+`
-                            // says 增加数量 rather than 加入需求单 on the page
-                            // that IS the 需求单. The catalogue's stepper passes
+                            // says 增加数量 rather than 加入购物车 on the page
+                            // that IS the 购物车. The catalogue's stepper passes
                             // neither and is unchanged.
                             editable
                           />
@@ -465,7 +466,7 @@ export default async function CartPage({
 
             {/* Back to the goods, attached to the foot of the list it adds to:
                 a dashed outline rather than a second filled button, because the
-                one filled control on this screen is 提交需求单 and a demand list
+                one filled control on this screen is 提交订单 and a demand list
                 that is missing an item is fixed by going back, not by pressing
                 something red. */}
             <Link

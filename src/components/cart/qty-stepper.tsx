@@ -44,7 +44,7 @@ import { useCart } from "./cart-provider";
  * ## `editable`: the same control, on the cart page
  *
  * One prop, because both things it changes are the same fact — this stepper is
- * on `/carrito`, the page that IS the 需求单:
+ * on `/carrito`, the page that IS the 购物车:
  *
  *  1. **the centre figure becomes a box you can type into.** A restaurant
  *     ordering 24 cajas of a whole-unit product had, after design 02 moved the
@@ -52,7 +52,7 @@ import { useCart } from "./cart-provider";
  *     that: 24 taps on `+`, or 24 round trips. The cart page is where a line is
  *     read and revised — the catalogue is where it is picked — so the box lives
  *     here and the catalogue keeps its static, `aria-live` span.
- *  2. **the `+` stops saying 加入需求单.** On the demand list itself the product
+ *  2. **the `+` stops saying 加入购物车.** On the cart page itself the product
  *     is already in it; what the button does there is increase the quantity, and
  *     `cart.increaseFor` is the mirror of the `−`'s own label. The two REFUSALS
  *     are left as they are: an unpriced line's button is disabled, and what its

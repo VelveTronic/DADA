@@ -13,11 +13,11 @@ import { useCart } from "./cart-provider";
  * rather than on the next navigation, because `useCart` mirrors the cookie the
  * moment a `+` is pressed anywhere under the shell.
  *
- * It counts LINES, not units (`cart.cartLink` takes `{n}`): "需求单（3）" means
+ * It counts LINES, not units (`cart.cartLink` takes `{n}`): "购物车（3）" means
  * three products, whatever the quantities are. That sentence is now the icon's
  * ARIA LABEL rather than its visible text — the badge shows the same number, and
  * a screen reader needs the noun as much as the figure. An empty cart still
- * announces "需求单（0）"; the badge is simply not drawn.
+ * announces "购物车（0）"; the badge is simply not drawn.
  */
 export function CartNavLink({
   locale,

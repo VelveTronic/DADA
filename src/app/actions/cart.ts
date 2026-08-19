@@ -168,7 +168,7 @@ export async function clearCart(locale: string): Promise<{ ok: true }> {
  * ids exactly as a `+` in the catalogue does, and every price on the cart page
  * after it is re-resolved from the company's tarifa — as `create_order` will
  * resolve them again at submit (CLAUDE.md). The customer still presses
- * 提交需求单 themselves.
+ * 提交订单 themselves.
  *
  * **Four reads in three rounds, none of them trusted from the form.** The gate
  * goes first and answers WHO is asking; the ownership check and the lines then

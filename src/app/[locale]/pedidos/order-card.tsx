@@ -250,7 +250,7 @@ export async function OrderCard({
         {/* 再来一单. It writes the CART cookie and nothing else — no order is
             placed by this button (see `reorderIntoCart`) — which is why it is
             the outlined accent rather than the portal's one filled red: the
-            filled button on a customer's screen is 提交需求单, and there must
+            filled button on a customer's screen is 提交订单, and there must
             be no press on this page that looks like it. `text-brand-ink` and not
             the mockup's `#E0231C`: the fill red fails AA as WORDING (globals.css
             documents the pair). */}

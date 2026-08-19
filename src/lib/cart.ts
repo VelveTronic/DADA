@@ -69,7 +69,7 @@ export function setQty(cart: Cart, productId: string, qty: number): Cart {
  * The UNITS in a cart: every line's quantity added up, where `count` (the
  * header badge, the demand bar's first figure) is the number of LINES.
  *
- * The bar says both — 需求单 3 种 · 12 件 — because they answer different
+ * The bar says both — 订单 3 种 · 12 件 — because they answer different
  * questions: how many products were picked, and how much is coming on the van.
  *
  * Rounded to three decimals for the same reason `parseCart` and `setQty` round
@@ -98,7 +98,7 @@ export type ReorderResult = { cart: Cart; added: number; skipped: number };
  * keeps the quantity they last typed: the past order does not get to overwrite
  * this week's 3 cajas with last week's 12. Those lines count as `skipped` — a
  * deliberate outcome rather than a failure, and the reason `cart.reorderSkipped`
- * names 已在需求单 / "ya en el pedido" alongside the two that really are
+ * names 已在购物车 / "ya estaba en el carrito" alongside the two that really are
  * refusals. A banner that blamed only the catalogue would be describing a
  * different function from this one.
  *
