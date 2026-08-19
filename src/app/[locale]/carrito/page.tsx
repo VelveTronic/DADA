@@ -365,20 +365,20 @@ export default async function CartPage({
                           sets — all exactly as `product-row.tsx` does it (and
                           for the owner's same 2026-08-19 reason), because this
                           is the same product in the same list. */}
-                      <p className="line-clamp-2 text-sm leading-[1.35] font-medium break-words text-ink-soft">
+                      <p className="line-clamp-2 text-sm leading-[1.35] font-medium break-words text-ink">
                         {name || "—"}
                       </p>
                       <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted">
-                        {/* A vanished product has no codart to show and its uuid
-                            means nothing to a restaurant, so the line says what
-                            the customer needs to know instead. The remove button
-                            still carries the id, which is all that has to travel. */}
+                        {/* The unit factor, as on the catalogue row — the SKU
+                            left both lines together (owner, 2026-08-19). A
+                            vanished product has no unit to show and its uuid
+                            means nothing to a restaurant, so that line says
+                            what the customer needs to know instead. The remove
+                            button still carries the id, which is all that has
+                            to travel. */}
                         <span>
                           {row.product
-                            ? `${row.product.codart} · ${unitLabel(
-                                row.product.unit,
-                                row.product.units_per_case,
-                              )}`
+                            ? unitLabel(row.product.unit, row.product.units_per_case)
                             : tCatalog("unavailable")}
                         </span>
                         {weighed && (

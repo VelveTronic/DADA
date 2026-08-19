@@ -31,7 +31,7 @@ import type { CustomerCatalogProduct } from "@/lib/supabase/public.types";
  *   ┌───────┬────────────────────────────┬───────────────┐
  *   │2.75rem│ minmax(0,1fr)              │ 6rem FIXED    │
  *   │ thumb │ name (2 lines max)         │ [stepper slot]│
- *   │       │ codart · CAJA×24  [称重]   │   − n +  96px │
+ *   │       │ CAJA×24  [称重]            │   − n +  96px │
  *   │       │ 12,00 €                    │               │
  *   └───────┴────────────────────────────┴───────────────┘
  * ```
@@ -131,13 +131,18 @@ export async function ProductRow({
             the flavour — the part that tells two tins apart — and the clamp is
             what stops a 57-character name from making one row as tall as three.
 
-            MEDIUM and ink-soft, not the mockup's 600 near-black. The owner
-            reviewed a real list (2026-08-19) and read the bold titles as a wall
-            — worst on the all-caps Spanish names, where 600 at 14px sets
-            SOLID BLOCKS down the pane. 500 in Noto Sans (the body stack's new
-            Latin face) with the deep-grey `--color-ink-soft` keeps the name the
-            biggest thing on the row while the row stops shouting; hierarchy
-            over the 12px muted meta line below survives on size and weight.
+            MEDIUM and full ink, and both halves are owner calls off a real
+            list. 600 went first (2026-08-19): bold all-caps Spanish names set
+            SOLID BLOCKS down the pane, so the weight dropped to 500 — which
+            Noto Sans, the stack's Latin face, carries as a true medium. But
+            the CJK faces behind it mostly cut only 400 and 700, so for a
+            CHINESE name "500" resolves to the regular cut — and painted in the
+            deep-grey ink-soft this pass first tried, the titles washed out
+            (owner, same day: 看不清). Full `--color-ink` is the darkening he
+            asked for: Chinese reads as regular-weight near-black — the way
+            every mainland grocery app sets its product names — Spanish stays a
+            calm true 500, and neither script gets the wall back. Hierarchy
+            over the 12px muted meta line below survives on size and colour.
 
             `break-words` is what makes the clamp honest on a LATIN name.
             `line-clamp` only ever ellipsises a line-COUNT overflow: a word with
@@ -148,28 +153,33 @@ export async function ProductRow({
             rest of the word on line two, where the clamp can do its job. Chinese
             never hit this (it breaks between any two characters), which is why
             the phone the bug was reported from never showed it. */}
-        <p className="line-clamp-2 text-sm leading-[1.35] font-medium break-words text-ink-soft">
+        <p className="line-clamp-2 text-sm leading-[1.35] font-medium break-words text-ink">
           {name}
         </p>
 
         <p className="mt-0.5 flex items-center gap-1.5 text-xs text-muted">
-          {/* `1-002 · CAJA×24`: the factor is what turns the price below into an
-              offer a restaurant can judge. It is silent at 1 — see `unitLabel`.
-              One line, truncated: this is reference detail, and a second line of
-              it would push the price out of a scanning customer's eye. */}
+          {/* `CAJA×24`: the factor is what turns the price below into an offer
+              a restaurant can judge. The codart that used to lead this line is
+              gone — owner's call (2026-08-19): restaurants pick by name and
+              photo, and the SKU was reference noise on every row. Staff pages
+              keep theirs; an order's detail lines still fall back to the codart
+              when a snapshot has no name in the reader's language. One line,
+              truncated: a second line of reference detail would push the price
+              out of a scanning customer's eye. */}
           <span className="truncate">
-            {product.codart} · {unitLabel(product.unit, product.units_per_case)}
+            {unitLabel(product.unit, product.units_per_case)}
           </span>
           {/* AT MOST ONE badge, and 断货 wins. A row that is both weighed and
               out of stock wants more than the meta line has: in Spanish,
               `Por peso` 60 + `Agotado` 57 + two 6px gaps ≈ 129px of content
               that cannot shrink (both badges are `shrink-0`, so only the
-              codart can give) against the 114px the column gets on a phone.
-              So 称重 renders only while the product is AVAILABLE: an
+              unit label can give) against the 114px the column gets on a
+              phone. So 称重 renders only while the product is AVAILABLE: an
               out-of-stock row cannot be ordered, which makes how it is weighed
               moot on it, while 断货 is the whole reason it looks the way it
               does. Badges keep their width either way — a truncated 断货 says
-              nothing — so it is the codart that gives way on a narrow screen. */}
+              nothing — so it is the unit label that gives way when a narrow
+              screen runs out. */}
           {product.is_available && product.is_weighed && (
             <span className="shrink-0 rounded-md bg-amber-100 px-1.5 py-0.5 text-amber-800">
               {t("weighed")}
