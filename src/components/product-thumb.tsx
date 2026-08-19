@@ -31,27 +31,55 @@ import Image from "next/image";
 const THUMB_PX = 44;
 
 /**
- * The box itself, shared by the photo and the empty slot so a product without
- * one keeps its row aligned with every other row. `size-11` IS `THUMB_PX` —
- * Tailwind cannot read the constant, so the two are kept next to each other.
+ * …and 50px, the ONE other size the design draws it at: the three-photo strip on
+ * an order card (design 06), where the picture is the whole of what identifies a
+ * past order at a glance and there is no product name beside it to help.
+ *
+ * It costs one more pair of candidates from the optimizer — 50 and 100 round UP
+ * to the configured 64 and 128 (see the note above), against 48/96 for the 44px
+ * row — which is why it is a second size rather than a new single size for
+ * everything.
  */
-const THUMB_BOX = "size-11 shrink-0 rounded-lg border border-border bg-border";
+const THUMB_LG_PX = 50;
 
-export function ProductThumb({ src }: { src: string | null | undefined }) {
+export type ThumbSize = typeof THUMB_PX | typeof THUMB_LG_PX;
+
+/**
+ * The box itself, shared by the photo and the empty slot so a product without
+ * one keeps its row aligned with every other row. The classes ARE the two
+ * constants above — Tailwind cannot read them, so the pairs are kept next to
+ * each other and nothing else in the portal names a thumbnail size.
+ */
+const THUMB_BOX = "shrink-0 rounded-lg border border-border bg-border";
+const THUMB_BOX_SIZE: Record<ThumbSize, string> = {
+  [THUMB_PX]: "size-11",
+  [THUMB_LG_PX]: "size-[50px]",
+};
+
+export function ProductThumb({
+  src,
+  size = THUMB_PX,
+}: {
+  src: string | null | undefined;
+  /** 44px in every product LIST; 50px on the order card's photo strip. */
+  size?: ThumbSize;
+}) {
+  const box = `${THUMB_BOX} ${THUMB_BOX_SIZE[size]}`;
+
   // A plain neutral square for the handful of products the freepos library has
   // no file for. Deliberately wordless: an "sin imagen" label would be one more
   // string to carry in both languages for something the empty box already says.
-  if (!src) return <div className={THUMB_BOX} />;
+  if (!src) return <div className={box} />;
 
   return (
     <Image
       src={src}
       alt=""
-      width={THUMB_PX}
-      height={THUMB_PX}
+      width={size}
+      height={size}
       // The freepos shots are not all square, so the box crops rather than
       // distorts. The tinted background shows through until the file lands.
-      className={`${THUMB_BOX} object-cover`}
+      className={`${box} object-cover`}
     />
   );
 }

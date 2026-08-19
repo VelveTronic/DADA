@@ -23,10 +23,12 @@ import {
   isOrderErrorDetail,
   isOrderErrorKey,
   madridDay,
+  parseReorderCount,
 } from "@/lib/orders";
 import { perfRun } from "@/lib/perf";
 import { getSetting } from "@/lib/settings";
 import type { CustomerCatalogProduct } from "@/lib/supabase/public.types";
+import { ReorderBanner } from "./reorder-banner";
 
 export const dynamic = "force-dynamic";
 
@@ -60,10 +62,20 @@ export default async function CartPage({
   searchParams,
 }: {
   params: Promise<{ locale: Locale }>;
-  searchParams: Promise<{ error?: string; detail?: string }>;
+  searchParams: Promise<{
+    error?: string;
+    detail?: string;
+    readded?: string;
+    skipped?: string;
+  }>;
 }) {
   const { locale } = await params;
-  const { error: rawError, detail: rawDetail } = await searchParams;
+  const {
+    error: rawError,
+    detail: rawDetail,
+    readded: rawReadded,
+    skipped: rawSkipped,
+  } = await searchParams;
   setRequestLocale(locale);
   const perf = perfRun(`/${locale}/carrito`);
   const { supabase, pendingUser } = await beginCompanyUser(locale);
@@ -79,6 +91,10 @@ export default async function CartPage({
   const error = isOrderErrorKey(errorText) ? errorText : undefined;
   const detail =
     error && isOrderErrorDetail(detailText) ? detailText : undefined;
+  // …and so are the two counts a 再来一单 press comes back with: digits only, or
+  // no banner at all.
+  const readded = parseReorderCount(rawReadded);
+  const skipped = parseReorderCount(rawSkipped);
 
   // A page may READ the cart cookie; only the server actions write it.
   const cart = parseCart((await cookies()).get(CART_COOKIE)?.value);
@@ -249,6 +265,11 @@ export default async function CartPage({
           )}
         </p>
       )}
+
+      {/* Above the list and above the empty state both: an all-skipped reorder
+          lands on a cart that may still be empty, and that is precisely the case
+          the sentence has to explain. */}
+      <ReorderBanner added={readded} skipped={skipped} />
 
       {rows.length === 0 ? (
         // No submit bar under this one: there is nothing to submit, and a dead

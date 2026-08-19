@@ -84,6 +84,76 @@ export function cartUnits(cart: Cart): number {
   return Math.round(total * 1000) / 1000;
 }
 
+/** One line of a past order, as 再来一单 hands it to the merge below. */
+export type ReorderLine = { product_id: string; qty: number };
+
+/** The merged cart and what became of the lines that went into it. */
+export type ReorderResult = { cart: Cart; added: number; skipped: number };
+
+/**
+ * 再来一单 — merge a past order into the cart the customer already has.
+ *
+ * **Merge, never replace.** The cart is the customer's current intention and a
+ * reorder is a shortcut for filling it, so a product that is ALREADY in the cart
+ * keeps the quantity they last typed: the past order does not get to overwrite
+ * this week's 3 cajas with last week's 12. Those lines count as `skipped`, which
+ * is what the banner on the cart page reports.
+ *
+ * Three things are refused, all counted the same way because the customer's
+ * answer to each is the same — look at the cart:
+ *
+ *  - a product no longer orderable (`orderableIds` is what the caller read back
+ *    from `products_priced`; a discontinued or paused article is not in it, and
+ *    neither is one whose row is gone entirely),
+ *  - a line the cookie has no room for (`setQty` throws CART_FULL at the 60-line
+ *    cap, and a big order merged into a full-ish cart hits it part way through),
+ *  - a quantity `setQty` would not store — non-finite, over its own cap, or ≤ 0,
+ *    which that function READS AS A REMOVAL. `create_order` cannot write a line
+ *    like that, so this is a floor rather than a case; it is here because
+ *    "removes an unrelated line and reports it as added" is the one way this
+ *    function could do damage.
+ *
+ * The orderable test runs FIRST, and that ordering is load-bearing: everything
+ * below it uses the id as an object key, and only an id `products_priced` just
+ * answered for is known to be a real product uuid rather than something a
+ * crafted row could put in front of `in`. Counts are unaffected — a line that
+ * fails two tests is skipped either way.
+ *
+ * Pure: the cart it is handed is never mutated (`setQty` copies), so the caller
+ * decides whether the result reaches the cookie.
+ */
+export function mergeReorderLines(
+  cart: Cart,
+  lines: readonly ReorderLine[],
+  orderableIds: ReadonlySet<string>,
+): ReorderResult {
+  let next = cart;
+  let added = 0;
+  let skipped = 0;
+
+  for (const line of lines) {
+    if (!orderableIds.has(line.product_id) || line.product_id in next) {
+      skipped++;
+      continue;
+    }
+    if (!Number.isFinite(line.qty) || line.qty <= 0) {
+      skipped++;
+      continue;
+    }
+    try {
+      next = setQty(next, line.product_id, line.qty);
+      added++;
+    } catch {
+      // CART_FULL or BAD_QTY. Which one it was does not change the sentence the
+      // customer reads, and the lines after it still get their turn: a cart that
+      // filled up on line 40 of a 50-line order keeps the 39 that fitted.
+      skipped++;
+    }
+  }
+
+  return { cart: next, added, skipped };
+}
+
 /**
  * `setQty` that answers with the cart instead of throwing: a change the rules
  * above refuse leaves it exactly as it was.

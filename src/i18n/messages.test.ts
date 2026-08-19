@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  CUSTOMER_ORDER_TABS,
   LINE_EDIT_RESULTS,
   ORDER_ERROR_KEYS,
   ORDER_STATUSES,
@@ -143,6 +144,25 @@ describe("translations", () => {
         "string",
       );
       expect(esStatus[status], `es orders.status.${status}`).toBeTypeOf(
+        "string",
+      );
+    }
+  });
+
+  /**
+   * The history's chip row draws one label per tab in `CUSTOMER_ORDER_TABS`.
+   * Adding a fifth view without writing its two strings would put the raw
+   * `orders.tabWhatever` token on a chip in front of a restaurant.
+   */
+  it("carries a label for every customer order tab", () => {
+    const camel = (tab: string) => `tab${tab[0].toUpperCase()}${tab.slice(1)}`;
+    const zhOrders: Record<string, unknown> = zh.orders;
+    const esOrders: Record<string, unknown> = es.orders;
+    for (const tab of CUSTOMER_ORDER_TABS) {
+      expect(zhOrders[camel(tab)], `zh orders.${camel(tab)}`).toBeTypeOf(
+        "string",
+      );
+      expect(esOrders[camel(tab)], `es orders.${camel(tab)}`).toBeTypeOf(
         "string",
       );
     }

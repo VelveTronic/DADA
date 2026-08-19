@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
+import type { Cart } from "./cart";
 import {
   CART_COOKIE,
   CART_MAX_LINES,
   cartUnits,
   isProductId,
+  mergeReorderLines,
   parseCart,
   serializeCart,
   setQty,
@@ -129,6 +131,133 @@ describe("cartUnits", () => {
     expect(0.1 + 0.2).not.toBe(0.3); // the reason for the rounding
     expect(cartUnits({ [A]: 0.1, [B]: 0.2 })).toBe(0.3);
     expect(cartUnits({ [A]: 1.005, [B]: 2.115 })).toBe(3.12);
+  });
+});
+
+/**
+ * 再来一单. The whole point of this function is what it REFUSES: the customer's
+ * own quantities must survive a reorder, a discontinued article must not come
+ * back, and a merge that runs out of room has to say so rather than silently
+ * dropping the tail of the order.
+ */
+describe("mergeReorderLines", () => {
+  const A = "11111111-1111-4111-8111-111111111111";
+  const B = "22222222-2222-4222-8222-222222222222";
+  const C = "33333333-3333-4333-8333-333333333333";
+  const all = new Set([A, B, C]);
+
+  it("adds every line of a past order into an empty cart", () => {
+    expect(
+      mergeReorderLines(
+        {},
+        [
+          { product_id: A, qty: 2 },
+          { product_id: B, qty: 0.5 },
+        ],
+        all,
+      ),
+    ).toEqual({ cart: { [A]: 2, [B]: 0.5 }, added: 2, skipped: 0 });
+  });
+
+  it("leaves a line the customer already has at THEIR quantity", () => {
+    const result = mergeReorderLines(
+      { [A]: 3 },
+      [
+        { product_id: A, qty: 12 },
+        { product_id: B, qty: 1 },
+      ],
+      all,
+    );
+    // The 3 they typed this week, not the 12 they ordered last week.
+    expect(result.cart).toEqual({ [A]: 3, [B]: 1 });
+    expect(result).toMatchObject({ added: 1, skipped: 1 });
+  });
+
+  it("skips a product that is no longer orderable", () => {
+    const result = mergeReorderLines(
+      {},
+      [
+        { product_id: A, qty: 1 },
+        { product_id: B, qty: 4 },
+      ],
+      // B is paused, superseded, or gone from the view entirely.
+      new Set([A]),
+    );
+    expect(result).toEqual({ cart: { [A]: 1 }, added: 1, skipped: 1 });
+  });
+
+  it("counts the lines a full cart has no room for, and keeps the rest", () => {
+    const full: Cart = {};
+    for (let i = 0; i < CART_MAX_LINES - 1; i++) {
+      full[`00000000-0000-4000-8000-${String(i).padStart(12, "0")}`] = 1;
+    }
+    // One slot left, three lines wanting it: the first fits, the other two hit
+    // CART_FULL inside `setQty` and are reported rather than lost.
+    const result = mergeReorderLines(
+      full,
+      [
+        { product_id: A, qty: 1 },
+        { product_id: B, qty: 1 },
+        { product_id: C, qty: 1 },
+      ],
+      all,
+    );
+    expect(Object.keys(result.cart)).toHaveLength(CART_MAX_LINES);
+    expect(result.cart[A]).toBe(1);
+    expect(result).toMatchObject({ added: 1, skipped: 2 });
+  });
+
+  it("normalises a quantity exactly as the cookie would store it", () => {
+    // Three decimals, the cookie's own precision — a weighed line ordered at
+    // 0.1234 kg comes back as the 0.123 `setQty` would have written.
+    expect(mergeReorderLines({}, [{ product_id: A, qty: 0.1234 }], all)).toEqual(
+      { cart: { [A]: 0.123 }, added: 1, skipped: 0 },
+    );
+  });
+
+  it("skips a quantity `setQty` would not store, removal included", () => {
+    // 0 and negatives are REMOVALS to `setQty`, so an unguarded merge would
+    // delete an unrelated line and report it as added.
+    const result = mergeReorderLines(
+      { [A]: 4 },
+      [
+        { product_id: A, qty: 0 },
+        { product_id: B, qty: -1 },
+        { product_id: C, qty: Number.NaN },
+      ],
+      all,
+    );
+    expect(result).toEqual({ cart: { [A]: 4 }, added: 0, skipped: 3 });
+    expect(mergeReorderLines({}, [{ product_id: B, qty: 100000 }], all)).toEqual(
+      { cart: {}, added: 0, skipped: 1 },
+    );
+  });
+
+  it("accounts for every line exactly once", () => {
+    const lines = [
+      { product_id: A, qty: 2 }, // already in the cart
+      { product_id: B, qty: 1 }, // added
+      { product_id: C, qty: 3 }, // not orderable
+      { product_id: A, qty: 9 }, // the same product twice in one order
+    ];
+    const result = mergeReorderLines({ [A]: 5 }, lines, new Set([A, B]));
+    expect(result.added + result.skipped).toBe(lines.length);
+    expect(result).toMatchObject({ added: 1, skipped: 3 });
+    expect(result.cart).toEqual({ [A]: 5, [B]: 1 });
+  });
+
+  it("never mutates the cart it was given", () => {
+    const before: Cart = { [A]: 2 };
+    mergeReorderLines(before, [{ product_id: B, qty: 1 }], all);
+    expect(before).toEqual({ [A]: 2 });
+  });
+
+  it("is a no-op for an order with no lines left to copy", () => {
+    expect(mergeReorderLines({ [A]: 1 }, [], all)).toEqual({
+      cart: { [A]: 1 },
+      added: 0,
+      skipped: 0,
+    });
   });
 });
 

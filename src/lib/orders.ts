@@ -91,6 +91,62 @@ export const ACTIVE_ORDER_STATUSES: readonly OrderStatus[] = [
 ];
 
 /**
+ * The four views a CUSTOMER's own history offers, in the order the chips are
+ * drawn: everything, everything still running, delivered, called off.
+ *
+ * They are deliberately NOT the seven statuses. The staff queue tabs BY status
+ * because a staff member works one state at a time (`QUEUE_TABS` above); a
+ * restaurant has no use for the difference between an order the bridge has
+ * claimed and one it has already written into Wingest, and a tab row that named
+ * those states would teach every customer our plumbing's vocabulary. Same call
+ * as `ACTIVE_ORDER_STATUSES` on the account hub, and the same grouping — the
+ * per-order badge still names the exact state for anyone who reads it.
+ */
+export const CUSTOMER_ORDER_TABS = [
+  "all",
+  "active",
+  "done",
+  "cancelled",
+] as const;
+
+export type CustomerOrderTab = (typeof CUSTOMER_ORDER_TABS)[number];
+
+/**
+ * Guards `?tab=` on the way in: the query string is user-editable and what it
+ * selects reaches `.in("status", …)`. Anything unrecognised is `all`, which is
+ * the screen's own default rather than an error — a hand-edited link should show
+ * the history, not a banner about a parameter nobody typed on purpose.
+ */
+export function isCustomerOrderTab(value: string): value is CustomerOrderTab {
+  return CUSTOMER_ORDER_TABS.some((tab) => tab === value);
+}
+
+/**
+ * The statuses one tab stands for, or `null` for "no filter at all" — which is
+ * what `all` is, exactly as it is on the staff queue: the absence of a `WHERE`,
+ * not a status of its own.
+ *
+ * `done` is `albaran` alone: the delivery note is the only state that means the
+ * goods arrived. `injected` is not done — it means Wingest has the order — and
+ * putting it here would tell a restaurant its vegetables had been delivered
+ * because a bridge process wrote a row.
+ */
+export function statusesForTab(
+  tab: CustomerOrderTab,
+): readonly OrderStatus[] | null {
+  switch (tab) {
+    case "active":
+      return ACTIVE_ORDER_STATUSES;
+    case "done":
+      return ["albaran"];
+    case "cancelled":
+      return ["cancelled"];
+    case "all":
+      return null;
+  }
+}
+
+/**
  * The instant Madrid's CURRENT month began, as an offset-bearing ISO string for
  * a `created_at >= …` filter.
  *
@@ -156,6 +212,41 @@ export function parseOrderNumber(value: string | null | undefined): number | nul
   if (typeof value !== "string" || !/^\d{1,9}$/.test(value)) return null;
   const parsed = Number(value);
   return parsed > 0 ? parsed : null;
+}
+
+/**
+ * The 件 figure on an order card: every line's quantity added up.
+ *
+ * The order-history twin of `cartUnits`, and it rounds at the same three
+ * decimals for the same reason: `order_items.qty` is `numeric(10,3)` because
+ * weighed products are ordered by the kilo, and adding 0.1 to 0.2 in binary
+ * floating point produces 0.30000000000000004 — which is not a quantity anybody
+ * should read on a phone. Three decimals is the column's own precision, so the
+ * rounding loses nothing that was ever stored.
+ *
+ * It takes quantities rather than lines so the card can hand it whatever shape
+ * its rows have; the cart's version takes the cookie because that IS its shape.
+ */
+export function orderUnits(quantities: readonly number[]): number {
+  let total = 0;
+  for (const qty of quantities) total += qty;
+  return Math.round(total * 1000) / 1000;
+}
+
+/**
+ * `?readded=` / `?skipped=` on the way back from a 再来一单 press: two counts
+ * this build wrote into the redirect, read back into a banner.
+ *
+ * Guarded like `?created=` above and for the same reason — a query string is
+ * user-editable, and these two numbers go straight into a sentence. Digits only
+ * and at most three of them: an order carries at most 200 lines
+ * (`create_order`'s TOO_MANY_LINES) and the cart at most 60, so nothing honest
+ * ever exceeds that. Anything else is 0, which renders as no banner at all
+ * rather than as "已加入 NaN 种".
+ */
+export function parseReorderCount(value: string | null | undefined): number {
+  if (typeof value !== "string" || !/^\d{1,3}$/.test(value)) return 0;
+  return Number(value);
 }
 
 /**

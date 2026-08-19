@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   ACTIVE_ORDER_STATUSES,
   addDays,
+  CUSTOMER_ORDER_TABS,
   formatOrderDate,
+  isCustomerOrderTab,
   isLineEditResult,
   isOrderErrorDetail,
   isOrderErrorKey,
@@ -15,10 +17,13 @@ import {
   mapOrderError,
   MAX_LINE_QTY,
   ORDER_STATUSES,
+  orderUnits,
   parseOrderBridgeFailures,
   parseOrderNumber,
+  parseReorderCount,
   QUEUE_TABS,
   safeQueueTab,
+  statusesForTab,
   validateLineQty,
 } from "./orders";
 
@@ -245,6 +250,93 @@ describe("safeQueueTab", () => {
     expect(safeQueueTab("toString")).toBe("submitted");
     expect(safeQueueTab(undefined)).toBe("submitted");
     expect(safeQueueTab(null)).toBe("submitted");
+  });
+});
+
+/**
+ * The customer's own four views, and the reason they are four rather than
+ * seven: `?tab=` is user-editable, it reaches `.in("status", …)`, and no chip on
+ * that row may name a state the bridge owns.
+ */
+describe("customer order tabs", () => {
+  it("offers exactly the four views the chip row draws", () => {
+    expect(CUSTOMER_ORDER_TABS).toEqual(["all", "active", "done", "cancelled"]);
+    for (const tab of CUSTOMER_ORDER_TABS) {
+      expect(isCustomerOrderTab(tab), tab).toBe(true);
+    }
+  });
+
+  it("rejects anything else, so a hand-edited `?tab=` falls back to 全部", () => {
+    // A real STATUS is not a tab: `injected` would otherwise reach the query
+    // through a validator that said yes, and put our plumbing on a chip.
+    for (const value of [
+      "injected",
+      "submitted",
+      "albaran",
+      "ALL",
+      "",
+      "toString",
+      "__proto__",
+    ]) {
+      expect(isCustomerOrderTab(value), value).toBe(false);
+    }
+  });
+
+  it("maps each tab onto the statuses it stands for", () => {
+    // `all` is the ABSENCE of a filter, not a status of its own.
+    expect(statusesForTab("all")).toBeNull();
+    expect(statusesForTab("active")).toEqual(ACTIVE_ORDER_STATUSES);
+    expect(statusesForTab("done")).toEqual(["albaran"]);
+    expect(statusesForTab("cancelled")).toEqual(["cancelled"]);
+  });
+
+  it("groups the bridge's three states under 进行中 and nowhere else", () => {
+    const active = statusesForTab("active") ?? [];
+    for (const status of ["processing", "bridge_failed", "injected"] as const) {
+      expect(active, status).toContain(status);
+    }
+    // …and `injected` is emphatically not 已完成: Wingest having the order is
+    // not the same sentence as the restaurant having the vegetables.
+    expect(statusesForTab("done")).toEqual(["albaran"]);
+  });
+
+  it("covers every status exactly once across the three filtered tabs", () => {
+    const filtered = [
+      ...(statusesForTab("active") ?? []),
+      ...(statusesForTab("done") ?? []),
+      ...(statusesForTab("cancelled") ?? []),
+    ];
+    expect([...filtered].sort()).toEqual([...ORDER_STATUSES].sort());
+  });
+});
+
+describe("orderUnits", () => {
+  it("adds a card's quantities up", () => {
+    expect(orderUnits([])).toBe(0);
+    expect(orderUnits([2, 3, 1])).toBe(6);
+  });
+
+  it("rounds the float noise weighed lines produce", () => {
+    expect(0.1 + 0.2).not.toBe(0.3); // the reason for the rounding
+    expect(orderUnits([0.1, 0.2])).toBe(0.3);
+    expect(orderUnits([2.5, 1.25])).toBe(3.75);
+    expect(orderUnits([1.005, 2.115])).toBe(3.12);
+  });
+});
+
+describe("parseReorderCount", () => {
+  it("takes the counts this build writes into the redirect", () => {
+    expect(parseReorderCount("0")).toBe(0);
+    expect(parseReorderCount("5")).toBe(5);
+    expect(parseReorderCount("200")).toBe(200);
+  });
+
+  it("answers 0 — no banner — for anything else", () => {
+    for (const value of ["abc", "-1", "1.5", "1e3", "1000", "", " 5", "5 "]) {
+      expect(parseReorderCount(value), value).toBe(0);
+    }
+    expect(parseReorderCount(undefined)).toBe(0);
+    expect(parseReorderCount(null)).toBe(0);
   });
 });
 
