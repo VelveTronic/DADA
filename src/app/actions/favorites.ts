@@ -70,5 +70,17 @@ export async function toggleFavorite(formData: FormData) {
   }
   perf.end();
 
+  // BOTH routes that mount the star, named explicitly. `ProductRow` — the only
+  // thing that renders this form — is drawn by `/catalogo` and by `/buscar`,
+  // and a star pressed on either has to come back lit on either.
+  //
+  // Listing both rather than leaning on what one path does today: Next's
+  // current `revalidatePath` sets a global flag and refreshes whatever route
+  // the action was called from, which is annotated in its own source as
+  // `// TODO: only revalidate if the path matches`. When that TODO lands, a
+  // path this action never named stops being refreshed — so it names them.
+  // Same shape as `cart.ts`'s `revalidateCart`, which lists `/catalogo` and
+  // `/carrito` for the same reason.
   revalidatePath(`/${locale}/catalogo`);
+  revalidatePath(`/${locale}/buscar`);
 }

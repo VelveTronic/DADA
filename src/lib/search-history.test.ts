@@ -14,8 +14,10 @@ import {
  * page that renders nothing at all, on the one screen that has to answer.
  *
  * `pushHistory` is the list's whole edit surface: move-to-front, deduped and
- * capped, and idempotent for the same term — which is what lets the browser leaf
- * run it inside an effect that React StrictMode invokes twice.
+ * capped, and — when there is nothing to change — the SAME ARRAY back. That
+ * identity is a contract, not an optimisation: the browser leaf writes storage
+ * only on `next !== stored`, so it is what keeps a bare landing, a reload and
+ * React StrictMode's double invocation from all rewriting the key.
  */
 
 describe("parseHistory", () => {
@@ -78,6 +80,44 @@ describe("pushHistory", () => {
   it("is idempotent for the same term", () => {
     const once = pushHistory(["白菜"], "可乐");
     expect(pushHistory(once, "可乐")).toEqual(once);
+  });
+
+  /**
+   * And it is idempotent by IDENTITY, which is the half the leaf's guard reads:
+   * `next !== stored` is what decides whether `localStorage` is written at all,
+   * so a term already at the front has to come back as the very same array or
+   * every reload and every StrictMode second pass rewrites the key with what it
+   * already held.
+   */
+  it("returns the same list when the term is already at the front", () => {
+    const list = ["可乐", "白菜"];
+    expect(pushHistory(list, "可乐")).toBe(list);
+  });
+
+  it("returns the same list for the trimmed form of the front term", () => {
+    const list = ["可乐", "白菜"];
+    expect(pushHistory(list, "  可乐  ")).toBe(list);
+  });
+
+  /**
+   * The front term is not on its own enough: these two lists still need an edit,
+   * so they must come back as NEW arrays and be written.
+   */
+  it("still rebuilds when a duplicate lurks below the front", () => {
+    const list = ["可乐", "白菜", "可乐"];
+    const next = pushHistory(list, "可乐");
+    expect(next).not.toBe(list);
+    expect(next).toEqual(["可乐", "白菜"]);
+  });
+
+  it("still rebuilds when a stored list is over the cap", () => {
+    const list = Array.from({ length: SEARCH_HISTORY_MAX + 3 }, (_, i) =>
+      i === 0 ? "可乐" : `t${i}`,
+    );
+    const next = pushHistory(list, "可乐");
+    expect(next).not.toBe(list);
+    expect(next).toHaveLength(SEARCH_HISTORY_MAX);
+    expect(next[0]).toBe("可乐");
   });
 
   it("trims the term it stores", () => {

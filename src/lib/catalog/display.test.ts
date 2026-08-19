@@ -64,6 +64,19 @@ describe("sanitizeSearch", () => {
   it("strips ilike wildcards and escapes", () => {
     expect(sanitizeSearch("a*b.c\\d")).toBe("a b c d");
   });
+  /**
+   * `_` is LIKE's single-character wildcard, so a query left holding one matches
+   * more than the customer typed — `a_c` would answer with `abc` too. Stripped,
+   * it can only ever be read literally.
+   */
+  it("strips the single-character wildcard", () => {
+    expect(sanitizeSearch("a_c")).toBe("a c");
+    expect(sanitizeSearch("ARZ_01")).toBe("ARZ 01");
+  });
+  it("collapses a query that was nothing but a wildcard", () => {
+    expect(sanitizeSearch("_")).toBe("");
+    expect(sanitizeSearch("__%")).toBe("");
+  });
   it("returns empty for whitespace-only", () => {
     expect(sanitizeSearch("   ")).toBe("");
   });

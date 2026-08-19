@@ -57,13 +57,34 @@ export function parseHistory(raw: string | null): string[] {
  * Dedupe is an EXACT match of the trimmed term, which is what the chips link
  * with: near-misses ("可乐" / "可乐 330") are genuinely different searches here.
  *
- * A blank `q` returns the list UNCHANGED — the same array, so a caller can tell
- * "nothing happened" by identity. That is the bare `/buscar` landing, where
- * there is no search to remember.
+ * **Nothing to change means the SAME ARRAY back**, so a caller can tell "no
+ * write is needed" by identity. Two shapes reach it:
+ *
+ * - a blank `q` — the bare `/buscar` landing, where there is no search to
+ *   remember;
+ * - a term that is already at the front of a list this function has nothing
+ *   else to do to — no copy of it further down to promote, nothing over the
+ *   cap to drop. That is re-entering a search already at the top of the
+ *   history: pressing the first chip, reloading a result page, or React
+ *   StrictMode running the browser leaf's effect a second time.
+ *
+ * The leaf writes only when the array it gets back is a different one
+ * (`search-history.tsx`), so both shapes leave `localStorage` untouched.
  */
 export function pushHistory(list: string[], q: string): string[] {
   const term = q.trim();
   if (!term) return list;
+  // Already the freshest term AND the list is otherwise exactly what this
+  // function would have produced: no duplicate below the front to fold away
+  // (`indexOf` from 1), nothing past the cap to cut. Anything else falls
+  // through and gets rebuilt.
+  if (
+    list[0] === term &&
+    list.indexOf(term, 1) === -1 &&
+    list.length <= SEARCH_HISTORY_MAX
+  ) {
+    return list;
+  }
   return [term, ...list.filter((entry) => entry !== term)].slice(
     0,
     SEARCH_HISTORY_MAX,

@@ -1,6 +1,7 @@
 import type { Locale } from "next-intl";
 import { getTranslations, setRequestLocale } from "next-intl/server";
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { AppShell } from "@/components/app-shell";
 import { SearchIcon } from "@/components/icons";
 import { ProductRow } from "@/components/product-row";
@@ -152,6 +153,14 @@ export default async function CatalogPage({
     const s = sp.toString();
     return `/${locale}/catalogo${s ? `?${s}` : ""}`;
   };
+
+  // A `?page` past the end lands on the real last page instead of an empty pane
+  // under a header still saying 共 30 种 — the shape a bookmarked page 3 takes
+  // once the ERP re-import shrinks the category. The count arrives on the SAME
+  // response as the rows, so the clamp is known here for free and the extra
+  // round trip is paid only in the rare over-range case. `href` is reused so the
+  // tab and the category ride along exactly as the pager encodes them.
+  if (page > totalPages) redirect(href({ page: totalPages }));
 
   // What the phone's bottom bar is allowed to add up: the CAJA price this render
   // resolved for each row it can actually order — the same figure the row shows,

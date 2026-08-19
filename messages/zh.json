@@ -47,6 +47,7 @@
     "title": "搜索",
     "placeholder": "搜索商品",
     "cancel": "取消",
+    "clearSearch": "清除搜索",
     "clear": "清除",
     "clearHistory": "清除历史搜索",
     "history": "历史搜索",

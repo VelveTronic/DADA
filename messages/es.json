@@ -47,6 +47,7 @@
     "title": "Buscar",
     "placeholder": "Buscar productos",
     "cancel": "Cancelar",
+    "clearSearch": "Borrar búsqueda",
     "clear": "Borrar",
     "clearHistory": "Borrar historial de búsqueda",
     "history": "Búsquedas recientes",

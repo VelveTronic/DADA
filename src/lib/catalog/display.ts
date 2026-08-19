@@ -44,13 +44,20 @@ export function unitLabel(
 }
 
 /**
- * Make a user query safe to embed in a PostgREST or() ilike pattern:
- * drop the characters PostgREST parses (comma, parens, percent, dot leaders),
- * collapse whitespace, cap length.
+ * Make a user query safe to embed in a PostgREST or() ilike pattern: drop the
+ * characters the `or()` grammar parses (comma, parens, dot leaders) and the ones
+ * LIKE reads as pattern syntax — `%` and `_`, its any-run and any-ONE wildcards,
+ * `*` (PostgREST's spelling of `%`) and the `\` that escapes them. `_` is the
+ * quiet one: left in, `a_c` silently matches `abc` as well as the codart the
+ * customer typed. Then collapse whitespace and cap length.
+ *
+ * Stripped rather than escaped, so the query is only ever read literally, and
+ * whatever survives is also what the field is redrawn with and what the search
+ * history stores.
  */
 export function sanitizeSearch(raw: string): string {
   return raw
-    .replace(/[,()%*.\\]/g, " ")
+    .replace(/[,()%*._\\]/g, " ")
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, 40)

@@ -45,6 +45,10 @@ function readRaw(): string | null {
 
 function getSnapshot(): string[] {
   const raw = readRaw();
+  // No key yet — the first-ever visit, and the storage-refused case — answers
+  // with the very array `getServerSnapshot` returned, so hydration has nothing
+  // to re-render. `parseHistory` would hand back a fresh `[]` and cost a pass.
+  if (!raw) return EMPTY;
   if (raw !== cachedRaw) {
     cachedRaw = raw;
     cachedList = parseHistory(raw);
@@ -98,9 +102,11 @@ function writeHistory(next: string[] | null): void {
  * what makes the chips refresh when one is pressed, because a chip is a
  * navigation to this same page rather than a remount.
  *
- * `pushHistory` is idempotent for the same term (its suite says so), so React
- * StrictMode's double invocation in development writes the same list twice and
- * changes nothing.
+ * `pushHistory` hands back the SAME ARRAY when the term is already at the front
+ * of the list (its suite pins that by identity), and the effect's guard below
+ * skips the write whenever it does — so a reload, a press on the first chip and
+ * React StrictMode's second invocation in development all touch `localStorage`
+ * zero times, rather than rewriting it with what it already held.
  */
 export function SearchHistory({ locale, q }: { locale: string; q: string }) {
   const t = useTranslations("search");
@@ -109,8 +115,10 @@ export function SearchHistory({ locale, q }: { locale: string; q: string }) {
   useEffect(() => {
     const stored = getSnapshot();
     const next = pushHistory(stored, q);
-    // The SAME array back means there was no search to remember — a bare
-    // `/buscar` landing — so opening the screen never rewrites storage.
+    // The SAME array back means the list already says what this visit would
+    // have said — a bare `/buscar` landing, or this term already at the front —
+    // so the screen opens without rewriting storage (StrictMode's second pass
+    // included).
     if (next !== stored) writeHistory(next);
   }, [q]);
 

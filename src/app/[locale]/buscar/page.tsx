@@ -1,6 +1,7 @@
 import type { Locale } from "next-intl";
 import { getTranslations, setRequestLocale } from "next-intl/server";
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { AppShell } from "@/components/app-shell";
 import { SearchIcon } from "@/components/icons";
 import { ProductRow } from "@/components/product-row";
@@ -92,9 +93,12 @@ export default async function SearchPage({
   ]);
 
   // ROUND TWO. The favourites are the one read that needed the profile — they
-  // are keyed by the restaurant's company — and they are only worth making when
-  // there are rows to draw stars ON. A bare `/buscar` issues neither query: it
-  // is a field and a list of words, and it should cost the database nothing.
+  // are keyed by the restaurant's company. The gate is `pendingProducts`: a
+  // query was ISSUED, not rows came back. A search that matches nothing still
+  // pays this round trip, deliberately — the rows are not here yet to be
+  // counted, and waiting for them to decide would cost every search that DOES
+  // match a third round trip to draw its stars. A bare `/buscar` issues neither
+  // query: it is a field and a list of words, and it costs the database nothing.
   const pendingFavorites = pendingProducts
     ? perf.step(
         "favorites",
@@ -127,6 +131,14 @@ export default async function SearchPage({
     if (p > 1) sp.set("page", String(p));
     return `/${locale}/buscar?${sp.toString()}`;
   };
+
+  // A `?page` past the end lands on the real last page instead of an empty list
+  // under a non-zero count — the shape a bookmarked page 3 takes once the ERP
+  // re-import shrinks what this `?q` matches. The count arrives on the SAME
+  // response as the rows, so the clamp is known here for free and the extra
+  // round trip is paid only in the rare over-range case. `href` is reused so the
+  // query keeps this page's own encoding.
+  if (page > totalPages) redirect(href(totalPages));
 
   // What the phone's bottom bar is allowed to add up: the CAJA price this render
   // resolved for each row it can actually order — the same figure the row shows,
@@ -173,8 +185,10 @@ export default async function SearchPage({
           `min-h-dvh` is for the screen this page is MOST often on: a bare
           `/buscar`, opened from the catalogue's search box, is a field and
           nothing else, and a sheet only as tall as that field ends in a hard
-          beige edge 145px down the phone that reads as a page which failed to
-          load. It costs an empty screen the ability to be flicked ~125px (the
+          beige edge 141px down the phone that reads as a page which failed to
+          load (the shell's header is 61px — `py-2` around a 44px icon row, plus
+          its hairline — and this sheet is 80px: 4 above the field, its 40, 12
+          below it, and the 24px tail). It costs an empty screen the ability to be flicked ~125px (the
           shell's header plus `<main>`'s own bottom inset) past its content; the
           alternative was subtracting those two by hand here, which is a number
           about the SHELL and would go stale inside it. */}
@@ -223,8 +237,9 @@ export default async function SearchPage({
               // The two paddings are not the field's own 12px because two
               // things sit inside it: `pl-9` clears the loupe (12px in, 16px
               // wide), and the right side only makes room for the × when there
-              // IS one — 32px is where the 18px circle's left edge falls inside
-              // its 44px target.
+              // IS one. `pr-8` is 32px, one pixel clear of the circle: the 44px
+              // target is pinned `right-0` and centres its 18px circle, so the
+              // circle runs from 31px to 13px in from the field's right edge.
               className={`h-10 flex-1 rounded-[10px] border-[1.5px] border-brand bg-surface pl-9 text-sm placeholder:text-faint focus:outline-none ${
                 q ? "pr-8" : "pr-3"
               }`}
@@ -235,11 +250,15 @@ export default async function SearchPage({
                 here, so the back button still holds the search that was just
                 cleared. 18px of circle inside a 44px target — the target
                 overhangs the 40px field by 2px at each end, into the row's own
-                padding, which is what buys the thumb its full square. */}
+                padding, which is what buys the thumb its full square.
+
+                Its own string, not the history block's 清除: a screen reader
+                meets these two controls one after the other, and "清除" twice on
+                one screen names neither of the things it empties. */}
             {q && (
               <Link
                 href={`/${locale}/buscar`}
-                aria-label={t("clear")}
+                aria-label={t("clearSearch")}
                 className="absolute top-1/2 right-0 flex size-11 -translate-y-1/2 items-center justify-center"
               >
                 <span
