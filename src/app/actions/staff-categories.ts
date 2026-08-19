@@ -7,6 +7,7 @@ import { routing } from "@/i18n/routing";
 import { getSessionUser } from "@/lib/auth/session";
 import type { CategoryError, CategoryFormState } from "@/lib/categories";
 import {
+  CATEGORY_LIMIT,
   makePortalErpCode,
   moveCategory,
   parseActiveFlag,
@@ -91,10 +92,38 @@ function revalidateCategoryPaths() {
 }
 
 /**
+ * The page's own view state, read back off the form that was submitted.
+ *
+ * Two independent things, and BOTH have to survive a row action: which category
+ * is open in the detail pane, and whether the create card is out. They are
+ * hidden fields rather than referer parsing because the page is the only thing
+ * that knows them, and it already writes the same pair into its links
+ * (`pageHref` in `staff/categorias/page.tsx`).
+ */
+interface ViewState {
+  /** The `?cat=` the form was rendered under, "" for none. */
+  cat: string;
+  /** Whether `?new=1` was on the URL that drew the form. */
+  creating: boolean;
+}
+
+function viewState(formData: FormData): ViewState {
+  const id = parseCategoryId(formData.get("cat"));
+  return {
+    cat: id === null ? "" : String(id),
+    // The literal "1" and nothing else — the one value `pageHref` writes and
+    // the page reads. Anything else simply closes the card, which is the safe
+    // reading of a field a crafted POST controls.
+    creating: formData.get("new") === "1",
+  };
+}
+
+/**
  * Where a finished (or refused) row action lands: back on the page it came
  * from, carrying the one word it needs to draw its banner — the `?result=<CODE>`
  * convention `staff-users.ts`, `staff-orders.ts` and `staff-settings.ts` share —
- * and the category that was selected, so the detail pane does not jump.
+ * plus the view state above, so neither the detail pane nor a half-typed create
+ * card is thrown away by pressing ↑ on a row.
  *
  * Returns `never` because `redirect()` works by THROWING NEXT_REDIRECT, which is
  * why no call to it may sit inside a catch-all try.
@@ -102,18 +131,13 @@ function revalidateCategoryPaths() {
 function finish(
   locale: string,
   result: "ok" | CategoryError,
-  selected: string,
+  view: ViewState,
 ): never {
   revalidateCategoryPaths();
   const params = new URLSearchParams({ result });
-  if (selected) params.set("cat", selected);
+  if (view.cat) params.set("cat", view.cat);
+  if (view.creating) params.set("new", "1");
   redirect(`/${locale}/staff/categorias?${params}`);
-}
-
-/** The `?cat=` the form was rendered under, echoed back through the redirect. */
-function selectedFrom(formData: FormData): string {
-  const id = parseCategoryId(formData.get("cat"));
-  return id === null ? "" : String(id);
 }
 
 /**
@@ -139,10 +163,19 @@ export async function createCategory(
 ): Promise<CategoryFormState> {
   await assertStaff();
 
-  // Kept exactly as typed, so a rejected create can redraw the fields it was
-  // sent rather than blanking both of them.
-  const zhRaw = String(formData.get("name_zh") ?? "");
-  const esRaw = String(formData.get("name_es") ?? "");
+  // Kept exactly as typed — untrimmed — so a rejected create can redraw the
+  // fields it was sent rather than blanking both of them. Untrimmed is the ONLY
+  // difference from `renameCategory`, which hands `validateCategoryName` the raw
+  // entries because it has nothing to redraw.
+  //
+  // Not `String(...)`: `FormData.get` is typed `string | File` and a crafted
+  // POST can send a file part, which `String()` would turn into the 13-character
+  // "[object File]" — a name that passes every check below and lands in the
+  // column. Same rule, and the same reason, as `text()` in `lib/categories.ts`.
+  const raw = (value: FormDataEntryValue | null) =>
+    typeof value === "string" ? value : "";
+  const zhRaw = raw(formData.get("name_zh"));
+  const esRaw = raw(formData.get("name_es"));
   const values = { zh: zhRaw, es: esRaw };
 
   const checked = validateCategoryName(zhRaw, esRaw);
@@ -186,16 +219,16 @@ export async function createCategory(
 export async function renameCategory(formData: FormData): Promise<void> {
   await assertStaff();
   const locale = safeLocale(formData.get("locale"));
-  const selected = selectedFrom(formData);
+  const view = viewState(formData);
 
   const id = parseCategoryId(formData.get("id"));
-  if (id === null) return finish(locale, "BAD_INPUT", selected);
+  if (id === null) return finish(locale, "BAD_INPUT", view);
 
   const checked = validateCategoryName(
     formData.get("name_zh"),
     formData.get("name_es"),
   );
-  if (!checked.ok) return finish(locale, checked.code, selected);
+  if (!checked.ok) return finish(locale, checked.code, view);
 
   const supabase = await createServerSupabase();
   // `select("id")` is how a write that matched NOTHING is told apart from one
@@ -208,11 +241,11 @@ export async function renameCategory(formData: FormData): Promise<void> {
     .select("id");
   if (error) {
     console.error("renameCategory:", error);
-    return finish(locale, "DB_ERROR", selected);
+    return finish(locale, "DB_ERROR", view);
   }
-  if ((data ?? []).length === 0) return finish(locale, "NOT_FOUND", selected);
+  if ((data ?? []).length === 0) return finish(locale, "NOT_FOUND", view);
 
-  return finish(locale, "ok", selected);
+  return finish(locale, "ok", view);
 }
 
 /**
@@ -228,12 +261,12 @@ export async function renameCategory(formData: FormData): Promise<void> {
 export async function setCategoryActive(formData: FormData): Promise<void> {
   await assertStaff();
   const locale = safeLocale(formData.get("locale"));
-  const selected = selectedFrom(formData);
+  const view = viewState(formData);
 
   const id = parseCategoryId(formData.get("id"));
   const active = parseActiveFlag(formData.get("active"));
   if (id === null || active === null) {
-    return finish(locale, "BAD_INPUT", selected);
+    return finish(locale, "BAD_INPUT", view);
   }
 
   const supabase = await createServerSupabase();
@@ -244,11 +277,11 @@ export async function setCategoryActive(formData: FormData): Promise<void> {
     .select("id");
   if (error) {
     console.error("setCategoryActive:", error);
-    return finish(locale, "DB_ERROR", selected);
+    return finish(locale, "DB_ERROR", view);
   }
-  if ((data ?? []).length === 0) return finish(locale, "NOT_FOUND", selected);
+  if ((data ?? []).length === 0) return finish(locale, "NOT_FOUND", view);
 
-  return finish(locale, "ok", selected);
+  return finish(locale, "ok", view);
 }
 
 /**
@@ -270,30 +303,68 @@ export async function setCategoryActive(formData: FormData): Promise<void> {
  * change one integer. The loop is bounded by the number of categories, 61 today;
  * the FIRST move on a list that has never been sequenced rewrites nearly all of
  * them and every move after that writes exactly two, because `resequence` is
- * idempotent. A failure halfway leaves a shorter but still strictly increasing
- * sequence — `sort_order` carries no unique index, so no intermediate state is
- * illegal — and the next move re-sequences from whatever is there.
+ * idempotent.
+ *
+ * **Written TAIL FIRST, and that is the whole reason for the `.reverse()`.**
+ * `sort_order` carries no unique index, so no intermediate state is illegal and
+ * the next successful move heals whatever this one left — but "not illegal" is
+ * not "harmless", and the direction the loop runs decides which. Consider the
+ * first-ever move on the freepos seed, where dozens of rows still sit on 0 and
+ * the NAME is what orders them: head-first, a failure three rows in leaves rows
+ * 1-3 carrying 10/20/30 and every UNWRITTEN row still on 0 — and 0 sorts AHEAD
+ * of 10, so the rail comes back with the untouched tail hoisted to the top. The
+ * whole customer-facing order rotates because one UPDATE failed.
+ *
+ * Tail-first inverts exactly that. The rows that get written are the ones at the
+ * BOTTOM, and the un-written head keeps its 0 — which sorts to the FRONT, broken
+ * by name, which is the order those rows were already in. Work it through on the
+ * seed above and the partial states are only ever two: while the un-written head
+ * still contains both of the swapped rows, their names put them back and the
+ * list reads exactly as it did before the press; once the head is short enough
+ * that it no longer holds both, the list reads exactly as it would have if every
+ * write had landed. There is no third order. In steady state (every row already
+ * numbered, so `changed` is just the two rows that swapped) a failure after the
+ * first write leaves the pair sharing one number, the comparator settles that by
+ * name, and the move simply did not take.
+ *
+ * The DB_ERROR path revalidates like every other, which is deliberate: a run
+ * that stopped halfway still changed rows, and leaving the pre-press order in
+ * the Router Cache would draw a list the database no longer holds.
+ *
+ * **Two staff members moving at once: last write wins.** Both read the same base
+ * list and both compute a FULL re-sequence of it, so their statements interleave
+ * onto a coherent permutation rather than a corrupt one — every row still ends
+ * up with exactly one number, and the list still reads top to bottom. What is
+ * lost is one of the two moves: whichever mover's writes land second decides the
+ * final order, silently, with no conflict shown to either of them. That is the
+ * same trade `createCategory` documents for its read-then-write `sort_order`,
+ * and it is accepted for the same reason — this is a two-person back office
+ * reordering a 61-row rail by hand, not a contended queue.
  */
 export async function moveCategoryAction(formData: FormData): Promise<void> {
   await assertStaff();
   const locale = safeLocale(formData.get("locale"));
-  const selected = selectedFrom(formData);
+  const view = viewState(formData);
 
   const id = parseCategoryId(formData.get("id"));
   const dir = parseMoveDirection(formData.get("dir"));
-  if (id === null || dir === null) return finish(locale, "BAD_INPUT", selected);
+  if (id === null || dir === null) return finish(locale, "BAD_INPUT", view);
 
   const supabase = await createServerSupabase();
   const { data: rows, error } = await supabase
     .from("categories")
     .select("id, name, sort_order")
     // The whole table, which is 61 rows and has been since the freepos seed.
-    // The bound is here so a runaway list cannot silently re-sequence a page of
-    // itself; it is far above anything a hand-managed rail can reach.
-    .limit(500);
+    // `CATEGORY_LIMIT` is the SAME bound the page draws under, imported rather
+    // than repeated, and `.order("id")` is what makes sharing it mean anything:
+    // two unordered `limit` reads may return two different subsets of a table
+    // past the bound, and a row the page drew but this read missed would answer
+    // its own ↑ with NOT_FOUND. Not the display order — `moveCategory` sorts.
+    .order("id")
+    .limit(CATEGORY_LIMIT);
   if (error) {
     console.error("moveCategoryAction read:", error);
-    return finish(locale, "DB_ERROR", selected);
+    return finish(locale, "DB_ERROR", view);
   }
 
   const categories = rows ?? [];
@@ -302,24 +373,27 @@ export async function moveCategoryAction(formData: FormData): Promise<void> {
   // disabled there, so this is a stale page), an id that is not in the list at
   // all is NOT_FOUND.
   if (!categories.some((row) => row.id === id)) {
-    return finish(locale, "NOT_FOUND", selected);
+    return finish(locale, "NOT_FOUND", view);
   }
   const next = moveCategory(categories, id, dir, locale);
-  if (next === null) return finish(locale, "EDGE", selected);
+  if (next === null) return finish(locale, "EDGE", view);
 
   const before = new Map(categories.map((row) => [row.id, row.sort_order]));
   const changed = next.filter((row) => before.get(row.id) !== row.sort_order);
 
-  for (const row of changed) {
+  // Bottom of the list upwards — see the note above. `changed` comes back in
+  // rail order, so this copy is reversed rather than iterated backwards by
+  // index, which keeps the loop body reading as "for each row".
+  for (const row of [...changed].reverse()) {
     const result = await supabase
       .from("categories")
       .update({ sort_order: row.sort_order })
       .eq("id", row.id);
     if (result.error) {
       console.error("moveCategoryAction write:", result.error);
-      return finish(locale, "DB_ERROR", selected);
+      return finish(locale, "DB_ERROR", view);
     }
   }
 
-  return finish(locale, "ok", selected);
+  return finish(locale, "ok", view);
 }

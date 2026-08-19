@@ -285,7 +285,7 @@
       "hiddenChip": "已隐藏",
       "productCount": "{n} 个商品",
       "rename": "重命名",
-      "renameFor": "保存分类名称：{name}",
+      "renameFor": "重命名分类：{name}",
       "show": "显示",
       "showFor": "显示分类：{name}",
       "hide": "隐藏",

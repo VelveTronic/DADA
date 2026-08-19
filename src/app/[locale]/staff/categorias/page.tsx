@@ -14,11 +14,19 @@ import { localizedName } from "@/lib/catalog/display";
 import type { CategoryError } from "@/lib/categories";
 import {
   CATEGORY_ERRORS,
+  CATEGORY_LIMIT,
   isCategoryError,
   MAX_CATEGORY_NAME_LENGTH,
   sortCategories,
 } from "@/lib/categories";
 import { perfRun } from "@/lib/perf";
+import {
+  MAX_SCAN_WINDOWS,
+  scanRange,
+  scanTruncated,
+  scanWindowCount,
+} from "@/lib/scan-windows";
+import type { createServerSupabase } from "@/lib/supabase/server";
 import { CreateCategoryForm } from "./create-category-form";
 
 export const dynamic = "force-dynamic";
@@ -75,27 +83,72 @@ const ROW = "flex items-center gap-3 border-t border-[#F4F0EC] px-[18px] py-[13p
 const MOVE_BTN =
   "inline-flex size-8 items-center justify-center rounded-lg border border-border-strong bg-surface text-xs leading-none text-ink-soft transition-colors hover:border-brand hover:text-brand-ink disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-border-strong disabled:hover:text-ink-soft";
 
-/**
- * How many categories this page will draw. 61 today — the whole freepos tree
- * (`scripts/seed-categories.ts`) — and the rail is hand-managed, so this is a
- * guard against a runaway list, not a pager.
- */
-const CATEGORY_LIMIT = 500;
-
-/**
- * How far the per-category product count reads.
- *
- * ONE read for every count: `select category_id` for the whole products table
- * and a tally in memory. The alternative is a `head:true` count per category,
- * which is 61 round trips for one page. 5,000 is above the 2,971 products the
- * freepos import loaded, and `count: "exact"` on the same request is what makes
- * a future overrun VISIBLE — the page logs it rather than quietly under-counting
- * the tail of the list.
- */
-const PRODUCT_SCAN_LIMIT = 5000;
-
 /** How many products the detail pane lists before it says how many are left. */
 const DETAIL_LIMIT = 50;
+
+/** The session client this page reads everything with — see the note above. */
+type ServerSupabase = Awaited<ReturnType<typeof createServerSupabase>>;
+
+/** One row of the count scan: the only column it asks for. */
+interface ScannedProduct {
+  category_id: number | null;
+}
+
+/**
+ * Every product's `category_id`, read past PostgREST's row cap.
+ *
+ * ONE query SHAPE for all 61 counts — `select category_id` for the whole
+ * products table, tallied in memory below — rather than a `head:true` count per
+ * category, which would be 61 round trips for one page.
+ *
+ * It is a loop and not a single request because PostgREST caps every response
+ * at `max_rows` (1000 — `supabase/config.toml:18`, and 1000 is the cloud
+ * default the hosted project runs on too) whether or not the request asks for a
+ * limit: one `.range(0, 4999)` against today's 2,971 products comes back with
+ * 1000 rows, no error, and a `Content-Range` of `0-999/2971`. So the scan walks
+ * windows of the cap until it has covered the exact `count` the FIRST window
+ * reported — three windows at 2,971 rows, and `scanWindowCount` is where that
+ * arithmetic lives and is tested.
+ *
+ * `.order("id")` is what makes the windows mean anything. Two `OFFSET` reads of
+ * an unordered table are two independent scans as far as Postgres is concerned:
+ * they may hand back the same row twice and miss another entirely, so the tally
+ * would come out DIFFERENT on every load. The primary key is stable, indexed,
+ * and never rewritten, so the windows are disjoint and the page is repeatable.
+ */
+async function scanProductCategories(supabase: ServerSupabase): Promise<{
+  rows: ScannedProduct[];
+  total: number;
+  truncated: boolean;
+}> {
+  const rows: ScannedProduct[] = [];
+  let total = 0;
+  // One, until the first response says how many are really needed. Bounded by
+  // `MAX_SCAN_WINDOWS` inside `scanWindowCount`, so this cannot run away.
+  let windows = 1;
+
+  for (let index = 0; index < windows; index++) {
+    const { from, to } = scanRange(index);
+    const { data, error, count } = await supabase
+      .from("products")
+      .select("category_id", { count: "exact" })
+      .order("id")
+      .range(from, to);
+    if (error) {
+      // Whatever was read still counts; the rest of the list simply reads low,
+      // which the caller's `truncated` figure and this line both say.
+      console.error("staff categories product scan:", error);
+      break;
+    }
+    rows.push(...(data ?? []));
+    if (index === 0) {
+      total = count ?? 0;
+      windows = scanWindowCount(total);
+    }
+  }
+
+  return { rows, total, truncated: scanTruncated(total) };
+}
 
 export default async function StaffCategoriesPage({
   params,
@@ -124,47 +177,51 @@ export default async function StaffCategoriesPage({
   const creating = rawNew === "1";
 
   // ROUND ONE. Neither read needs anything from the guard, so both go out beside
-  // it. The counts read is the whole `category_id` column, tallied below.
-  const [staffUser, categoryResult, productScan] = await Promise.all([
+  // it. ONE perf step covers the whole count scan, loop included: it is one
+  // query shape and one figure on the line, however many windows it took.
+  const [staffUser, categoryResult, scan] = await Promise.all([
     finishStaff(pendingStaff, locale),
     perf.step(
       "categories",
       supabase
         .from("categories")
         .select("id, erp_code, name, parent_label, sort_order, is_active")
+        // Ordered so the 500 rows this reads are the SAME 500 the move action
+        // reads (`staff-categories.ts`, same bound, same order). Not the display
+        // order — `sortCategories` below is that — just a stable slice, because
+        // an unordered `limit` is free to return a different subset per request
+        // and the ↑ on a row the action could not see would answer NOT_FOUND.
+        .order("id")
         .limit(CATEGORY_LIMIT),
     ),
-    perf.step(
-      "counts",
-      supabase
-        .from("products")
-        .select("category_id", { count: "exact" })
-        .range(0, PRODUCT_SCAN_LIMIT - 1),
-    ),
+    perf.step("counts", scanProductCategories(supabase)),
   ]);
 
   if (categoryResult.error) {
     console.error("staff categories query:", categoryResult.error);
   }
-  if (productScan.error) {
-    console.error("staff categories product scan:", productScan.error);
-  }
-  const scanned = productScan.data ?? [];
-  if ((productScan.count ?? 0) > scanned.length) {
-    // Not a page error — the counts are simply low for whatever the scan did not
-    // reach, and the operator is the one who can raise the bound.
+  if (scan.truncated) {
+    // A REAL overrun now, not the row cap: the scan spent its ceiling of
+    // MAX_SCAN_WINDOWS windows and the table is longer still, so the counts are
+    // low for whatever it did not reach. Past this many products the tally
+    // wants a grouped count in SQL rather than a bigger ceiling.
     console.error(
-      `staff categories product scan truncated at ${scanned.length} of ${productScan.count}`,
+      `staff categories product scan truncated at ${scan.rows.length} of ${scan.total} (ceiling ${MAX_SCAN_WINDOWS} windows)`,
     );
   }
   /**
-   * Products per category, counted from the one scan. Every row filed under the
+   * Products per category, tallied from the one scan. Every row filed under the
    * category, which is the ERP's own filing — not what a restaurant sees, since
-   * the catalogue also hides discontinued variants. The detail list below counts
-   * the same way, so the two figures on this page always agree.
+   * the catalogue also hides discontinued variants.
+   *
+   * The detail pane's list below filters the same column with no other
+   * predicate, so the header figure and that list agree by construction: a
+   * category holding 63 rows shows 50 of them and a "13 more" line. The only
+   * way they can disagree is a scan that hit its ceiling — which is what the
+   * `console.error` above exists to say.
    */
   const counts = new Map<number, number>();
-  for (const row of scanned) {
+  for (const row of scan.rows) {
     if (row.category_id == null) continue;
     counts.set(row.category_id, (counts.get(row.category_id) ?? 0) + 1);
   }
@@ -253,6 +310,23 @@ export default async function StaffCategoriesPage({
     const query = sp.toString();
     return `/${locale}/staff/categorias${query ? `?${query}` : ""}`;
   };
+
+  /**
+   * The create card's disclosure, echoed through every row action's POST.
+   *
+   * The four row actions answer by REDIRECTING (`finish` in
+   * `app/actions/staff-categories.ts`), and a redirect that rebuilt only
+   * `?result=&cat=` would drop `?new=1` — so pressing ↑ on a row while the
+   * create card was open unmounted the card and threw away whatever names had
+   * been typed into it. The links on this page already carry it (`pageHref`);
+   * this is the same state carried through the other half of the round trip.
+   *
+   * One element reused by every form below: a React element is an immutable
+   * description, not a mounted node.
+   */
+  const keepCreating = creating ? (
+    <input type="hidden" name="new" value="1" />
+  ) : null;
 
   // A rejected create answers the FORM with a code instead of redirecting, so
   // the form needs the same sentences this page's banner uses. Built from the
@@ -352,6 +426,7 @@ export default async function StaffCategoriesPage({
                             name="cat"
                             value={selected?.id ?? ""}
                           />
+                          {keepCreating}
                           <button
                             type="submit"
                             disabled={
@@ -418,7 +493,6 @@ export default async function StaffCategoriesPage({
               </div>
               <div className="px-[18px] py-4">
                 <CreateCategoryForm
-                  locale={locale}
                   labels={{
                     nameZh: t("nameZh"),
                     nameEs: t("nameEs"),
@@ -473,6 +547,7 @@ export default async function StaffCategoriesPage({
                     <input type="hidden" name="locale" value={locale} />
                     <input type="hidden" name="id" value={selected.id} />
                     <input type="hidden" name="cat" value={selected.id} />
+                    {keepCreating}
                     <label className="flex flex-col gap-1 text-xs text-muted">
                       {t("nameZh")}
                       <input
@@ -514,6 +589,7 @@ export default async function StaffCategoriesPage({
                         name="active"
                         value={selected.is_active ? "0" : "1"}
                       />
+                      {keepCreating}
                       <button
                         type="submit"
                         aria-label={t(

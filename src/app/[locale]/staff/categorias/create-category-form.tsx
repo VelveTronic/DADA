@@ -29,11 +29,9 @@ import {
  * is how four categories get added in a row.
  */
 export function CreateCategoryForm({
-  locale,
   labels,
   errorLabels,
 }: {
-  locale: string;
   /** Already localized by the server page — this leaf does no translation. */
   labels: {
     nameZh: string;
@@ -53,9 +51,12 @@ export function CreateCategoryForm({
   const kept = state.values;
 
   return (
+    // No `locale` field, and that is the difference from every sibling form on
+    // this page: they post one because they REDIRECT, and the path they redirect
+    // to needs a locale segment. This one answers the form instead, and
+    // `createCategory` revalidates both locales' paths outright — so a locale
+    // here would be a field nothing reads.
     <form action={formAction} className="grid gap-3 sm:grid-cols-2">
-      <input type="hidden" name="locale" value={locale} />
-
       <label className="flex flex-col gap-1 text-xs text-muted">
         {labels.nameZh}
         <input

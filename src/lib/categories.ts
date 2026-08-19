@@ -30,11 +30,29 @@ import { localizedName } from "@/lib/catalog/display";
 export const SORT_STEP = 10;
 
 /**
+ * How many categories one read of the table takes.
+ *
+ * 61 today — the whole freepos tree (`scripts/seed-categories.ts`) — and the
+ * rail is hand-managed, so this is a guard against a runaway list, not a pager.
+ *
+ * It lives HERE because two places have to agree on it: `/staff/categorias`
+ * draws under it and `moveCategoryAction` re-sequences under it. Two copies of
+ * the number would be two bounds that could drift, and past the bound the page
+ * and the action could then be looking at different rows — a row the page drew
+ * and the action never saw answers its own ↑ with NOT_FOUND. Both reads also
+ * `.order("id")` for the same reason: sharing a bound only means something if
+ * the slice under it is the same slice.
+ */
+export const CATEGORY_LIMIT = 500;
+
+/**
  * A category name is not free text: `categories_name_shape` (migration
  * 20260815000004_catalog_review_fixes.sql:33) demands a jsonb OBJECT carrying at
  * least one of `zh`/`es`, so an empty form is a constraint violation rather than
- * an empty rail entry. 60 is ours: the rail is a ~92px column on a phone and the
- * admin list gives a name one line, so a name past this is not a name.
+ * an empty rail entry. 60 is ours: the rail is an 88px column on a phone
+ * (`catalogo/category-rail.tsx:48` — `w-[88px]`, widening to `lg:w-52` on a
+ * desktop) and the admin list gives a name one line, so a name past this is not
+ * a name.
  */
 export const MAX_CATEGORY_NAME_LENGTH = 60;
 
@@ -131,6 +149,13 @@ function steps(ordered: readonly { id: number }[]): CategorySort[] {
  *
  * Idempotent: run it on a list it has already numbered and every row comes back
  * with the number it already has.
+ *
+ * EXPORTED with no app call site today — `moveCategory` below reaches `steps`
+ * directly, and the move action is the only writer. That is deliberate surface,
+ * not a leftover: this is the normalization contract the move loop embeds (a
+ * full 10/20/30… over the whole list, not a two-row swap), stated once where it
+ * can be named, and `categories.test.ts` asserts it here rather than inferring
+ * it from a move. Delete it and the contract survives only inside a loop.
  */
 export function resequence<T extends NamedCategory & { id: number }>(
   rows: readonly T[],
