@@ -373,7 +373,7 @@ export default async function AccountPage({
             </span>
             <span className="flex-1 truncate">{row.label}</span>
             {row.hint && (
-              <span className="shrink-0 font-num text-xs text-faint tabular-nums">
+              <span className="shrink-0 font-num text-xs text-muted tabular-nums">
                 {row.hint}
               </span>
             )}

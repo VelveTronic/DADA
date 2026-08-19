@@ -120,7 +120,7 @@
   },
   "orders": {
     "title": "我的订单",
-    "back": "返回我的账户",
+    "back": "返回我的账号",
     "empty": "您还没有订单",
     "emptyTab": "该分类下暂无订单",
     "tabsLabel": "订单筛选",

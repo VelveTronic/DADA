@@ -40,10 +40,10 @@ const archivo = Archivo({
  * bars sit under the indicator and the content sits under the bars.
  *
  * Every one of those is an `env()` ADDED to a fixed number rather than a floor
- * under one, which is the other half of the arrangement: there is no
- * `max(…, env())` anywhere on this edge to make a missing inset look survivable
- * on a desktop while it is 34px short on the hardware. Turn this off and the
- * layout is wrong everywhere, visibly, at once.
+ * under one — with a single deliberate exception: the cart's submit bar pads
+ * itself with `max(0.875rem, env())` because a bar flush against the glass
+ * takes a floor, not a sum (its reasoning lives in `carrito/page.tsx`). Turn
+ * this off and the layout is wrong everywhere, visibly, at once.
  *
  * Next's defaults for width and initial-scale are kept; this only adds the fit.
  */

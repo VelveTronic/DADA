@@ -146,7 +146,7 @@ export function SearchHistory({ locale, q }: { locale: string; q: string }) {
           type="button"
           onClick={() => writeHistory(null)}
           aria-label={t("clearHistory")}
-          className="-my-2.5 -mr-2 flex h-11 min-w-11 items-center justify-end px-2 text-[11.5px] text-faint transition-colors hover:text-muted"
+          className="-my-2.5 -mr-2 flex h-11 min-w-11 items-center justify-end px-2 text-[11.5px] text-muted transition-colors hover:text-ink-soft"
         >
           {t("clear")}
         </button>

@@ -98,6 +98,9 @@ export function CartBar({
         )}
       </p>
 
+      {/* `rounded-[9px]` is the design's own radius for this one CTA — between
+          BTN_PRIMARY's 10px and the bar's 12px shell. One control, so it stays
+          a literal rather than becoming a token. */}
       <Link
         href={`/${locale}/carrito`}
         className="flex h-[38px] shrink-0 items-center rounded-[9px] bg-brand px-4 text-[13.5px] font-semibold text-white transition-colors hover:bg-brand-ink"
