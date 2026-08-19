@@ -4,10 +4,35 @@ import Link from "next/link";
 import {
   StaffSidebar,
   StaffTopBar,
+  type ShellCounts,
   type StaffNavKey,
 } from "@/components/staff-sidebar";
 import { NAV_LINK } from "@/components/ui";
+import { perfRun } from "@/lib/perf";
+import { createServerSupabase } from "@/lib/supabase/server";
 import { canManageStaff, canManageUsers, isStaffRole } from "@/lib/user-admin";
+
+/** As much of a `head:true` count response as the reader below needs. */
+type CountResult = {
+  count: number | null;
+  error: { message: string } | null;
+};
+
+/**
+ * One backlog figure, or `null` when its query failed.
+ *
+ * supabase-js does not throw for a query that did not work — a network failure,
+ * a policy refusal and a bad column all come back in `error` — so the branch
+ * that matters is this one, and it logs before it gives up. `null` travels to
+ * the sidebar as an em dash; see `ShellCounts`.
+ */
+function readCount(name: string, result: CountResult): number | null {
+  if (result.error) {
+    console.error(`staff shell ${name} count:`, result.error);
+    return null;
+  }
+  return result.count ?? 0;
+}
 
 /**
  * The back office's frame: the sidebar on the left, a breadcrumb and a title
@@ -60,10 +85,15 @@ export async function StaffShell({
   // entry is a courtesy, never the gate: `/staff/usuarios` and `/staff/ajustes`
   // both redirect a staff member who types the URL, and every action behind them
   // repeats the check for the POST that skipped the page.
+  //
+  // 分类 is ungated: category writes are open to any active staff member (it is
+  // the one table whose RLS still says `is_staff()` and nothing finer), and the
+  // page guards itself with `requireStaff` like every other one.
   const items: StaffNavKey[] = [
     "home",
     "orders",
     "products",
+    "categories",
     ...(canManageUsers(user.role) ? (["users"] as const) : []),
     ...(canManageStaff(user.role) ? (["settings"] as const) : []),
   ];
@@ -79,11 +109,58 @@ export async function StaffShell({
         ? t(`users.roles.${user.role}`)
         : user.role;
 
+  // The sidebar's three figures, on the SESSION client under staff RLS — the
+  // same mechanism `/staff/pedidos` reads its queue with, and `head: true` so
+  // that not one row comes back, only the Content-Range count (the idiom
+  // `/cuenta` uses for its four). The select list names one real column each:
+  // `orders` is column-revoked (`staff_note`) and a `*` there 403s the query.
+  //
+  // This is ONE extra round trip per staff page, and it is paid HERE rather than
+  // beside the page's own reads because the shell renders after those have
+  // already resolved — the price of real counts in the nav, taken deliberately
+  // over polling or over a number that is only refreshed by luck.
+  //
+  // Its own `perfRun` for the same reason: the page's run called `end()` before
+  // it rendered this shell, so a `perfStep` would be recorded into a line that
+  // has already been printed (see the cache-slot note in `lib/perf.ts`). One
+  // step for the three, because they go out together.
+  const supabase = await createServerSupabase();
+  const perf = perfRun("staff-shell");
+  const [submittedResult, bridgeFailedResult, unavailableResult] =
+    await perf.step(
+      "counts",
+      Promise.all([
+        supabase
+          .from("orders")
+          .select("id", { count: "exact", head: true })
+          .eq("status", "submitted"),
+        supabase
+          .from("orders")
+          .select("id", { count: "exact", head: true })
+          .eq("status", "bridge_failed"),
+        supabase
+          .from("products")
+          .select("id", { count: "exact", head: true })
+          .eq("is_available", false),
+      ]),
+    );
+  perf.end();
+
+  // BACKLOG, not today: none of the three is date-filtered, which is why the
+  // sidebar heads them 待办 and not the mockup's 今日. The today-scoped figures
+  // belong to the dashboard's KPI strip.
+  const counts: ShellCounts = {
+    submitted: readCount("submitted", submittedResult),
+    bridgeFailed: readCount("bridge failed", bridgeFailedResult),
+    unavailable: readCount("unavailable", unavailableResult),
+  };
+
   const sidebar = {
     locale,
     items,
     name: user.name,
     roleLabel,
+    counts,
   };
 
   return (

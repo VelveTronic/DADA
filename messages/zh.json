@@ -205,7 +205,8 @@
       "home": "首页",
       "orders": "订单",
       "products": "商品",
-      "users": "用户",
+      "categories": "分类",
+      "users": "客户",
       "settings": "设置"
     },
     "shell": {
@@ -213,7 +214,11 @@
       "drawer": "后台菜单",
       "breadcrumb": "路径导航",
       "openMenu": "打开菜单",
-      "closeMenu": "关闭菜单"
+      "closeMenu": "关闭菜单",
+      "badge": "商家",
+      "backlog": "待办",
+      "backlogUnavailable": "停售商品",
+      "ordersWithCount": "订单，{n} 个待确认"
     },
     "ordersQueue": "订单确认队列",
     "tabSubmitted": "待确认",

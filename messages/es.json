@@ -205,7 +205,8 @@
       "home": "Inicio",
       "orders": "Pedidos",
       "products": "Productos",
-      "users": "Usuarios",
+      "categories": "Categorías",
+      "users": "Clientes",
       "settings": "Ajustes"
     },
     "shell": {
@@ -213,7 +214,11 @@
       "drawer": "Menú de administración",
       "breadcrumb": "Ruta de navegación",
       "openMenu": "Abrir el menú",
-      "closeMenu": "Cerrar el menú"
+      "closeMenu": "Cerrar el menú",
+      "badge": "Gestión",
+      "backlog": "Por gestionar",
+      "backlogUnavailable": "Productos pausados",
+      "ordersWithCount": "Pedidos, {n, plural, one {# pendiente} other {# pendientes}}"
     },
     "ordersQueue": "Cola de confirmación de pedidos",
     "tabSubmitted": "Pendientes",

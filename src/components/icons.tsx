@@ -73,7 +73,7 @@ export function UserIcon() {
 }
 
 /* ── The staff sidebar ──────────────────────────────────────────────────────
-   Five nav glyphs and the three controls around them. They are drawn on the
+   Six nav glyphs and the three controls around them. They are drawn on the
    same grid as the four above and take their colour the same way, which is what
    lets the sidebar's active row tint the icon by tinting the anchor. */
 
@@ -106,6 +106,18 @@ export function BoxIcon() {
       <path d="M12 3.5 20 7.5v9L12 20.5 4 16.5v-9Z" />
       <path d="M4 7.5 12 11.5l8-4" />
       <path d="M12 11.5v9" />
+    </svg>
+  );
+}
+
+/** 分类 — the catalogue's shelves, drawn as the 2×2 grid of a category rail. */
+export function GridIcon() {
+  return (
+    <svg {...ICON_PROPS}>
+      <rect x="4.5" y="4.5" width="6.5" height="6.5" rx="1.5" />
+      <rect x="13" y="4.5" width="6.5" height="6.5" rx="1.5" />
+      <rect x="4.5" y="13" width="6.5" height="6.5" rx="1.5" />
+      <rect x="13" y="13" width="6.5" height="6.5" rx="1.5" />
     </svg>
   );
 }
