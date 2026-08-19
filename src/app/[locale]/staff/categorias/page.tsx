@@ -136,7 +136,8 @@ async function scanProductCategories(supabase: ServerSupabase): Promise<{
       .range(from, to);
     if (error) {
       // Whatever was read still counts; the rest of the list simply reads low,
-      // which the caller's `truncated` figure and this line both say.
+      // and this log line is the only place that says so — `truncated` reports
+      // a capped PLAN (past `MAX_SCAN_WINDOWS`), not a window that failed.
       console.error("staff categories product scan:", error);
       break;
     }

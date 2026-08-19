@@ -327,19 +327,24 @@ export async function setCategoryActive(formData: FormData): Promise<void> {
  * first write leaves the pair sharing one number, the comparator settles that by
  * name, and the move simply did not take.
  *
- * The DB_ERROR path revalidates like every other, which is deliberate: a run
- * that stopped halfway still changed rows, and leaving the pre-press order in
- * the Router Cache would draw a list the database no longer holds.
+ * The DB_ERROR paths revalidate like every other, which is deliberate: a write
+ * loop that stopped halfway still changed rows, and leaving the pre-press order
+ * in the Router Cache would draw a list the database no longer holds. (On the
+ * read failure nothing changed, and the same revalidate just redraws an
+ * unchanged list.)
  *
  * **Two staff members moving at once: last write wins.** Both read the same base
  * list and both compute a FULL re-sequence of it, so their statements interleave
  * onto a coherent permutation rather than a corrupt one — every row still ends
- * up with exactly one number, and the list still reads top to bottom. What is
- * lost is one of the two moves: whichever mover's writes land second decides the
- * final order, silently, with no conflict shown to either of them. That is the
- * same trade `createCategory` documents for its read-then-write `sort_order`,
- * and it is accepted for the same reason — this is a two-person back office
- * reordering a 61-row rail by hand, not a contended queue.
+ * up with exactly one number, and the list still reads top to bottom. In steady
+ * state each mover writes only its own swapped pair, so two moves on disjoint
+ * pairs both land; only where the writes overlap (the same pair, or the
+ * un-numbered seed above, where `changed` is the whole list) do the later writes
+ * override the earlier, and a move can silently fail to take, with no conflict
+ * shown to either mover. That is the same trade `createCategory` documents for
+ * its read-then-write `sort_order`, and it is accepted for the same reason —
+ * this is a two-person back office reordering a 61-row rail by hand, not a
+ * contended queue.
  */
 export async function moveCategoryAction(formData: FormData): Promise<void> {
   await assertStaff();
