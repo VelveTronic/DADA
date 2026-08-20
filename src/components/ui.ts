@@ -45,6 +45,27 @@ export const CARD = "rounded-card border border-border bg-surface";
 export const ADMIN_CARD = "rounded-xl border border-[#EDE9E5] bg-surface";
 
 /**
+ * One body cell of an admin table, at the back office's row metrics.
+ *
+ * Imported by the two /staff screens that draw a real `<table>`: the products
+ * list (`staff/productos/page.tsx`) and the dashboard's recent-orders mini
+ * table (`staff/page.tsx`). It is here for the same reason `ADMIN_CARD` is —
+ * the string was byte-identical in both — and for nothing more: the padding is
+ * the mockup's admin row and carries no colour, so there is no palette argument
+ * on it either way. `/staff/pedidos` does NOT import it; the order queue draws
+ * cards and not a table, and has no cell constant of its own.
+ *
+ * **The HEADER cell is deliberately NOT here.** Both pages have one, and the
+ * two strings differ: the products table's header is `h-[42px]` (the mockup's
+ * own admin header height, written up on that page beside the AA note for its
+ * 11.5px muted label) and the dashboard's mini table is `h-10`. Parameterising
+ * a height to share four other utilities would trade a real duplicate for a
+ * fake abstraction, so each page keeps its `TH` and the difference stays
+ * visible at the place that chose it.
+ */
+export const ADMIN_TD = "px-3 py-2.5 align-middle";
+
+/**
  * Text/number/date inputs and textareas. The field is a shade OFF the card it
  * sits on rather than the same white — an input the customer cannot see the
  * edges of is an input they do not fill in — and its border is heavier than a

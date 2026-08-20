@@ -9,32 +9,9 @@ import {
 } from "@/components/staff-sidebar";
 import { NAV_LINK } from "@/components/ui";
 import { perfRun } from "@/lib/perf";
-import { type CountResult, readCount } from "@/lib/shell-counts";
+import { readLoggedCount } from "@/lib/shell-counts";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { canManageStaff, canManageUsers, isStaffRole } from "@/lib/user-admin";
-
-/**
- * One backlog figure, or `null` when the read cannot be trusted to have one.
- *
- * The decision itself is `readCount` in `lib/shell-counts.ts`, pure and under
- * test; this is the logging half. It matters that it logs BOTH failure shapes,
- * because a `head: true` request that fails quietly is the easiest kind to miss:
- * a HEAD response has no body, so postgrest-js has no error JSON to parse and
- * `error.message` would be `""` even when it does fill one in. The status is
- * therefore printed too, and a result with no error at all is named as what it
- * is rather than logged as `null`. `null` travels to the sidebar as an em dash;
- * see `ShellCounts`.
- */
-function readShellCount(name: string, result: CountResult): number | null {
-  const value = readCount(result);
-  if (value === null) {
-    console.error(
-      `staff shell ${name} count (status ${result.status}):`,
-      result.error ?? "no content-range on the response",
-    );
-  }
-  return value;
-}
 
 /**
  * The back office's frame: the sidebar on the left, a breadcrumb and a title
@@ -175,10 +152,24 @@ export async function StaffShell({
   // BACKLOG, not today: none of the three is date-filtered, which is why the
   // sidebar heads them 待办 and not the mockup's 今日. The today-scoped figures
   // belong to the dashboard's KPI strip.
+  //
+  // Read and logged by the shared half (`lib/shell-counts.ts`), which prints
+  // `staff shell <name> count (status <n>)` and names BOTH failure shapes —
+  // including the quiet one, a `head: true` request whose response carries no
+  // error JSON to parse. `null` travels to the sidebar as an em dash and never
+  // as 0; see `ShellCounts`.
   const counts: ShellCounts = {
-    submitted: readShellCount("submitted", submittedResult),
-    bridgeFailed: readShellCount("bridge failed", bridgeFailedResult),
-    unavailable: readShellCount("unavailable", unavailableResult),
+    submitted: readLoggedCount("staff shell", "submitted", submittedResult),
+    bridgeFailed: readLoggedCount(
+      "staff shell",
+      "bridge failed",
+      bridgeFailedResult,
+    ),
+    unavailable: readLoggedCount(
+      "staff shell",
+      "unavailable",
+      unavailableResult,
+    ),
   };
 
   const sidebar = {

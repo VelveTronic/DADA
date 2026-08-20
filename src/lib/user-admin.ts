@@ -145,7 +145,7 @@ function fail(error: UserAdminError): { ok: false; error: UserAdminError } {
 }
 
 /**
- * Who may open 用户管理 at all, and who may touch staff accounts.
+ * Who may open 客户管理页 at all, and who may touch staff accounts.
  *
  * The whole permission model is these two predicates (see the table in the
  * plan): managers run the customer side, and only the owner — 超级管理员 — can

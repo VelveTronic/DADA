@@ -175,7 +175,7 @@
   },
   "profile": {
     "title": "Mis datos",
-    "customerNo": "Nº de cliente {code}",
+    "customerNo": "N.º de cliente {code}",
     "sectionAccount": "Datos de la cuenta",
     "email": "Correo",
     "emailHint": "El correo no se puede cambiar aquí. Para cambiarlo, contacte con DADA.",

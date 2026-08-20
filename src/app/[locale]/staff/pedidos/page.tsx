@@ -22,7 +22,7 @@ import {
   safeQueueTab,
 } from "@/lib/orders";
 import { perfRun } from "@/lib/perf";
-import { type CountResult, readCount } from "@/lib/shell-counts";
+import { readLoggedCount } from "@/lib/shell-counts";
 import type { Database } from "@/lib/supabase/database.types";
 import type { PublicOrder } from "@/lib/supabase/public.types";
 import { PUBLIC_ORDER_COLUMNS } from "@/lib/supabase/public.types";
@@ -138,32 +138,6 @@ type QueueItem = Pick<
   | "is_weighed"
 > & { products: { is_weighed: boolean } | null };
 
-/**
- * One chip's figure, or `null` when the read cannot be trusted to have one.
- *
- * The decision is `readCount` in `lib/shell-counts.ts`, pure and under test;
- * this is the logging half, and it is the shell's (`staff-shell.tsx:28-37`) —
- * both failure shapes are printed, because a `head: true` request that fails
- * quietly is the easiest kind to miss: a HEAD response has no body, so
- * postgrest-js has no error JSON to parse and `error.message` would be `""`
- * even when it does fill one in. The status is therefore printed too, and a
- * result with no error at all is named as what it is.
- *
- * `null` renders as the chip's LABEL with no number — never as 0. A count that
- * did not arrive must not be able to tell a staff member there is nothing to
- * confirm.
- */
-function readTabCount(tab: QueueTab, result: CountResult): number | null {
-  const value = readCount(result);
-  if (value === null) {
-    console.error(
-      `staff queue ${tab} count (status ${result.status}):`,
-      result.error ?? "no content-range on the response",
-    );
-  }
-  return value;
-}
-
 export default async function StaffOrdersPage({
   params,
   searchParams,
@@ -236,7 +210,7 @@ export default async function StaffOrdersPage({
    *
    * `submitted` and `bridge_failed` are counted TWICE per request: `StaffShell`
    * reads the same two predicates for the sidebar's 待办 block and its 订单
-   * badge (`staff-shell.tsx:155-172`). Same request, separate round — the shell
+   * badge (`staff-shell.tsx:132-149`). Same request, separate round — the shell
    * renders after this page's reads have resolved — so the badge and the chip
    * can differ by the milliseconds between them. Unifying them behind one
    * `cache()`d read is a recorded follow-up, not this round.
@@ -275,11 +249,20 @@ export default async function StaffOrdersPage({
 
   const [submittedCount, confirmedCount, failedCount, allCount] =
     tabCountResults;
+  // Read and logged by the shared half (`lib/shell-counts.ts`), which prints
+  // `staff queue <tab> count (status <n>)` and names BOTH failure shapes —
+  // including the quiet one, a `head: true` request whose response carries no
+  // error JSON to parse. The `QueueTab` keys below are the log's `name`: the
+  // parameter is `string` and the union is a subtype of it, so the emitted line
+  // is the tab's own id and the record's keys stay checked against `QueueTab`.
+  // `null` renders as the chip's LABEL with no number — never as 0. A count
+  // that did not arrive must not be able to tell a staff member there is
+  // nothing to confirm.
   const tabCounts: Record<QueueTab, number | null> = {
-    submitted: readTabCount("submitted", submittedCount),
-    confirmed: readTabCount("confirmed", confirmedCount),
-    bridge_failed: readTabCount("bridge_failed", failedCount),
-    all: readTabCount("all", allCount),
+    submitted: readLoggedCount("staff queue", "submitted", submittedCount),
+    confirmed: readLoggedCount("staff queue", "confirmed", confirmedCount),
+    bridge_failed: readLoggedCount("staff queue", "bridge_failed", failedCount),
+    all: readLoggedCount("staff queue", "all", allCount),
   };
   /** The chip figure of the view on screen — and the footer's total. */
   const activeCount = tabCounts[tab];
@@ -512,7 +495,7 @@ export default async function StaffOrdersPage({
         /* `ADMIN_CARD` is on this wrapper rather than on the `<ul>` because the
            footer below the list sits INSIDE the same card and a `<ul>` may hold
            nothing but `<li>`. The products table card is built the same way
-           (`productos/page.tsx:501`). `overflow-hidden` is what keeps the row
+           (`productos/page.tsx:505`). `overflow-hidden` is what keeps the row
            hover and the dividers inside the 12px radius. */
         <div className={`${ADMIN_CARD} mt-[18px] overflow-hidden`}>
           <ul className="divide-y divide-[#F4F0EC]">

@@ -3,7 +3,7 @@ import { getTranslations, setRequestLocale } from "next-intl/server";
 import Link from "next/link";
 import { OrderStatusBadge } from "@/components/order-status-badge";
 import { StaffShell } from "@/components/staff-shell";
-import { ADMIN_CARD } from "@/components/ui";
+import { ADMIN_CARD, ADMIN_TD } from "@/components/ui";
 import { beginStaff, finishStaff } from "@/lib/auth/guards";
 import {
   bridgeCountLabelKey,
@@ -22,7 +22,7 @@ import {
   type OrderStatus,
 } from "@/lib/orders";
 import { perfRun } from "@/lib/perf";
-import { type CountResult, readCount } from "@/lib/shell-counts";
+import { readLoggedCount } from "@/lib/shell-counts";
 import type { Database } from "@/lib/supabase/database.types";
 import type { PublicOrder } from "@/lib/supabase/public.types";
 import { PUBLIC_ORDER_COLUMNS } from "@/lib/supabase/public.types";
@@ -97,9 +97,15 @@ const FUNNEL_FAILED: { status: OrderStatus; bar: string } = {
   bar: "bg-brand-ink",
 };
 
-/** The mini table's header cell, at the house's admin-table metrics. */
+/**
+ * The mini table's header cell, at the house's admin-table metrics.
+ *
+ * Stays local: `h-10` here against `/staff/productos`'s `h-[42px]`, so the two
+ * header strings are NOT the same string and there is nothing to share. The
+ * body cell is — it is `ADMIN_TD` in `components/ui.ts`, byte-identical on both
+ * pages.
+ */
 const TH = "h-10 px-3 text-left align-middle font-medium";
-const TD = "px-3 py-2.5 align-middle";
 
 /**
  * The KPI strip's internal hairlines, per cell, at both of its layouts.
@@ -119,32 +125,6 @@ const KPI_RULES = [
   "border-t lg:border-t-0 lg:border-l",
   "border-l border-t lg:border-t-0",
 ];
-
-/**
- * One dashboard count, or `null` when the read cannot be trusted to have one.
- *
- * The decision is `readCount` in `lib/shell-counts.ts`, pure and under test;
- * this is the logging half, and it is the shape `/staff/pedidos` logs its tab
- * counts in (`pedidos/page.tsx:156-165`) down to the wording — both failure
- * shapes printed, because a `head: true` request that fails quietly is the
- * easiest kind to miss: a HEAD response has no body, so postgrest-js has no
- * error JSON to parse and `error.message` would be `""` even when it does fill
- * one in. The status is printed too, and a result with no error at all is named
- * as what it is.
- *
- * `null` reaches the screen as an em dash, never as 0. A count that did not
- * arrive must not be able to tell a staff member there is nothing to do.
- */
-function readHomeCount(name: string, result: CountResult): number | null {
-  const value = readCount(result);
-  if (value === null) {
-    console.error(
-      `staff home ${name} count (status ${result.status}):`,
-      result.error ?? "no content-range on the response",
-    );
-  }
-  return value;
-}
 
 /** The recent-orders row: the customer-readable columns plus the restaurant. */
 type RecentOrder = PublicOrder & {
@@ -180,9 +160,9 @@ export default async function StaffHome({
    *
    * These predicates now have THREE readers. `StaffShell` counts `submitted`,
    * `bridge_failed` and `products.is_available = false` for the sidebar's 待办
-   * block and its 订单 badge (`staff-shell.tsx:155-172`); `/staff/pedidos`
+   * block and its 订单 badge (`staff-shell.tsx:132-149`); `/staff/pedidos`
    * counts `submitted`, `confirmed` and `bridge_failed` again for its tab chips
-   * (`pedidos/page.tsx:244-249`); and this page counts six of them for the KPI
+   * (`pedidos/page.tsx:218-223`); and this page counts six of them for the KPI
    * strip and the funnel. Same request, separate rounds — the shell renders
    * after this page's reads have resolved — so the sidebar figure and the KPI
    * beside it can differ by the milliseconds between them. Both are real;
@@ -366,13 +346,39 @@ export default async function StaffHome({
     bridgeFailedResult,
     pausedCountResult,
   ] = countResults;
-  const todayCount = readHomeCount("today", todayResult);
-  const submittedCount = readHomeCount("submitted", submittedResult);
-  const confirmedCount = readHomeCount("confirmed", confirmedResult);
-  const processingCount = readHomeCount("processing", processingResult);
-  const injectedCount = readHomeCount("injected", injectedResult);
-  const bridgeFailedCount = readHomeCount("bridge failed", bridgeFailedResult);
-  const pausedCount = readHomeCount("paused", pausedCountResult);
+  // All seven read and logged by the shared half (`lib/shell-counts.ts`), which
+  // prints `staff home <name> count (status <n>)` and names BOTH failure shapes
+  // — including the quiet one, a `head: true` request whose response carries no
+  // error JSON to parse. `null` reaches the screen as an em dash, never as 0: a
+  // count that did not arrive must not be able to tell a staff member there is
+  // nothing to do.
+  const todayCount = readLoggedCount("staff home", "today", todayResult);
+  const submittedCount = readLoggedCount(
+    "staff home",
+    "submitted",
+    submittedResult,
+  );
+  const confirmedCount = readLoggedCount(
+    "staff home",
+    "confirmed",
+    confirmedResult,
+  );
+  const processingCount = readLoggedCount(
+    "staff home",
+    "processing",
+    processingResult,
+  );
+  const injectedCount = readLoggedCount(
+    "staff home",
+    "injected",
+    injectedResult,
+  );
+  const bridgeFailedCount = readLoggedCount(
+    "staff home",
+    "bridge failed",
+    bridgeFailedResult,
+  );
+  const pausedCount = readLoggedCount("staff home", "paused", pausedCountResult);
 
   // ── everything below this line is derivation and markup ───────────────────
 
@@ -665,7 +671,7 @@ export default async function StaffHome({
             table's `min-w-[560px]` would push this column — and with it the
             whole page — past 390px on a phone-width drawer, which is exactly the
             sideways scroll the table's own `overflow-x-auto` exists to
-            prevent. Same fix `staff-shell.tsx:202` makes for the main column. */}
+            prevent. Same fix `staff-shell.tsx:193` makes for the main column. */}
         <div className="flex min-w-0 flex-col gap-[18px]">
           <section className={ADMIN_CARD}>
             <div className="flex items-baseline justify-between gap-3 border-b border-[#EDE9E5] px-5 py-4">
@@ -814,10 +820,10 @@ export default async function StaffHome({
                         {/* `font-num` for the DIGITS: Archivo carries no CJK, so
                             the numeral face is exactly what a column of order
                             numbers wants. */}
-                        <td className={`${TD} pl-5 font-num text-[12.5px]`}>
+                        <td className={`${ADMIN_TD} pl-5 font-num text-[12.5px]`}>
                           {order.order_number}
                         </td>
-                        <td className={`${TD} max-w-0`}>
+                        <td className={`${ADMIN_TD} max-w-0`}>
                           <p className="truncate text-[13px] font-semibold">
                             {order.companies?.name ?? DASH}
                           </p>
@@ -830,10 +836,10 @@ export default async function StaffHome({
                         {/* Absolute, not 今天 09:12: a queue is worked against
                             dated paperwork, and this card reaches back over
                             whatever the six newest orders happen to be. */}
-                        <td className={`${TD} text-[12.5px] text-ink-soft`}>
+                        <td className={`${ADMIN_TD} text-[12.5px] text-ink-soft`}>
                           {formatOrderDate(order.created_at, locale)}
                         </td>
-                        <td className={`${TD} pr-5 text-right`}>
+                        <td className={`${ADMIN_TD} pr-5 text-right`}>
                           <OrderStatusBadge status={order.status} />
                         </td>
                       </tr>
@@ -951,7 +957,7 @@ export default async function StaffHome({
               </ul>
             )}
             {/* The card's own count, in the footer shape the queue uses
-                (`pedidos/page.tsx:933-943`). This was the ONE card here with no
+                (`pedidos/page.tsx:916-926`). This was the ONE card here with no
                 figure of its own: `FAILED_LIMIT` truncates in silence, so twelve
                 failures drew five rows and nothing on the card said so.
                 Deliberately outside the ternary above, because the case worth

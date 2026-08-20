@@ -106,10 +106,33 @@ export function SettingsForm({
             The state is still carried by the track's colour and the knob's
             POSITION — the two things that move — which is the switch every
             phone in the room draws; the knob's colour only makes sure the knob
-            is one of the things you can see. */}
+            is one of the things you can see.
+
+            **The focus ring needs `ring-offset-2`, and it is the ON state that
+            needs it.** `ring-brand` on a track that `peer-checked:` has just
+            painted `bg-brand` is brand on brand: 1:1, no edge at all, and what
+            a keyboard user sees is not a ring but the pill going 4px fatter.
+            The 2px offset puts a gap between track and ring, so the ring is a
+            detached outline in BOTH states rather than a swelling in one.
+
+            `ring-offset-color` is deliberately left at Tailwind's default,
+            which is `#fff` (v4 registers `--tw-ring-offset-color` with that
+            initial value). That is not a fudge here: this switch sits inside an
+            `ADMIN_CARD`, whose fill IS `--color-surface` = `#ffffff`, so the
+            default already matches the ground the gap is cut out of. The beige
+            `--color-background` (#f1eeeb) is the page BEHIND the card and never
+            touches this control, so overriding the offset to it would put a
+            beige stripe on a white card. Should a switch ever be drawn straight
+            on the wash, that one needs `ring-offset-background`.
+
+            Contrast, both states: the ring is `#e0231c` and both colours now
+            adjacent to it are `#ffffff` — the offset gap inside, the card
+            outside — at 4.74:1, over the 3:1 WCAG 1.4.11 asks of a focus
+            indicator. Before the offset the ON state's inner neighbour was the
+            brand track itself at 1:1. */}
         <span
           aria-hidden="true"
-          className="relative ml-auto inline-block h-[26px] w-11 shrink-0 rounded-full bg-border-strong transition-colors after:absolute after:top-[3px] after:left-[3px] after:h-5 after:w-5 after:rounded-full after:bg-muted after:shadow-[0_1px_3px_rgba(0,0,0,.2)] after:transition-[transform,background-color] peer-checked:bg-brand peer-checked:after:translate-x-[18px] peer-checked:after:bg-white peer-focus-visible:ring-2 peer-focus-visible:ring-brand"
+          className="relative ml-auto inline-block h-[26px] w-11 shrink-0 rounded-full bg-border-strong transition-colors after:absolute after:top-[3px] after:left-[3px] after:h-5 after:w-5 after:rounded-full after:bg-muted after:shadow-[0_1px_3px_rgba(0,0,0,.2)] after:transition-[transform,background-color] peer-checked:bg-brand peer-checked:after:translate-x-[18px] peer-checked:after:bg-white peer-focus-visible:ring-2 peer-focus-visible:ring-brand peer-focus-visible:ring-offset-2"
         />
       </label>
 

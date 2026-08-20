@@ -9,7 +9,7 @@ import {
 } from "@/app/actions/staff-products";
 import { ProductThumb } from "@/components/product-thumb";
 import { StaffShell } from "@/components/staff-shell";
-import { ADMIN_CARD, BTN_QUIET, FIELD_SM } from "@/components/ui";
+import { ADMIN_CARD, ADMIN_TD, BTN_QUIET, FIELD_SM } from "@/components/ui";
 import { requireStaff } from "@/lib/auth/guards";
 import { localizedName, sanitizeSearch, unitLabel } from "@/lib/catalog/display";
 import {
@@ -74,9 +74,13 @@ const CHIP_OFF = `${CHIP} border border-border-strong bg-surface text-ink-soft t
  * IS that token), 11.5px muted. `text-muted` and not the mockup's `#8C857E`,
  * which is the standing AA rule for table headers — a sole-carrier label is
  * read, so it clears 4.5:1.
+ *
+ * Stays local for that height: the dashboard's mini table heads its rows at
+ * `h-10`, so the two header strings differ and there is nothing to share. The
+ * body cell is shared — `ADMIN_TD` in `components/ui.ts`, byte-identical on
+ * both pages.
  */
 const TH = "h-[42px] px-3 text-left align-middle font-medium";
-const TD = "px-3 py-2.5 align-middle";
 
 /*
  * The two shades this table draws rows with, both already named on
@@ -569,7 +573,7 @@ export default async function StaffProductsPage({
                       p.is_available ? "" : "opacity-50"
                     }`}
                   >
-                    <td className={`${TD} pl-[18px]`}>
+                    <td className={`${ADMIN_TD} pl-[18px]`}>
                       <div className="flex items-center gap-3">
                         <ProductThumb src={p.image_url} />
                         <div className="min-w-0">
@@ -613,7 +617,7 @@ export default async function StaffProductsPage({
                         else — the same list of identical buttons `roleFor` /
                         `saveRoleFor` already fixed on `/staff/usuarios`, and the
                         pair is copied from there. */}
-                    <td className={TD}>
+                    <td className={ADMIN_TD}>
                       <form
                         action={setProductCategory}
                         className="flex items-center gap-1.5"
@@ -681,11 +685,11 @@ export default async function StaffProductsPage({
                         the tarifa price into the per-caja price a customer sees,
                         so staff comparing a price against the ERP need it on the
                         row. */}
-                    <td className={`${TD} text-[12.5px] text-ink-soft`}>
+                    <td className={`${ADMIN_TD} text-[12.5px] text-ink-soft`}>
                       {unitLabel(p.unit, p.units_per_case)}
                     </td>
 
-                    <td className={TD}>
+                    <td className={ADMIN_TD}>
                       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                         <span
                           className={
@@ -703,12 +707,12 @@ export default async function StaffProductsPage({
                     </td>
 
                     <td
-                      className={`${TD} text-right font-num text-[12.5px] tabular-nums`}
+                      className={`${ADMIN_TD} text-right font-num text-[12.5px] tabular-nums`}
                     >
                       {pricedTiers(p)}/6
                     </td>
 
-                    <td className={`${TD} pr-[18px] text-right`}>
+                    <td className={`${ADMIN_TD} pr-[18px] text-right`}>
                       <div className="flex flex-wrap justify-end gap-2">
                         <form action={setProductAvailability}>
                           <input type="hidden" name="product_id" value={p.id} />
