@@ -2,7 +2,7 @@ import type { Locale } from "next-intl";
 import { getTranslations, setRequestLocale } from "next-intl/server";
 import { redirect } from "next/navigation";
 import { StaffShell } from "@/components/staff-shell";
-import { CARD } from "@/components/ui";
+import { ADMIN_CARD } from "@/components/ui";
 import { beginStaff, finishStaff } from "@/lib/auth/guards";
 import { perfRun } from "@/lib/perf";
 import { getSetting, isSettingsResult } from "@/lib/settings";
@@ -83,49 +83,78 @@ export default async function StaffSettingsPage({
         role: staffUser.role,
       }}
     >
-      {result && (
-        <p
-          role={result === "ok" ? "status" : "alert"}
-          className={`mt-4 rounded-lg px-3 py-2 text-sm ${
-            result === "ok"
-              ? "bg-green-50 text-green-800"
-              : "bg-red-50 text-red-700"
-          }`}
-        >
-          {t(`results.${result}`)}
-        </p>
-      )}
+      {/* 940px, the mockup's own settings column (`:427`) — narrower than the
+          shell's `max-w-5xl`, because a switch row is a title, a sentence and a
+          44px track, and a sentence that runs the full width of a 1280px screen
+          is a sentence nobody finishes reading. */}
+      <div className="max-w-[940px]">
+        {/* The mockup's sub-line is 供应商资料、下单规则与通知 (`:431`) and two
+            thirds of it are fiction: there is no supplier-profile form and there
+            are no notification switches (decision 9). What is left is what this
+            page actually holds — the switches that gate the customer portal. */}
+        <p className="mt-2 text-[13px] text-muted">{t("subtitle")}</p>
 
-      {/* One card per switch, each with its own 保存. The banner above is
-          shared because a save redirects here with a single `?result=` — which
-          is honest: only one form can be submitted at a time. */}
-      <section className={`${CARD} mt-6 p-5`}>
-        <h2 className="font-medium">{t("pricesTitle")}</h2>
-        <SettingsForm
-          locale={locale}
-          settingKey="show_prices"
-          checked={showPrices}
-          labels={{
-            label: t("showPrices"),
-            hint: t("showPricesHint"),
-            save: t("save"),
-          }}
-        />
-      </section>
+        {result && (
+          <p
+            role={result === "ok" ? "status" : "alert"}
+            className={`mt-4 rounded-lg px-3 py-2 text-sm ${
+              result === "ok"
+                ? "bg-green-50 text-green-800"
+                : "bg-red-50 text-red-700"
+            }`}
+          >
+            {t(`results.${result}`)}
+          </p>
+        )}
 
-      <section className={`${CARD} mt-6 p-5`}>
-        <h2 className="font-medium">{t("deliveryDateTitle")}</h2>
-        <SettingsForm
-          locale={locale}
-          settingKey="show_delivery_date"
-          checked={showDeliveryDate}
-          labels={{
-            label: t("showDeliveryDate"),
-            hint: t("showDeliveryDateHint"),
-            save: t("save"),
-          }}
-        />
-      </section>
+        {/* One card per switch, each with its own 保存. The banner above is
+            shared because a save redirects here with a single `?result=` — which
+            is honest: only one form can be submitted at a time.
+
+            OUT, and deliberately: the mockup's 供应商资料 card (`:437-461`, a
+            company name / phone / warehouse / logo form backed by no table), the
+            two dropdown rows inside 下单规则 (每日截单时间 and 最小起订量,
+            `:666-667` — a cut-off time and a minimum order nobody has built,
+            decision 3), its 通知 card (`:479-491`) and the ONE global 保存修改
+            button over all of them (`:433`). That last one is not just missing
+            data: `updateSetting` writes a single key per POST, so a button that
+            claimed to save the whole page would save one switch (decision 9). */}
+        <section className={`${ADMIN_CARD} mt-[18px]`}>
+          <div className="border-b border-[#EDE9E5] px-5 py-4">
+            <h2 className="text-[15px] font-bold">{t("pricesTitle")}</h2>
+          </div>
+          <div className="px-5 py-[18px]">
+            <SettingsForm
+              locale={locale}
+              settingKey="show_prices"
+              checked={showPrices}
+              labels={{
+                label: t("showPrices"),
+                hint: t("showPricesHint"),
+                save: t("save"),
+              }}
+            />
+          </div>
+        </section>
+
+        <section className={`${ADMIN_CARD} mt-[18px]`}>
+          <div className="border-b border-[#EDE9E5] px-5 py-4">
+            <h2 className="text-[15px] font-bold">{t("deliveryDateTitle")}</h2>
+          </div>
+          <div className="px-5 py-[18px]">
+            <SettingsForm
+              locale={locale}
+              settingKey="show_delivery_date"
+              checked={showDeliveryDate}
+              labels={{
+                label: t("showDeliveryDate"),
+                hint: t("showDeliveryDateHint"),
+                save: t("save"),
+              }}
+            />
+          </div>
+        </section>
+      </div>
     </StaffShell>
   );
 }

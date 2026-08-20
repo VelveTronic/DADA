@@ -407,6 +407,7 @@
     },
     "settings": {
       "title": "项目设置",
+      "subtitle": "客户端下单开关",
       "pricesTitle": "价格显示",
       "showPrices": "显示商品价格",
       "showPricesHint": "关闭后客户端不再显示任何价格，员工后台不受影响。",

@@ -407,6 +407,7 @@
     },
     "settings": {
       "title": "Ajustes del portal",
+      "subtitle": "Interruptores del portal de pedidos",
       "pricesTitle": "Visibilidad de los precios",
       "showPrices": "Mostrar los precios de los productos",
       "showPricesHint": "Si se desactiva, los clientes no verán ningún precio. El panel interno no cambia.",

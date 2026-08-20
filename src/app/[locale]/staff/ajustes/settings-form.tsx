@@ -17,7 +17,15 @@ import type { SettingKey } from "@/lib/settings";
  * with the visible track drawn by its sibling `<span>` through Tailwind's
  * `peer-checked:` variants. The knob is that span's `::after`, which is why it
  * can slide from a `peer-checked:` rule at all: only siblings of the checkbox
- * (and their pseudo-elements) are reachable from it.
+ * (and their pseudo-elements) are reachable from it. That is also why the label
+ * text is written BEFORE the checkbox and the track AFTER it: `peer-*` compiles
+ * to the general sibling combinator, which only reaches FOLLOWING siblings.
+ *
+ * The row is the mockup's (`dada-staff-admin.dc.html:465-472`): the title and
+ * its sentence on the left, the switch alone on the right. 保存 stays BELOW the
+ * row and on the left — the mockup has no per-row button because it has one
+ * global 保存修改 for the whole page, and this page does not (see the note on
+ * `ajustes/page.tsx`).
  *
  * **The hidden `0` above the checkbox is load-bearing.** An off checkbox posts
  * nothing at all, so without it "hide prices" would arrive as an ABSENT field,
@@ -44,14 +52,23 @@ export function SettingsForm({
   labels: { label: string; hint: string; save: string };
 }) {
   return (
-    <form action={updateSetting} className="mt-4">
+    <form action={updateSetting}>
       <input type="hidden" name="locale" value={locale} />
       {/* Which setting this form writes. The action proves it is a registered
           key before anything is upserted — a hidden field is client input, and
           this component's own type says nothing about the POST that arrives. */}
       <input type="hidden" name="key" value={settingKey} />
 
-      <label className="flex cursor-pointer items-start gap-3">
+      <label className="flex cursor-pointer items-center gap-5">
+        <span className="min-w-0">
+          <span className="block text-[13.5px] font-semibold">
+            {labels.label}
+          </span>
+          <span className="mt-[5px] block text-[12px] leading-relaxed text-muted">
+            {labels.hint}
+          </span>
+        </span>
+
         <input type="hidden" name="value" value="0" />
         <input
           type="checkbox"
@@ -60,14 +77,30 @@ export function SettingsForm({
           defaultChecked={checked}
           className="peer sr-only"
         />
+        {/* The mockup's switch, to the pixel (`:528-530`, the `toggle()` helper
+            that builds every `trackStyle`/`knobStyle` in the file): a 44×26
+            track at `padding:3px` holding a 20×20 white knob, `#E4DED8` off and
+            `#E0231C` — the brand — on.
+            `--color-border-strong` IS `#e4ded8` (`globals.css:50`) and
+            `--color-brand` IS `#e0231c` (`:76`), so both fills are the tokens
+            and neither is a literal.
+            NO border, also the mockup's: the track is a fill, so the 3px insets
+            below are measured from the border box and the travel arithmetic is
+            the mockup's own rather than a border's worth off it.
+
+            Knob travel = 44 − 20 − 3 − 3 = 18px → `after:translate-x-[18px]`,
+            which lands the knob 3px from the right edge exactly as it rests 3px
+            from the left. Vertically it is centred by the same 3: 3 + 20 + 3 =
+            26. The fixture measures all four gaps in both states.
+
+            The knob is white in BOTH positions, with the mockup's own drop
+            shadow to draw its edge on the pale off track. The state is carried
+            by the track's colour and the knob's POSITION — the two things that
+            change — which is the switch every phone in the room draws. */}
         <span
           aria-hidden="true"
-          className="relative mt-0.5 inline-block h-6 w-11 shrink-0 rounded-full border border-border-strong bg-surface-dim transition-colors after:absolute after:top-1 after:left-1 after:h-4 after:w-4 after:rounded-full after:bg-muted after:transition-transform peer-checked:border-brand peer-checked:bg-brand peer-checked:after:translate-x-5 peer-checked:after:bg-white peer-focus-visible:ring-2 peer-focus-visible:ring-brand"
+          className="relative ml-auto inline-block h-[26px] w-11 shrink-0 rounded-full bg-border-strong transition-colors after:absolute after:top-[3px] after:left-[3px] after:h-5 after:w-5 after:rounded-full after:bg-white after:shadow-[0_1px_3px_rgba(0,0,0,.2)] after:transition-transform peer-checked:bg-brand peer-checked:after:translate-x-[18px] peer-focus-visible:ring-2 peer-focus-visible:ring-brand"
         />
-        <span className="min-w-0">
-          <span className="block text-sm font-medium">{labels.label}</span>
-          <span className="mt-0.5 block text-xs text-muted">{labels.hint}</span>
-        </span>
       </label>
 
       <button type="submit" className={`mt-5 ${BTN_PRIMARY}`}>
