@@ -46,12 +46,14 @@ next-env.d.ts
 
 # Bridge build output: `pnpm bridge:build` writes bridge/dist/dada-bridge.js, a
 # 3 MB single-file bundle rebuilt from src/bridge on demand. Only the README that
-# tells an operator what the folder is for, and the secret-free sandbox config
-# template the operator copies to the ERP server, are tracked. `bridge.env`
-# itself — the filled-in file with the two real secrets — never is.
+# tells an operator what the folder is for, and the two secret-free config
+# templates (sandbox and production) the operator copies to the ERP server, are
+# tracked. `bridge.env` itself — the filled-in file with the two real secrets —
+# never is.
 /bridge/*
 !/bridge/README.md
 !/bridge/bridge.env.sandbox
+!/bridge/bridge.env.production
 
 # Wingest price export: the full six-tier price matrix for every article, which
 # 0002c revokes from authenticated readers. It lands next to the export script
