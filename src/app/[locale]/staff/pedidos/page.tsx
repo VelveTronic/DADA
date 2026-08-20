@@ -645,6 +645,22 @@ export default async function StaffOrdersPage({
                         <span className="sr-only">{tCart("subtotal")}: </span>
                         {formatEuros(order.subtotal_cents, locale)}
                       </p>
+                      {/* The A4 sheet, in a tab of its own so the queue —
+                          filters, scroll position, an open line editor — is
+                          still exactly where it was when the print dialog
+                          closes. Named per order for a screen reader; the
+                          visible word alone repeats fifty times down the
+                          queue. */}
+                      <Link
+                        href={`/${locale}/staff/pedidos/${order.id}/imprimir`}
+                        target="_blank"
+                        aria-label={t("print.linkFor", {
+                          n: order.order_number,
+                        })}
+                        className="text-[12.5px] text-brand-ink underline underline-offset-4"
+                      >
+                        {t("print.link")}
+                      </Link>
                     </div>
                   </div>
 
