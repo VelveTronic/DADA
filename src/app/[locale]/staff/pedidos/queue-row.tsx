@@ -22,9 +22,10 @@ import { useId, useState, type ReactNode } from "react";
  * `hidden=until-found`, and nothing on this queue is searched with Ctrl+F
  * while folded.
  *
- * All four icons-and-words in the cluster stay 12.5px: the row reads as one
- * line of quiet controls next to the money, which keeps the card at a single
- * line of height until somebody opens it.
+ * The cluster is a fixed-track grid (see its note below) and the two actions
+ * are BUTTONS with fills — 明细 on the dim ground, 打印 on the soft brand —
+ * badge-weight beside the status chip, per the owner's second pass. The row
+ * still holds two shallow stacks of card height until somebody opens it.
  */
 export function QueueRow({
   children,
@@ -61,15 +62,24 @@ export function QueueRow({
           {children}
         </div>
 
-        <div className="ml-auto flex shrink-0 items-center gap-x-3">
-          {lines != null && (
+        {/* A GRID of fixed tracks, not a flex run — the owner's alignment
+            call (2026-08-20 round two): down fifty rows, 明细 sits under 明细
+            and money under money, whatever the restaurant's name did to the
+            left half. Every cell is centred in its track; the track widths are
+            sized for the widest content either locale produces (明细（88 项）/
+            Líneas (88), the 打印 pill, 已进ERP, a four-figure euro amount).
+            An order whose lines failed to read keeps an EMPTY first cell
+            rather than sliding the other three left — the withheld-count rule
+            must not un-align the column it withheld from. */}
+        <div className="ml-auto grid shrink-0 grid-cols-[7rem_5.5rem_5rem_6rem] items-center justify-items-center gap-x-2">
+          {lines != null ? (
             <button
               type="button"
               aria-expanded={open}
               aria-controls={foldId}
               aria-label={toggleAria}
               onClick={() => setOpen((value) => !value)}
-              className="flex items-center gap-1 text-[12.5px] text-muted transition-colors hover:text-ink"
+              className="flex h-8 items-center gap-1 rounded-lg border border-border-strong bg-surface-dim px-2.5 text-[12.5px] text-ink-soft transition-colors hover:border-brand hover:text-brand-ink"
             >
               {/* The chevron turns to say which way the press goes. */}
               <svg
@@ -86,16 +96,19 @@ export function QueueRow({
               </svg>
               {toggleLabel}
             </button>
+          ) : (
+            <span aria-hidden />
           )}
 
           {/* The A4 sheet, in a tab of its own so the queue — filter, scroll,
               an open fold — is exactly where it was when the print dialog
-              closes. */}
+              closes. The soft brand fill is the owner's "make it show" —
+              a badge-weight pill beside the status chip, not a text link. */}
           <Link
             href={printHref}
             target="_blank"
             aria-label={printAria}
-            className="flex items-center gap-1 text-[12.5px] text-muted transition-colors hover:text-brand-ink"
+            className="flex h-8 items-center gap-1 rounded-lg bg-brand-soft px-2.5 text-[12.5px] font-medium text-brand-ink transition-colors hover:bg-brand hover:text-white"
           >
             <svg
               viewBox="0 0 16 16"

@@ -243,6 +243,8 @@
     "orderLines": "明细（{n} 项）",
     "customerNote": "客户备注",
     "orderLinesFor": "订单 {n} 的明细",
+    "wingestNo": "Wingest NO. {n}",
+    "albaran": "ALBARAN {n}",
     "print": {
       "link": "打印",
       "linkFor": "打印订单 {n}",

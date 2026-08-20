@@ -549,11 +549,16 @@ export default async function StaffOrdersPage({
                 // back its width. It is not lost: the customer's own order
                 // card still shows it, and the bridge writes it into the
                 // pedido's FECENT.
+                // The ERP identifiers in the shop's own vocabulary — the
+                // owner's wording (2026-08-20), the SAME in both locales:
+                // staff call the pedido number "Wingest" and the delivery
+                // note "albarán" whichever language the UI is in, so these
+                // are staff keys, not the customer's orders.erpOrder pair.
                 order.numped != null
-                  ? tOrders("erpOrder", { n: order.numped })
+                  ? t("wingestNo", { n: order.numped })
                   : null,
                 order.numalb != null
-                  ? tOrders("erpAlbaran", { n: order.numalb })
+                  ? t("albaran", { n: order.numalb })
                   : null,
               ].filter((part): part is string => part !== null);
               /**
@@ -693,37 +698,36 @@ export default async function StaffOrdersPage({
                       </p>
                     }
                   >
-                    {/* `font-num` is for the DIGITS: Archivo carries no CJK, so
-                        「订单」 falls back to the system sans and the number
-                        takes the numeral face. */}
-                    <span className="shrink-0 font-num text-[12.5px] font-semibold">
-                      {tOrders("orderNumber", { n: order.order_number })}
-                    </span>
-                    {/* 提交时间 — absolute date, no clock: the order number
-                        beside it already ranks two orders of one day, and the
-                        全部 tab reaches back over orders of any age, where a
-                        bare 08-11 without a year is the one thing on this row
-                        that could be read wrong. Labelled for a screen reader
-                        only; in this position nothing else could be meant. */}
-                    <span className="shrink-0 text-[11px] text-muted">
-                      <span className="sr-only">{tOrders("placedAt")}: </span>
-                      {formatOrderDate(order.created_at, locale)}
-                    </span>
-                    {/* Restaurant and meta share ONE truncating span: two
-                        separate `truncate`s on one flex line would fight over
-                        the same free space and clip both; here the codcli and
-                        ERP numbers simply run until the line does. */}
-                    <span className="min-w-0 flex-1 truncate text-[13.5px]">
-                      <span className="font-semibold">
+                    {/* Two SHALLOW stacks, the owner's arrangement
+                        (2026-08-20 round two): date under the number, the ERP
+                        identifiers under the restaurant. `font-num` is for the
+                        DIGITS: Archivo carries no CJK, so 「订单」 falls back
+                        to the system sans and the number takes the numeral
+                        face. The date is absolute and clockless — the number
+                        above it already ranks two orders of one day, and 全部
+                        reaches back over orders of any age, where a bare 08-11
+                        without a year is the one thing here that could be read
+                        wrong. Labelled for a screen reader only; in this
+                        position nothing else could be meant. */}
+                    <div className="w-24 shrink-0">
+                      <p className="font-num text-[12.5px] font-semibold">
+                        {tOrders("orderNumber", { n: order.order_number })}
+                      </p>
+                      <p className="mt-0.5 text-[11px] text-muted">
+                        <span className="sr-only">{tOrders("placedAt")}: </span>
+                        {formatOrderDate(order.created_at, locale)}
+                      </p>
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-[13.5px] font-semibold">
                         {order.companies?.name ?? "—"}
-                      </span>
+                      </p>
                       {meta.length > 0 && (
-                        <span className="text-[11.5px] text-muted">
-                          {" "}
-                          · {meta.join(" · ")}
-                        </span>
+                        <p className="mt-0.5 truncate text-[11.5px] text-muted">
+                          {meta.join(" · ")}
+                        </p>
                       )}
-                    </span>
+                    </div>
                   </QueueRow>
 
                   {order.customer_note && (

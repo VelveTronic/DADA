@@ -243,6 +243,8 @@
     "orderLines": "Líneas ({n})",
     "customerNote": "Observaciones del cliente",
     "orderLinesFor": "Líneas del pedido {n}",
+    "wingestNo": "Wingest NO. {n}",
+    "albaran": "ALBARAN {n}",
     "print": {
       "link": "Imprimir",
       "linkFor": "Imprimir el pedido {n}",
