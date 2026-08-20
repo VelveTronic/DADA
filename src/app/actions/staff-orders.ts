@@ -4,7 +4,7 @@ import { hasLocale } from "next-intl";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { routing } from "@/i18n/routing";
-import { getSessionUser } from "@/lib/auth/session";
+import { assertStaff } from "@/lib/auth/assert-staff";
 import type { LineEditResult, QueueTab } from "@/lib/orders";
 import {
   isUuid,
@@ -20,30 +20,6 @@ function safeLocale(value: FormDataEntryValue | null) {
   return hasLocale(routing.locales, candidate)
     ? candidate
     : routing.defaultLocale;
-}
-
-/**
- * Server-action staff gate: verifies an active staff_users row; throws otherwise.
- *
- * Suspenders. `staff_confirm_order` and `staff_cancel_order` both raise
- * STAFF_ONLY on `private.is_staff()` of their own accord, which is the belt — but
- * a Server Action is its own POST endpoint, reachable by anyone who knows the
- * action id without ever rendering the page, and a caller who gets that far
- * should be stopped here rather than one round trip later. Fails CLOSED, like
- * the staff-products gate it is copied from.
- */
-async function assertStaff() {
-  const user = await getSessionUser();
-  if (!user) throw new Error("UNAUTHENTICATED");
-
-  const supabase = await createServerSupabase();
-  const { data: staffUser, error } = await supabase
-    .from("staff_users")
-    .select("id, is_active")
-    .eq("id", user.id)
-    .maybeSingle();
-  if (error) console.error("assertStaff:", error);
-  if (!staffUser?.is_active) throw new Error("NOT_STAFF");
 }
 
 /**

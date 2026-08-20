@@ -11,7 +11,9 @@ import {
   isOrderStatus,
   isUuid,
   LINE_EDIT_RESULTS,
+  funnelWidth,
   madridDay,
+  madridDayStartIso,
   madridMonthStartIso,
   mapLineEditError,
   mapOrderError,
@@ -65,6 +67,95 @@ describe("madridMonthStartIso", () => {
     expect(
       new Date(madridMonthStartIso(new Date("2026-08-18T09:00:00Z"))).toISOString(),
     ).toBe("2026-07-31T22:00:00.000Z");
+  });
+});
+
+describe("madridDayStartIso", () => {
+  // Each row is an instant and the day start a `created_at >= …` filter has to
+  // carry for it. Madrid runs +01:00 in winter and +02:00 in summer, and the
+  // two flip days are the reason this helper does not probe noon.
+  it.each([
+    // An ordinary summer day, and an ordinary winter one.
+    ["2026-08-20T09:00:00Z", "2026-08-20T00:00:00+02:00"],
+    ["2026-01-15T09:00:00Z", "2026-01-15T00:00:00+01:00"],
+    // SPRING FLIP. Madrid springs forward on the last Sunday of March — 1 March
+    // 2026 is a Sunday (1 Jan 2026 is a Thursday, and 1 March is day 60, so
+    // 59 mod 7 = 3 days past Thursday), which puts Sundays on the 1st, 8th,
+    // 15th, 22nd and 29th. On the 29th midnight is still CET: the changeover is
+    // at 01:00 UTC = 02:00 local, two hours after the day began. A noon probe
+    // would read +02:00 here and be an hour early.
+    ["2026-03-29T09:00:00Z", "2026-03-29T00:00:00+01:00"],
+    // AUTUMN FLIP. 1 October 2026 is a Thursday (day 274, so 273 mod 7 = 0 days
+    // past Thursday), which puts the last Sunday on the 25th. Midnight there is
+    // still CEST — the changeover is again at 01:00 UTC, 03:00 local — so the
+    // day starts at +02:00 and a noon probe (+01:00) would drop its first hour.
+    ["2026-10-25T09:00:00Z", "2026-10-25T00:00:00+02:00"],
+    // The month helper's own edge, one calendar step down: 22:30 UTC on 19
+    // August is already 00:30 on the 20th in Madrid, so the day has turned
+    // while UTC still says the 19th.
+    ["2026-08-19T22:30:00Z", "2026-08-20T00:00:00+02:00"],
+    // The same edge in winter, where the Madrid day turns an hour later.
+    ["2026-01-14T23:30:00Z", "2026-01-15T00:00:00+01:00"],
+  ])("%s → %s", (now, expected) => {
+    expect(madridDayStartIso(new Date(now))).toBe(expected);
+  });
+
+  // The arithmetic spelled out as instants, because the offset in the string is
+  // only right if it names the moment the Spanish day actually began.
+  it.each([
+    // 2026-03-29 00:00 CET (+01:00) = 2026-03-28 23:00 UTC.
+    ["2026-03-29T09:00:00Z", "2026-03-28T23:00:00.000Z"],
+    // 2026-10-25 00:00 CEST (+02:00) = 2026-10-24 22:00 UTC.
+    ["2026-10-25T09:00:00Z", "2026-10-24T22:00:00.000Z"],
+    // An ordinary summer day: 2026-08-20 00:00 CEST = 2026-08-19 22:00 UTC.
+    ["2026-08-20T09:00:00Z", "2026-08-19T22:00:00.000Z"],
+  ])("%s starts the day at %s", (now, instant) => {
+    expect(new Date(madridDayStartIso(new Date(now))).toISOString()).toBe(
+      instant,
+    );
+  });
+
+  it("never lands on a neighbouring civil day", () => {
+    // The invariant behind the whole helper: whatever it stamps, Madrid agrees
+    // it is the same day `madridDay` reports — including on both flip days.
+    for (const now of [
+      "2026-03-29T09:00:00Z",
+      "2026-10-25T09:00:00Z",
+      "2026-08-19T22:30:00Z",
+      "2026-01-14T23:30:00Z",
+    ]) {
+      const start = madridDayStartIso(new Date(now));
+      expect(madridDay(new Date(start))).toBe(madridDay(new Date(now)));
+      // …and one millisecond earlier is the day BEFORE, which is what makes it
+      // a boundary rather than merely a moment inside the day.
+      expect(madridDay(new Date(new Date(start).getTime() - 1))).not.toBe(
+        madridDay(new Date(now)),
+      );
+    }
+  });
+});
+
+describe("funnelWidth", () => {
+  it.each([
+    // The ordinary ratios: the longest bar fills the track, the rest are its
+    // fraction. 3/5 = 0.6 → 60%, 1/5 = 0.2 → 20%.
+    [5, 5, "100%"],
+    [3, 5, "60%"],
+    [1, 5, "20%"],
+    // A real zero is a real zero — an empty bar beside a figure that says 0.
+    [0, 5, "0%"],
+    // An EMPTY pipeline. Without the guard this is 0/0 = NaN, `width: NaN%` is
+    // dropped by the browser, and every bar renders full for a queue that holds
+    // nothing at all.
+    [0, 0, "0%"],
+    // A count that never arrived: empty track, and the figure draws an em dash.
+    [null, 5, "0%"],
+    [null, 0, "0%"],
+    // Rounded to a tenth: 1/3 = 33.333…% and 2/3 = 66.666…%.
+    [1, 3, "33.3%"],
+    [2, 3, "66.7%"],
+  ])("(%s of %s) → %s", (n, max, expected) => {
+    expect(funnelWidth(n, max)).toBe(expected);
   });
 });
 

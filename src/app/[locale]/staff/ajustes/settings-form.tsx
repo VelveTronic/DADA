@@ -17,7 +17,15 @@ import type { SettingKey } from "@/lib/settings";
  * with the visible track drawn by its sibling `<span>` through Tailwind's
  * `peer-checked:` variants. The knob is that span's `::after`, which is why it
  * can slide from a `peer-checked:` rule at all: only siblings of the checkbox
- * (and their pseudo-elements) are reachable from it.
+ * (and their pseudo-elements) are reachable from it. That is also why the label
+ * text is written BEFORE the checkbox and the track AFTER it: `peer-*` compiles
+ * to the general sibling combinator, which only reaches FOLLOWING siblings.
+ *
+ * The row is the mockup's (`dada-staff-admin.dc.html:465-472`): the title and
+ * its sentence on the left, the switch alone on the right. 保存 stays BELOW the
+ * row and on the left — the mockup has no per-row button because it has one
+ * global 保存修改 for the whole page, and this page does not (see the note on
+ * `ajustes/page.tsx`).
  *
  * **The hidden `0` above the checkbox is load-bearing.** An off checkbox posts
  * nothing at all, so without it "hide prices" would arrive as an ABSENT field,
@@ -44,14 +52,23 @@ export function SettingsForm({
   labels: { label: string; hint: string; save: string };
 }) {
   return (
-    <form action={updateSetting} className="mt-4">
+    <form action={updateSetting}>
       <input type="hidden" name="locale" value={locale} />
       {/* Which setting this form writes. The action proves it is a registered
           key before anything is upserted — a hidden field is client input, and
           this component's own type says nothing about the POST that arrives. */}
       <input type="hidden" name="key" value={settingKey} />
 
-      <label className="flex cursor-pointer items-start gap-3">
+      <label className="flex cursor-pointer items-center gap-5">
+        <span className="min-w-0">
+          <span className="block text-[13.5px] font-semibold">
+            {labels.label}
+          </span>
+          <span className="mt-[5px] block text-[12px] leading-relaxed text-muted">
+            {labels.hint}
+          </span>
+        </span>
+
         <input type="hidden" name="value" value="0" />
         <input
           type="checkbox"
@@ -60,14 +77,66 @@ export function SettingsForm({
           defaultChecked={checked}
           className="peer sr-only"
         />
+        {/* The mockup's switch, to the pixel (`:528-530`, the `toggle()` helper
+            that builds every `trackStyle`/`knobStyle` in the file): a 44×26
+            track at `padding:3px` holding a 20×20 white knob, `#E4DED8` off and
+            `#E0231C` — the brand — on.
+            `--color-border-strong` IS `#e4ded8` (`globals.css:50`) and
+            `--color-brand` IS `#e0231c` (`:76`), so both fills are the tokens
+            and neither is a literal.
+            NO border, also the mockup's: the track is a fill, so the 3px insets
+            below are measured from the border box and the travel arithmetic is
+            the mockup's own rather than a border's worth off it.
+
+            Knob travel = 44 − 20 − 3 − 3 = 18px → `after:translate-x-[18px]`,
+            which lands the knob 3px from the right edge exactly as it rests 3px
+            from the left. Vertically it is centred by the same 3: 3 + 20 + 3 =
+            26. The fixture measures all four gaps in both states.
+
+            The KNOB's colour is the one place this switch parts with the
+            mockup, and it has to. There the knob is white in both positions,
+            and white on the `#E4DED8` off track is 1.33:1 — under the 3:1 WCAG
+            asks of a non-text control, which makes the off switch a track with
+            nothing visible in it. So the knob is `--color-muted` off (#6e6760
+            on #e4ded8 = 4.17:1) and the mockup's white on (#ffffff on #e0231c =
+            4.74:1). One colour cannot serve both: white fails the off track and
+            muted on brand is 1.17:1, worse. The mockup's drop shadow stays in
+            both states.
+
+            The state is still carried by the track's colour and the knob's
+            POSITION — the two things that move — which is the switch every
+            phone in the room draws; the knob's colour only makes sure the knob
+            is one of the things you can see.
+
+            **The focus ring needs `ring-offset-2`, and it is the ON state that
+            needs it.** `ring-brand` on a track that `peer-checked:` has just
+            painted `bg-brand` is brand on brand: 1:1, no edge at all, and what
+            a keyboard user sees is not a ring but the pill going 4px fatter.
+            The 2px offset puts a gap between track and ring, so the ring is a
+            detached outline in BOTH states rather than a swelling in one.
+
+            `ring-offset-color` is deliberately left at Tailwind's default,
+            which is `#fff` (v4 registers `--tw-ring-offset-color` with that
+            initial value). That is not a fudge here: this switch sits inside an
+            `ADMIN_CARD`, whose fill IS `--color-surface` = `#ffffff`, so the
+            default already matches the ground the gap is cut out of. The beige
+            `--color-background` (#f1eeeb) is the page BEHIND the card and never
+            touches this control, so overriding the offset to it would put a
+            beige stripe on a white card. Should a switch ever be drawn straight
+            on the wash, that one needs the background-token offset utility —
+            `ring-offset-` plus the background token, written broken here
+            because Tailwind scans raw file text and would compile a dead rule
+            out of the prose.
+
+            Contrast, both states: the ring is `#e0231c` and both colours now
+            adjacent to it are `#ffffff` — the offset gap inside, the card
+            outside — at 4.74:1, over the 3:1 WCAG 1.4.11 asks of a focus
+            indicator. Before the offset the ON state's inner neighbour was the
+            brand track itself at 1:1. */}
         <span
           aria-hidden="true"
-          className="relative mt-0.5 inline-block h-6 w-11 shrink-0 rounded-full border border-border-strong bg-surface-dim transition-colors after:absolute after:top-1 after:left-1 after:h-4 after:w-4 after:rounded-full after:bg-muted after:transition-transform peer-checked:border-brand peer-checked:bg-brand peer-checked:after:translate-x-5 peer-checked:after:bg-white peer-focus-visible:ring-2 peer-focus-visible:ring-brand"
+          className="relative ml-auto inline-block h-[26px] w-11 shrink-0 rounded-full bg-border-strong transition-colors after:absolute after:top-[3px] after:left-[3px] after:h-5 after:w-5 after:rounded-full after:bg-muted after:shadow-[0_1px_3px_rgba(0,0,0,.2)] after:transition-[transform,background-color] peer-checked:bg-brand peer-checked:after:translate-x-[18px] peer-checked:after:bg-white peer-focus-visible:ring-2 peer-focus-visible:ring-brand peer-focus-visible:ring-offset-2"
         />
-        <span className="min-w-0">
-          <span className="block text-sm font-medium">{labels.label}</span>
-          <span className="mt-0.5 block text-xs text-muted">{labels.hint}</span>
-        </span>
       </label>
 
       <button type="submit" className={`mt-5 ${BTN_PRIMARY}`}>

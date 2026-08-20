@@ -147,6 +147,35 @@ export function statusesForTab(
 }
 
 /**
+ * Madrid's UTC offset AT one instant, as `+01:00` / `+02:00` — the half of the
+ * two helpers below that is the same in both, so it is written once.
+ *
+ * WHICH instant is probed is the interesting decision and stays with each
+ * caller: getting it wrong moves a boundary by an hour on exactly two days a
+ * year, and each of them argues its own choice.
+ */
+function madridOffsetAt(probe: Date): string {
+  return (
+    new Intl.DateTimeFormat("en-US", {
+      timeZone: "Europe/Madrid",
+      timeZoneName: "longOffset",
+    })
+      .formatToParts(probe)
+      .find((part) => part.type === "timeZoneName")
+      // "GMT+02:00" → "+02:00". The `|| "+00:00"` is a TYPE floor, not a
+      // behavioural one: `find` may return undefined, so the optional chain
+      // hands back `string | undefined` where the callers' templates need a
+      // `string`. It cannot fire on this runtime — Node 22 with full ICU always
+      // emits `GMT±HH:MM` from `longOffset`, zero offsets included (`UTC` and
+      // `Africa/Abidjan` both format as "GMT+00:00", never a bare "GMT") — and
+      // Madrid is +1 or +2 regardless. Were some exotic ICU to drop the part,
+      // the boundary would move by the true offset for one render of one stat
+      // count: a floor worth having, not worth throwing over.
+      ?.value.replace("GMT", "") || "+00:00"
+  );
+}
+
+/**
  * The instant Madrid's CURRENT month began, as an offset-bearing ISO string for
  * a `created_at >= …` filter.
  *
@@ -163,25 +192,67 @@ export function statusesForTab(
  */
 export function madridMonthStartIso(now: Date): string {
   const month = madridDay(now).slice(0, 7); // "2026-08"
-  const probe = new Date(`${month}-01T12:00:00Z`);
-  const offset =
-    new Intl.DateTimeFormat("en-US", {
-      timeZone: "Europe/Madrid",
-      timeZoneName: "longOffset",
-    })
-      .formatToParts(probe)
-      .find((part) => part.type === "timeZoneName")
-      // "GMT+02:00" → "+02:00". The `|| "+00:00"` is a TYPE floor, not a
-      // behavioural one: `find` may return undefined, so the optional chain
-      // hands back `string | undefined` where the template below needs a
-      // `string`. It cannot fire on this runtime — Node 22 with full ICU always
-      // emits `GMT±HH:MM` from `longOffset`, zero offsets included (`UTC` and
-      // `Africa/Abidjan` both format as "GMT+00:00", never a bare "GMT") — and
-      // Madrid is +1 or +2 regardless. Were some exotic ICU to drop the part,
-      // the month boundary would move by the true offset for one render of one
-      // stat count: a floor worth having, not worth throwing over.
-      ?.value.replace("GMT", "") || "+00:00";
-  return `${month}-01T00:00:00${offset}`;
+  return `${month}-01T00:00:00${madridOffsetAt(new Date(`${month}-01T12:00:00Z`))}`;
+}
+
+/**
+ * The instant TODAY began on Madrid's calendar, as an offset-bearing ISO string
+ * for a `created_at >= …` filter — the day twin of `madridMonthStartIso`, and
+ * the staff dashboard's 今日订单 count is the whole reason it exists.
+ *
+ * **The month helper's noon-probe argument does NOT transfer, and that is the
+ * entire difficulty here.** That one may probe noon of the 1st because Madrid
+ * switches on the last Sunday of March and of October, so the 1st never contains
+ * a flip. A DAY helper has no such luck: those two Sundays are ordinary days
+ * somebody opens the dashboard on. On 2026-03-29 midnight is still CET (+01:00)
+ * while noon is already CEST (+02:00), so a noon probe would stamp
+ * `2026-03-29T00:00:00+02:00` — 2026-03-28T22:00Z, a full hour BEFORE the day
+ * began — and count the previous evening's orders as today's. On 2026-10-25 it
+ * errs the other way and drops the first hour of the day.
+ *
+ * So the probe is MIDNIGHT UTC of the same civil day, an instant that provably
+ * carries the offset Madrid's midnight had:
+ *
+ *  - Every EU changeover happens at 01:00 UTC — Directive 2000/84/EC art. 1,
+ *    "at 1 a.m. Coordinated Universal Time" — whatever local hour that lands on.
+ *  - Madrid is +01:00 or +02:00, so midnight local on day D is 23:00 or 22:00
+ *    UTC on D−1. Both are LATER than 01:00 UTC on D−1 and EARLIER than 01:00 UTC
+ *    on D.
+ *  - The window between that midnight and 00:00 UTC on D is therefore at most
+ *    two hours long, lies entirely inside (01:00 UTC D−1, 01:00 UTC D), and so
+ *    contains no changeover at all: the two instants share an offset.
+ *  - And 00:00 UTC on D is 01:00 or 02:00 on Madrid's clock, i.e. still day D
+ *    there — the probe never reads a neighbouring day's rule either.
+ *
+ * Pinned by table tests on both flip days, in `orders.test.ts`.
+ */
+export function madridDayStartIso(now: Date): string {
+  const day = madridDay(now); // "2026-08-20"
+  return `${day}T00:00:00${madridOffsetAt(new Date(`${day}T00:00:00Z`))}`;
+}
+
+/**
+ * The width of ONE bar in the staff dashboard's status funnel, as a CSS
+ * percentage of the longest bar beside it.
+ *
+ * Three cases, which is why this is a tested function and not an expression in
+ * the JSX:
+ *
+ *  - **`max` is 0** — an empty pipeline, every status at zero. `n / 0` is
+ *    `Infinity` and `0 / 0` is `NaN`; either produces a declaration the browser
+ *    throws away, leaving the bar at its natural width — a FULL track for a
+ *    queue with nothing in it, which is the one output that would be a lie.
+ *  - **`n` is null** — that count never came back. An empty track, never a full
+ *    one, for the same reason the figure beside it draws an em dash.
+ *  - otherwise the honest ratio, rounded to a tenth of a percent so the inline
+ *    style is a short stable string rather than `33.33333333333333%`.
+ *
+ * `max` is always the largest of the counts being drawn, so the result never
+ * exceeds 100%.
+ */
+export function funnelWidth(n: number | null, max: number): string {
+  if (n === null || max <= 0) return "0%";
+  return `${Math.round((n / max) * 1000) / 10}%`;
 }
 
 /** The four views the staff queue offers; `all` means "no status filter". */

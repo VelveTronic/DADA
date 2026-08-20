@@ -25,6 +25,18 @@
  *    Passwords are never part of a code, an error, or a redirect.
  */
 
+import { formText } from "@/lib/form-text";
+
+/**
+ * The local name for the shared `formText` (`lib/form-text.ts`): a form field as
+ * trimmed text, or "" for anything that is not a string.
+ *
+ * An alias rather than a rename at every call site — this file reads every field
+ * through `text(...)` and has since it shipped. It sits up here because
+ * `isUuid` below is the first thing that calls it.
+ */
+const text = formText;
+
 /** The three values `staff_users.role`'s check constraint allows (0001_core.sql). */
 export const STAFF_ROLES = ["staff", "manager", "owner"] as const;
 
@@ -133,7 +145,7 @@ function fail(error: UserAdminError): { ok: false; error: UserAdminError } {
 }
 
 /**
- * Who may open 用户管理 at all, and who may touch staff accounts.
+ * Who may open 客户管理页 at all, and who may touch staff accounts.
  *
  * The whole permission model is these two predicates (see the table in the
  * plan): managers run the customer side, and only the owner — 超级管理员 — can
@@ -197,17 +209,6 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
  */
 export function isUuid(value: unknown): boolean {
   return UUID.test(text(value));
-}
-
-/**
- * A form field as text, or "" for anything that is not a string.
- *
- * `FormData.get` is typed `string | File`, and a crafted POST can send an
- * object. Coercing those with `String()` would turn a File into "[object File]"
- * and let it pass a length check, so non-strings are simply absent.
- */
-function text(value: unknown): string {
-  return typeof value === "string" ? value.trim() : "";
 }
 
 /**

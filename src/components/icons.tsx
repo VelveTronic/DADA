@@ -73,7 +73,7 @@ export function UserIcon() {
 }
 
 /* ── The staff sidebar ──────────────────────────────────────────────────────
-   Five nav glyphs and the three controls around them. They are drawn on the
+   Six nav glyphs and the three controls around them. They are drawn on the
    same grid as the four above and take their colour the same way, which is what
    lets the sidebar's active row tint the icon by tinting the anchor. */
 
@@ -110,7 +110,22 @@ export function BoxIcon() {
   );
 }
 
-/** 用户 — two of them, so it cannot be mistaken for the account glyph above. */
+/** 分类 — the catalogue's shelves, drawn as the 2×2 grid of a category rail. */
+export function GridIcon() {
+  return (
+    <svg {...ICON_PROPS}>
+      <rect x="4.5" y="4.5" width="6.5" height="6.5" rx="1.5" />
+      <rect x="13" y="4.5" width="6.5" height="6.5" rx="1.5" />
+      <rect x="4.5" y="13" width="6.5" height="6.5" rx="1.5" />
+      <rect x="13" y="13" width="6.5" height="6.5" rx="1.5" />
+    </svg>
+  );
+}
+
+/**
+ * 客户 — two of them, the restaurants this portal serves, so the glyph cannot be
+ * mistaken for the single-figure account icon above.
+ */
 export function UsersIcon() {
   return (
     <svg {...ICON_PROPS}>

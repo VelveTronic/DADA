@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { CATEGORY_ERRORS } from "@/lib/categories";
 import {
   CUSTOMER_ORDER_TABS,
   LINE_EDIT_RESULTS,
@@ -51,6 +52,27 @@ describe("translations", () => {
     for (const key of [...USER_ADMIN_ERRORS, "ok"]) {
       expect(zhResults[key], `zh staff.users.results.${key}`).toBeTypeOf("string");
       expect(esResults[key], `es staff.users.results.${key}`).toBeTypeOf("string");
+    }
+  });
+
+  /**
+   * The category surface answers the same way: the row actions redirect with
+   * `?result=<CODE>` and `/staff/categorias` renders
+   * `staff.categories.results.<CODE>`, while a rejected create hands the same
+   * code to its form to draw inline. A code with no message here arrives as the
+   * raw SCREAMING_SNAKE token beside the buttons that reorder every
+   * restaurant's category rail.
+   */
+  it("carries a staff.categories.results message for every category outcome", () => {
+    const zhResults: Record<string, string> = zh.staff.categories.results;
+    const esResults: Record<string, string> = es.staff.categories.results;
+    for (const key of [...CATEGORY_ERRORS, "ok"]) {
+      expect(zhResults[key], `zh staff.categories.results.${key}`).toBeTypeOf(
+        "string",
+      );
+      expect(esResults[key], `es staff.categories.results.${key}`).toBeTypeOf(
+        "string",
+      );
     }
   });
 

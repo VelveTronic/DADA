@@ -4,9 +4,13 @@ import Link from "next/link";
 import {
   StaffSidebar,
   StaffTopBar,
+  type ShellCounts,
   type StaffNavKey,
 } from "@/components/staff-sidebar";
 import { NAV_LINK } from "@/components/ui";
+import { perfRun } from "@/lib/perf";
+import { readLoggedCount } from "@/lib/shell-counts";
+import { createServerSupabase } from "@/lib/supabase/server";
 import { canManageStaff, canManageUsers, isStaffRole } from "@/lib/user-admin";
 
 /**
@@ -16,7 +20,7 @@ import { canManageStaff, canManageUsers, isStaffRole } from "@/lib/user-admin";
  * The portal is two products under one login, and this is where they part
  * company. A customer gets `AppShell` — a storefront header of icons over a
  * centred column. A staff member gets THIS: the persistent left nav every admin
- * tool has, because the four back-office pages are worked in rotation all day
+ * tool has, because the six back-office pages are worked in rotation all day
  * and a header that has to be scrolled back to is a header that gets scrolled
  * back to forty times. The structure is Medusa v2's admin (studied at
  * `medusajs/medusa`, `packages/admin/dashboard/src/components/layout` — shell,
@@ -60,10 +64,18 @@ export async function StaffShell({
   // entry is a courtesy, never the gate: `/staff/usuarios` and `/staff/ajustes`
   // both redirect a staff member who types the URL, and every action behind them
   // repeats the check for the POST that skipped the page.
+  //
+  // 分类 is ungated: category writes are open to any active staff member — it is
+  // one of the tables whose write RLS is a bare `is_staff()` (so are `products`,
+  // migration 20260815101406:173-180) and, uniquely, the one whose id sequence is
+  // granted to authenticated (:719, the only such grant in the schema), which is
+  // what lets the session client INSERT a row at all. The page guards itself with
+  // `requireStaff` like every other one.
   const items: StaffNavKey[] = [
     "home",
     "orders",
     "products",
+    "categories",
     ...(canManageUsers(user.role) ? (["users"] as const) : []),
     ...(canManageStaff(user.role) ? (["settings"] as const) : []),
   ];
@@ -79,11 +91,93 @@ export async function StaffShell({
         ? t(`users.roles.${user.role}`)
         : user.role;
 
+  // The sidebar's three figures, on the SESSION client under staff RLS — the
+  // same mechanism `/staff/pedidos` reads its queue with, and `head: true` so
+  // that not one row comes back, only the Content-Range count (the idiom
+  // `/cuenta` uses for its four). The select list names one real column each:
+  // `orders` is column-revoked (`staff_note`) and a `*` there 403s the query.
+  //
+  // This is ONE extra round trip per staff page, and it is paid HERE rather than
+  // beside the page's own reads because the shell renders after those have
+  // already resolved — the price of real counts in the nav, taken deliberately
+  // over polling or over a number that is only refreshed by luck.
+  //
+  // On ONE page these predicates have a second reader: `/staff/pedidos` counts
+  // `submitted` and `bridge_failed` again for its own tab chips
+  // (`staff/pedidos/page.tsx`, the `countQuery` note). Same request, separate
+  // round — the queue's counts go out beside its guard, these go out after the
+  // page has rendered — so the sidebar badge and the chip beside it can differ
+  // by the milliseconds between the two. Both figures are real; neither is
+  // stale by design. Unifying them behind one `cache()`d read is a recorded
+  // follow-up, deliberately not done here.
+  //
+  // Its own `perfRun` for the same reason: the page's run called `end()` before
+  // it rendered this shell, so a `perfStep` would be recorded into a line that
+  // has already been printed (see the cache-slot note in `lib/perf.ts`). One
+  // step for the three, because they go out together. Every staff request now
+  // prints TWO `[perf]` lines — the page's and this one's — and that is the
+  // intended shape, not a duplicate.
+  //
+  // The nuance in taking a run here: `perfRun` claims the request's cache slot
+  // (`perf.ts:125`), so from this line on the slot points at THIS run rather
+  // than the page's. Any `perfStep` later in the same render would land in it —
+  // and `perf.end()` on the next line closes it, so that span would be recorded
+  // into a printed line and silently dropped rather than falling back to
+  // `standalone()`. Nothing does that today: the only production caller of
+  // `perfStep` is `lib/auth/guards.ts`, which every page enters through BEFORE
+  // it renders (its unit tests call it too), and Server Actions are separate
+  // requests with slots of their own.
+  const supabase = await createServerSupabase();
+  const perf = perfRun("staff-shell");
+  const [submittedResult, bridgeFailedResult, unavailableResult] =
+    await perf.step(
+      "counts",
+      Promise.all([
+        supabase
+          .from("orders")
+          .select("id", { count: "exact", head: true })
+          .eq("status", "submitted"),
+        supabase
+          .from("orders")
+          .select("id", { count: "exact", head: true })
+          .eq("status", "bridge_failed"),
+        supabase
+          .from("products")
+          .select("id", { count: "exact", head: true })
+          .eq("is_available", false),
+      ]),
+    );
+  perf.end();
+
+  // BACKLOG, not today: none of the three is date-filtered, which is why the
+  // sidebar heads them 待办 and not the mockup's 今日. The today-scoped figures
+  // belong to the dashboard's KPI strip.
+  //
+  // Read and logged by the shared half (`lib/shell-counts.ts`), which prints
+  // `staff shell <name> count (status <n>)` and names BOTH failure shapes —
+  // including the quiet one, a `head: true` request whose response carries no
+  // error JSON to parse. `null` travels to the sidebar as an em dash and never
+  // as 0; see `ShellCounts`.
+  const counts: ShellCounts = {
+    submitted: readLoggedCount("staff shell", "submitted", submittedResult),
+    bridgeFailed: readLoggedCount(
+      "staff shell",
+      "bridge failed",
+      bridgeFailedResult,
+    ),
+    unavailable: readLoggedCount(
+      "staff shell",
+      "unavailable",
+      unavailableResult,
+    ),
+  };
+
   const sidebar = {
     locale,
     items,
     name: user.name,
     roleLabel,
+    counts,
   };
 
   return (
