@@ -30,6 +30,14 @@ import { PUBLIC_ORDER_COLUMNS } from "@/lib/supabase/public.types";
 export const dynamic = "force-dynamic";
 
 /**
+ * What a figure that did not arrive looks like, everywhere on this page. At
+ * module scope because it is a constant of the page and not of one render: it
+ * closes over nothing, and every other literal this file reuses already lives up
+ * here beside it.
+ */
+const DASH = "—";
+
+/**
  * Four states, four colours, and `busy` deliberately not among the alarming
  * ones: the orders job is scheduled every minute and its lock stops the odd
  * overlapping run, which is the machine working, not failing. Violet is the same
@@ -44,11 +52,12 @@ const TONE_CLASS: Record<BridgeTone, string> = {
 
 /**
  * How much of each list this page draws. Six recent orders is the mockup's own
- * count (`docs/design/dada-staff-admin.dc.html:139`) and six paused products is
- * its alert card's (:167); the failure list is FIVE because every one of its
+ * count (`docs/design/dada-staff-admin.dc.html:140`) and six paused products is
+ * its alert card's (:161); the failure list is FIVE because every one of its
  * rows is a job somebody has to do by hand, and a to-do card that scrolls is a
- * to-do card nobody finishes — the sidebar's 待办 figure and the funnel's own
- * bridge_failed row both carry the real total beside it.
+ * to-do card nobody finishes. The truncation is no longer silent: the card's own
+ * footer prints 共 {n} 单 · 显示最早 5 单 whenever the total runs past this, and the
+ * sidebar's 待办 figure and the funnel's bridge_failed row carry it too.
  */
 const RECENT_LIMIT = 6;
 const PAUSED_LIMIT = 6;
@@ -56,16 +65,17 @@ const FAILED_LIMIT = 5;
 
 /**
  * The funnel's colour ramp, in pipeline order —
- * `docs/design/dada-staff-admin.dc.html:585-590`: `#E0231C`, `#F0806A`,
+ * `docs/design/dada-staff-admin.dc.html:579-584`: `#E0231C`, `#F0806A`,
  * `#C4B7AC`, `#1C1917`, red draining to ink as an order moves down the machine.
  *
  * Three of its five stops are values the palette ALREADY carries, so they are
  * named rather than retyped: `#E0231C` is `--color-brand`, `#1C1917` is
  * `--color-ink` and the alarm bar's `#B31710` is `--color-brand-ink`
- * (`globals.css:76-81`). Only the two middle shades have no token — a washed
- * coral and a warm stone that exist nowhere else in the portal — and those stay
- * literal under the standard "not a token because" rule: they are one admin
- * chart's ramp, not palette entries a customer screen may reach for.
+ * (`globals.css:56`, `:76` and `:81` — the three are not contiguous). Only the
+ * two middle shades have no token — a washed coral and a warm stone that exist
+ * nowhere else in the portal — and those stay literal under the standard "not a
+ * token because" rule: they are one admin chart's ramp, not palette entries a
+ * customer screen may reach for.
  *
  * The bars are DECORATION beside the figures — every row prints its own count in
  * `font-num` to the right of the track — so no contrast ratio is claimed for
@@ -185,21 +195,46 @@ export default async function StaffHome({
       .select("id", { count: "exact", head: true })
       .eq("status", status);
 
-  // Every read on this page is a SESSION read under staff RLS — `orders_read`
-  // and `products_read` open both tables to staff and to nobody else — so all of
-  // them go out BESIDE the guard rather than behind it: a caller who turns out
-  // not to be staff reads their own restaurant's orders at worst, and
-  // `finishStaff` redirects out of this `Promise.all` before a row is rendered.
-  // The same argument the queue and the categories page already make.
+  // Every read on this page is a SESSION read, and the case for firing them all
+  // BESIDE the guard rather than behind it rests on what the policies actually
+  // say — neither of these two is staff-only. `products_read` is
+  // `is_staff() OR my_company_id() is not null`
+  // (`supabase/migrations/20260815101406_security_order_integrity.sql:166-171`):
+  // ANY logged-in customer reads the whole product table, which is how the
+  // catalog works at all. `orders_read` is
+  // `is_staff() OR company_id = my_company_id()` (:189-194). So the worst case
+  // for a caller who turns out NOT to be staff is their own restaurant's orders
+  // plus catalog facts /catalogo already hands them, and `finishStaff` redirects
+  // out of this `Promise.all` before a row of either is rendered. The same
+  // argument the queue and the categories page already make.
   //
-  // `bridge_status` is the same shape (`bridge_status_staff_read`), and it stays
-  // on the ordinary session client rather than the admin one for the reason it
+  // The guardrail that argument carries with it: it is an argument about THESE
+  // predicates. A read on a table whose policy is genuinely staff-only has no
+  // "they could already see this" to stand on, so it belongs BEHIND the guard
+  // and not in this `Promise.all`.
+  //
+  // `bridge_status` is the one read here that IS staff-only —
+  // `bridge_status_staff_read` is `is_staff()` alone
+  // (`20260816041200_bridge_status.sql:34-36`) — and it sits beside the guard on
+  // a narrower argument of its own: it holds no customer data whatsoever (job
+  // names, run times and tallies about our own machine), and RLS answers a
+  // non-staff caller with an empty set rather than an error. It also stays on
+  // the ordinary session client rather than the admin one for the reason it
   // always has: the admin client throws when `SUPABASE_SERVICE_ROLE_KEY` is
   // absent, and a status card must never be the reason the whole staff home
   // 500s and takes the dashboard with it.
   //
   // The seven counts ride under ONE step because they go out together; each list
   // keeps its own step so a slow one is visible in the `[perf]` line by name.
+  //
+  // TWELVE requests, and two of them are foldable: `pausedCount` and
+  // `bridgeFailedCount` count the same sets their lists below already select, so
+  // `{ count: "exact" }` on those two SELECTs would return the true total beside
+  // the limited rows and take this to ten. They are kept separate on purpose. A
+  // folded count shares its list's fate — one failure would take BOTH down, and
+  // the alert cards would then show an empty list beside a dashed figure with
+  // nothing left on the card that knows better. The count is those cards' honest
+  // signal precisely because it can survive its list.
   const [
     staffUser,
     { data: heartbeats, error },
@@ -248,6 +283,17 @@ export default async function StaffHome({
     // `is_available`, `codart` and `name` are all authenticated-granted columns
     // (only the six `price_N_cents` are revoked), so this is a session read like
     // the rest — the same table the shell already COUNTS on the session client.
+    //
+    // Ordered by CODART and not by "recently paused", because that second thing
+    // is not recoverable from this table. `price-sync` runs nightly and PATCHes
+    // every article it read out of `articulo`
+    // (`bridge/jobs/price-sync.ts:219-221`; matched=2854 in the runbook's own
+    // sample run), and `products_updated_at` fires `set_updated_at()` on every
+    // UPDATE with no "only if something changed" guard
+    // (`0002_catalog.sql:30-31`, `0001_core.sql:2-3`) — so by breakfast
+    // `updated_at` says the same thing about the whole catalog. Codart at least
+    // gives the six rows a stable scan order, and it is the string staff match
+    // against Wingest, which is what the second line of each row prints.
     perf.step(
       "paused",
       supabase
@@ -285,12 +331,17 @@ export default async function StaffHome({
   // — and the reason lands in the server log rather than on a staff screen.
   if (error) console.error("staff bridge_status query:", error);
 
-  // The three lists take the same position, and on the two ALERT cards it is
-  // worth saying out loud: a list that came back empty because the query failed
-  // is indistinguishable, on screen, from a list that is genuinely empty — 无停售商品
-  // and 暂无待办 are what both look like. The COUNTS beside them are the honest
-  // signal, and those dash on failure rather than reading 0; the reason lands in
-  // the log below.
+  // A list that came back empty because the query FAILED is indistinguishable,
+  // on screen, from a list that is genuinely empty — 无停售商品 and 暂无待办 are what
+  // both look like. On the two alert cards a second figure answers that: the
+  // paused card's header count and the todos card's footer total are separate
+  // reads (see the fan-out note above), they dash on failure rather than reading
+  // 0, and a live count beside an empty list is a visible contradiction — which
+  // is the point. It is the honest shape, not a tidy one.
+  //
+  // The RECENT card is the exception and has no such figure: 此视图中没有订单 can
+  // equally mean "the read failed", and nothing beside it says otherwise. Only
+  // the log below does.
   if (recentResult.error)
     console.error("staff home recent orders query:", recentResult.error);
   if (pausedResult.error)
@@ -325,9 +376,6 @@ export default async function StaffHome({
 
   // ── everything below this line is derivation and markup ───────────────────
 
-  /** What a figure that did not arrive looks like, everywhere on this page. */
-  const DASH = "—";
-
   /**
    * 进行中: the three states between confirmation and the delivery note. It is
    * `null` when ANY of the three is — a sum with a hole in it is not a sum, and
@@ -343,9 +391,14 @@ export default async function StaffHome({
    * The five bars, each carrying its own count. Keyed by status rather than
    * zipped by position so the ramp above and the figures here cannot drift apart
    * — a row whose colour and number came from two different lists is the one bug
-   * this card could have that nobody would see.
+   * this card could have that nobody would see. `Partial<Record<OrderStatus,…>>`
+   * and not `Record<string,…>` is what makes that a real guarantee rather than a
+   * hope: a mistyped key here is a compile error, where under `string` it was a
+   * row that dashed forever and looked exactly like a count that never arrived.
+   * `Partial` because the map holds five of the seven statuses on purpose —
+   * `albaran` and `cancelled` are not stages this funnel draws.
    */
-  const funnelCounts: Record<string, number | null> = {
+  const funnelCounts: Partial<Record<OrderStatus, number | null>> = {
     submitted: submittedCount,
     confirmed: confirmedCount,
     processing: processingCount,
@@ -359,7 +412,9 @@ export default async function StaffHome({
   /**
    * The longest bar. `Math.max(0, …)` rather than `Math.max(…)` so an all-null
    * funnel is 0 and not `-Infinity`; `funnelWidth` turns a zero max into an
-   * empty track for every row (its own table pins that).
+   * empty track for every row (its own table pins that). The `?? 0` reads as it
+   * should: a count that never arrived cannot be the longest bar, and its own
+   * row draws an empty track and a dash.
    */
   const funnelMax = Math.max(0, ...funnel.map((row) => row.count ?? 0));
   /**
@@ -368,6 +423,9 @@ export default async function StaffHome({
    * ICU plural in Spanish («{n, plural, …}»), so it needs a number, and a total
    * computed over a hole would be a smaller figure stated as a whole one — the
    * same call `activeCount` makes above. The rows' own dashes carry the news.
+   * The `?? 0` in the reduce is unreachable — the `some` above already returned
+   * on any null — and stays only because the array's element type says nothing
+   * about which branch we are in.
    */
   const funnelTotal = funnel.some((row) => row.count === null)
     ? null
@@ -376,6 +434,27 @@ export default async function StaffHome({
   const relative = new Intl.RelativeTimeFormat(locale === "zh" ? "zh-CN" : "es-ES", {
     numeric: "auto",
   });
+  /**
+   * TWO formatters, differing in one option, because the two places that print
+   * an age want different words at the same value. `numeric: "auto"` swaps a
+   * calendar word in at one and two days — 昨天 / 前天, «ayer» / «anteayer» — and
+   * the to-do card is an AGE column on a list drawn oldest-first, so multi-day
+   * rows are precisely what lands in it and «anteayer» in a column of «hace 3
+   * días» is a different unit of measure, not a nicety. `always` keeps it a
+   * duration: 3天前 / «hace 3 días», and 1天前 / «hace 1 día».
+   *
+   * The heartbeat below keeps `relative` exactly as it shipped, byte for byte —
+   * this round does not reopen that region. Its ages CAN cross a day too (a
+   * stopped job keeps aging, and `price-sync` is still fresh at 25 hours: its
+   * window is 26), so 昨天 is reachable there as well; it is left alone because
+   * three rows about freshness, each carrying its own badge and its exact
+   * instant on hover, are not the reading problem a COLUMN of ages on a backlog
+   * worked oldest-first is.
+   */
+  const relativeAlways = new Intl.RelativeTimeFormat(
+    locale === "zh" ? "zh-CN" : "es-ES",
+    { numeric: "always" },
+  );
 
   /**
    * How long something has been waiting, as a DURATION («42 minutos», 42分钟)
@@ -402,7 +481,7 @@ export default async function StaffHome({
   /**
    * REAL items only: every bridge failure sitting in the queue, oldest first,
    * and one row for how long the oldest unconfirmed order has been waiting. The
-   * mockup's 催报价 / 修改了收货时段 / 待审核客户 (`:600-604`) are three CRM
+   * mockup's 催报价 / 修改了收货时段 / 待审核客户 (`:601-605`) are three CRM
    * events this portal does not record (decision 1), and inventing them here
    * would put a to-do list in front of staff that nothing can ever clear.
    */
@@ -425,7 +504,7 @@ export default async function StaffHome({
       // from authenticated), and this card is not worth a fourth round trip to
       // move a relative time by a few minutes. The `title` says which instant
       // it is, the way the heartbeat's does.
-      age: relative.format(-value, unit),
+      age: relativeAlways.format(-value, unit),
       at: formatMadridTime(order.created_at, locale),
     };
   });
@@ -438,7 +517,10 @@ export default async function StaffHome({
       // No link: the row is not one order, it is the age of the whole 待确认
       // backlog — the sidebar entry and the KPI beside it both open that view.
       href: null,
-      // …and no second time on the right either: the sentence IS the age.
+      // …and no second time on the right either: the sentence IS the age. `at`
+      // is still set, and still reaches the screen — the row carries the exact
+      // instant as its `title`, which is why that hangs off `at` and not off the
+      // age chip this row does not have.
       age: null,
       at: formatMadridTime(oldestSubmittedAt, locale),
     });
@@ -531,7 +613,7 @@ export default async function StaffHome({
       </p>
 
       {/* ONE card holding four cells with internal rules, per the mockup's own
-          `repeat(4,1fr)` strip (`:97-109`); `overflow-hidden` is what keeps
+          `repeat(4,1fr)` strip (`:97-108`); `overflow-hidden` is what keeps
           those rules inside the 12px radius. Two across below `lg`, where 4×34px
           figures would be four columns of 60px. */}
       <div
@@ -540,13 +622,19 @@ export default async function StaffHome({
         {kpis.map((kpi, index) => (
           <div
             key={kpi.key}
-            className={`flex flex-col gap-2.5 border-[#EDE9E5] p-5 ${KPI_RULES[index]}`}
+            className={`flex flex-col gap-2.5 border-[#EDE9E5] p-5 ${
+              // `?? ""` and not a bare index: a fifth KPI would index past the
+              // array and render `class="undefined"` on the cell.
+              KPI_RULES[index] ?? ""
+            }`}
           >
             {/* The mockup's `#79726B` label. It maps to `text-ink-soft`
-                (#57504A, 7.3:1 on white) rather than to `text-muted` (#6E6760,
-                5.6:1): the mockup's own shade sits between the two at 4.7:1, and
-                of the pair the DARKER one is the honest reading of a label that
-                names a figure somebody is scanning for. */}
+                (#57504A, 7.92:1 on this card's white) rather than to
+                `text-muted` (#6E6760, 5.57:1). The mockup's own shade fails
+                nothing — 4.74:1 clears AA for text this size — but it is LIGHTER
+                than both candidates, not between them, so neither token is a
+                faithful match and the choice is which way to miss. Darker, for a
+                label that names a figure somebody is scanning for. */}
             <p className="text-[12.5px] text-ink-soft">{kpi.label}</p>
             <p className="font-num text-[34px] font-bold leading-none tabular-nums">
               {kpi.value === null ? (
@@ -567,7 +655,7 @@ export default async function StaffHome({
         ))}
       </div>
 
-      {/* The mockup's `1fr 380px` (`:111`). Below `lg` the two columns stack in
+      {/* The mockup's `1fr 380px` (`:110`). Below `lg` the two columns stack in
           source order — funnel, recent orders, then the two alert cards — and
           nothing on this page has a fixed width, so a 390px drawer scrolls
           vertically and never sideways. */}
@@ -582,10 +670,17 @@ export default async function StaffHome({
           <section className={ADMIN_CARD}>
             <div className="flex items-baseline justify-between gap-3 border-b border-[#EDE9E5] px-5 py-4">
               <h2 className="text-[15px] font-bold">{t("funnelTitle")}</h2>
-              {/* NOW, not the mockup's 本周 (`:118`): every bar is a count of
+              {/* NOW, not the mockup's 本周 (`:116`): every bar is a count of
                   orders SITTING in that state at this instant, so a time word
                   over it would describe a different query. `queueTotal` is the
-                  queue's own 共 {n} 单, reused. */}
+                  queue's own 共 {n} 单, reused.
+
+                  This is the ONE figure on the page whose absence is silent —
+                  every other missing number leaves an em dash where it stood,
+                  and this leaves nothing at all. Deliberate, not an oversight:
+                  the es `queueTotal` is an ICU plural, which has no slot a dash
+                  can go in. The five rows below each dash for themselves, so the
+                  news is on the card either way. */}
               {funnelTotal !== null && (
                 <p className="text-xs text-muted">
                   {t("queueTotal", { n: funnelTotal })}
@@ -605,7 +700,7 @@ export default async function StaffHome({
                       : ""
                   }`}
                 >
-                  {/* 104px, not the mockup's 76 (`:123`): its labels are 3-4
+                  {/* 104px, not the mockup's 76 (`:121`): its labels are 3-4
                       character inventions (待报价, 待发货) and ours are the
                       SHIPPED status words — 需要人工处理 is six CJK characters =
                       78px at 13px, and «Revisión manual» is wider still. The
@@ -635,6 +730,10 @@ export default async function StaffHome({
                   >
                     {row.count ?? DASH}
                   </span>
+                  {/* …and nothing after it. The mockup's fifth column is a 64px
+                      hint (`:126` — 平均 26 分, 签收率 100%), dropped for the same
+                      reason the KPI deltas are: every one of those sentences is
+                      computed against history this portal does not keep. */}
                 </div>
               ))}
             </div>
@@ -659,17 +758,18 @@ export default async function StaffHome({
                  sideways in a 390px drawer and the page body never does — the
                  products table's own arrangement. */
               <div className="overflow-x-auto">
-                {/* A real `<table>`, not the mockup's div grid (`:140`): four
-                    columns with a header each is tabular data, and the grid
+                {/* A real `<table>`, not the mockup's div grid (`:137-151`):
+                    four columns with a header each is tabular data, and the grid
                     version hands a screen reader four unrelated boxes per row.
                     Every `<th>` takes `scope="col"`, as `/staff/productos`
                     does.
 
-                    NO 商品 / 种 column, which the mockup puts third (`:145`):
-                    the line count is not on `orders`, so it would cost a second
-                    read of `order_items` for six rows — the plan drops it for
-                    this card and the queue's own `<details>` summary already
-                    carries it where somebody is working the order. */}
+                    NO 商品 / 种 column, which the mockup puts third (header
+                    `:138`, cell `:147`): the line count is not on `orders`, so
+                    it would cost a second read of `order_items` for six rows —
+                    the plan drops it for this card and the queue's own
+                    `<details>` summary already carries it where somebody is
+                    working the order. */}
                 <table className="w-full min-w-[560px] text-sm">
                   <thead>
                     <tr className="border-b border-[#EDE9E5] bg-field text-[11.5px] text-muted">
@@ -682,11 +782,15 @@ export default async function StaffHome({
                       <th scope="col" className={`${TH} w-[120px] pl-5`}>
                         {t("colOrder")}
                       </th>
-                      {/* 客户 / Clientes — the sidebar's own word for the
+                      {/* 客户 / «Cliente» — the sidebar's own word for the
                           restaurant that placed it (decision 7's relabel), not
-                          a second noun invented for a column header. */}
+                          a second noun invented for a column header. Its OWN key
+                          rather than `nav.users`, though the zh is the same
+                          string either way: the nav entry is a destination
+                          holding many of them and reads «Clientes», while a
+                          column header names the one entity on each row. */}
                       <th scope="col" className={TH}>
-                        {t("nav.users")}
+                        {t("colClient")}
                       </th>
                       {/* 下单日期 / Fecha del pedido: `created_at`'s shipped
                           label, the same one the queue row gives it. */}
@@ -743,7 +847,7 @@ export default async function StaffHome({
 
         <div className="flex min-w-0 flex-col gap-[18px]">
           {/* The mockup's red-wash alert card — border `#FBE4E2` on `#FFF8F7`
-              with an inner `#FBE9E7` row rule (`:159-171`). The three are ONE
+              with an inner `#FBE9E7` row rule (`:156-171`). The three are ONE
               card's wash, the only red-wash surface anywhere on /staff, which is
               exactly why they are literals here and not palette entries: the
               token map's admin row lists `#FCFBFA` and `#EDE9E5` as the two
@@ -760,8 +864,10 @@ export default async function StaffHome({
                 {t("shell.backlogUnavailable")}
               </h2>
               {/* The KPI's own figure — the count of the whole table, not the
-                  length of the six-row list under it. */}
-              <p className="font-num font-bold tabular-nums text-brand-ink">
+                  length of the six-row list under it. 13px, the mockup's size
+                  (`:159`): with no size of its own it inherited the 16px body
+                  and drew a figure heavier than the 15px heading beside it. */}
+              <p className="font-num text-[13px] font-bold tabular-nums text-brand-ink">
                 {pausedCount ?? DASH}
               </p>
             </div>
@@ -816,6 +922,13 @@ export default async function StaffHome({
                   <li
                     key={todo.key}
                     className="flex items-center gap-3 border-b border-[#F4F0EC] px-[18px] py-3.5 last:border-b-0"
+                    // The exact moment on Madrid's clock, as the heartbeat rows
+                    // carry it — hung off the ROW and keyed on `at`, not on the
+                    // age chip. Both kinds of row have an `at`; only the failure
+                    // rows have a chip, so on the chip this title was dead code
+                    // for the 待确认 line, whose `at` was computed and thrown
+                    // away.
+                    title={todo.at ? t("bridge.at", { time: todo.at }) : undefined}
                   >
                     <span
                       aria-hidden="true"
@@ -829,20 +942,43 @@ export default async function StaffHome({
                       <span className="min-w-0 flex-1 text-[13px]">{todo.text}</span>
                     )}
                     {todo.age && (
-                      <span
-                        className="shrink-0 text-[11.5px] text-muted"
-                        // The exact moment on Madrid's clock, as the heartbeat
-                        // rows carry it.
-                        title={
-                          todo.at ? t("bridge.at", { time: todo.at }) : undefined
-                        }
-                      >
+                      <span className="shrink-0 text-[11.5px] text-muted">
                         {todo.age}
                       </span>
                     )}
                   </li>
                 ))}
               </ul>
+            )}
+            {/* The card's own count, in the footer shape the queue uses
+                (`pedidos/page.tsx:933-943`). This was the ONE card here with no
+                figure of its own: `FAILED_LIMIT` truncates in silence, so twelve
+                failures drew five rows and nothing on the card said so.
+                Deliberately outside the ternary above, because the case worth
+                drawing is the one where they disagree — a failed LIST read next
+                to a live COUNT now renders 暂无待办 beside 共 3 单, a contradiction
+                somebody can SEE, which is the A4 precedent (a visible
+                disagreement beats a confident lie). When the count itself did
+                not arrive nothing extra renders at all and the funnel's own
+                bridge_failed dash is the signal.
+
+                It counts FAILURES only. The 待确认 row below them is a different
+                query and is not in this total — which is why the footer sits
+                under a list that can be one row longer than the number it
+                prints. */}
+            {bridgeFailedCount !== null && bridgeFailedCount > 0 && (
+              <p className="border-t border-[#F4F0EC] px-[18px] py-3.5 text-xs text-muted">
+                <span>{t("queueTotal", { n: bridgeFailedCount })}</span>
+                {bridgeFailedCount > FAILED_LIMIT && (
+                  <>
+                    {" · "}
+                    {/* 最早, not the queue's 最新: this list is ordered oldest
+                        first, so what is on screen is the front of the backlog
+                        and not the top of it. */}
+                    <span>{t("todoShowing", { m: FAILED_LIMIT })}</span>
+                  </>
+                )}
+              </p>
             )}
           </section>
         </div>
