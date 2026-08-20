@@ -11,7 +11,7 @@ import { formatOrderDate, isUuid, orderUnits } from "@/lib/orders";
 import type { Database } from "@/lib/supabase/database.types";
 import type { PublicOrder } from "@/lib/supabase/public.types";
 import { PUBLIC_ORDER_COLUMNS } from "@/lib/supabase/public.types";
-import { PrintButton } from "./print-button";
+import { PrintControls } from "./print-controls";
 
 export const dynamic = "force-dynamic";
 
@@ -62,7 +62,7 @@ type PrintOrder = PublicOrder & {
     codcli: number | null;
     address: string | null;
     address_city: string | null;
-    address_postal: string | null;
+    postal_code: string | null;
   } | null;
 };
 
@@ -95,7 +95,7 @@ export default async function PrintOrderPage({
     supabase
       .from("orders")
       .select(
-        `${PUBLIC_ORDER_COLUMNS}, companies:company_id(name, codcli, address, address_city, address_postal)`,
+        `${PUBLIC_ORDER_COLUMNS}, companies:company_id(name, codcli, address, address_city, postal_code)`,
       )
       .eq("id", id)
       .maybeSingle(),
@@ -139,16 +139,13 @@ export default async function PrintOrderPage({
   const address = [
     order.companies?.address,
     order.companies?.address_city,
-    order.companies?.address_postal,
+    order.companies?.postal_code,
   ]
     .filter(Boolean)
     .join(", ");
 
-  // The toggle's other half: same sheet, opposite `?precios=`. Built by hand —
-  // one parameter, two states — rather than importing a URL helper for it.
-  const toggleHref = `/${locale}/staff/pedidos/${id}/imprimir${
-    showPrices ? "?precios=0" : ""
-  }`;
+  // The sheet's own path, no query — 打印设置 appends the price state to it.
+  const baseHref = `/${locale}/staff/pedidos/${id}/imprimir`;
 
   /** One boxed header cell: the tiny label row over the value. */
   const headCell = (label: string, value: ReactNode) => (
@@ -186,17 +183,8 @@ export default async function PrintOrderPage({
           >
             ‹ {t("print.back")}
           </Link>
-          <div className="ml-auto flex items-center gap-3">
-            {/* A LINK, not a checkbox: the state lives in the URL, so the
-                printed copy and the address bar can never disagree about
-                whether money was on the paper. */}
-            <Link
-              href={toggleHref}
-              className="text-sm text-brand-ink underline underline-offset-4"
-            >
-              {showPrices ? t("print.hidePrices") : t("print.showPrices")}
-            </Link>
-            <PrintButton />
+          <div className="ml-auto">
+            <PrintControls showPrices={showPrices} baseHref={baseHref} />
           </div>
         </div>
 

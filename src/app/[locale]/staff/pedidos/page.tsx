@@ -27,6 +27,7 @@ import type { Database } from "@/lib/supabase/database.types";
 import type { PublicOrder } from "@/lib/supabase/public.types";
 import { PUBLIC_ORDER_COLUMNS } from "@/lib/supabase/public.types";
 import { LineQtyForm } from "./line-qty-form";
+import { QueueRow } from "./queue-row";
 
 export const dynamic = "force-dynamic";
 
@@ -543,9 +544,11 @@ export default async function StaffOrdersPage({
                 order.companies?.codcli != null
                   ? String(order.companies.codcli)
                   : null,
-                order.delivery_date
-                  ? `${tCart("deliveryDate")}: ${formatOrderDate(order.delivery_date, locale)}`
-                  : null,
+                // The delivery date is deliberately NOT here any more — the
+                // owner cut it from the queue row (2026-08-20) to buy the line
+                // back its width. It is not lost: the customer's own order
+                // card still shows it, and the bridge writes it into the
+                // pedido's FECENT.
                 order.numped != null
                   ? tOrders("erpOrder", { n: order.numped })
                   : null,
@@ -553,116 +556,175 @@ export default async function StaffOrdersPage({
                   ? tOrders("erpAlbaran", { n: order.numalb })
                   : null,
               ].filter((part): part is string => part !== null);
+              /**
+               * The fold behind the row's 明细 toggle. The count lives on that
+               * toggle, which is why the mockup's 种类 column is not on the row
+               * — the plan's A4 OUT list settles both of that pair ("种类/件数
+               * columns (line count lives on the details summary; a cajas+kg
+               * sum would lie)").
+               *
+               * And NO lines, NO toggle — the same position `order-card.tsx`
+               * takes for the customer: an order always HAS lines
+               * (`create_order` refuses EMPTY_ORDER), so an empty array is
+               * this page's line read having come back short, and 明细（0 项）
+               * would be a false statement about a real order. The count is
+               * WITHHELD instead of printed wrong, on both paths that can
+               * produce it — the exactly-1000 truncation and a plain query
+               * error — and the row keeps everything else it says. The reason
+               * lives in the server log beside the read.
+               */
+              const linesFold =
+                lines.length > 0 ? (
+                  <ul className="mt-2 space-y-1 text-sm">
+                    {lines.map((line) => {
+                      // The live flag, with the line's own snapshot as the
+                      // fallback — the same coalesce the RPC makes, so the box
+                      // this row draws and the rule that judges it agree. Saving
+                      // the row also writes that value onto the line, so the
+                      // snapshot the bridge later reads agrees with it too.
+                      const weighed =
+                        line.products?.is_weighed ?? line.is_weighed;
+                      // The per-caja price. `qty` is CAJAS and
+                      // `unit_price_cents` is the ERP's per-base-unit price, so
+                      // those two do not multiply out to the total beside them —
+                      // `units_per_case x unit_price_cents` does, both
+                      // snapshotted on the line, so `qty x this =
+                      // line_total_cents` exactly and the row reads the way a
+                      // staff member checking an albarán needs it to.
+                      const perCase = formatEuros(
+                        line.units_per_case * line.unit_price_cents,
+                        locale,
+                      );
+                      const name = localizedName(line.name, locale);
+                      return (
+                        <li
+                          key={line.id}
+                          className="flex flex-wrap items-center gap-x-2 gap-y-0.5"
+                        >
+                          <span className="font-mono text-xs text-muted">
+                            {line.codart}
+                          </span>
+                          {/* The name is the order's own snapshot, not the
+                              product's — a renamed article still reads the way
+                              the customer ordered it. */}
+                          <span className="min-w-0 flex-1 truncate">{name}</span>
+                          {/* Why this line's box takes decimals, said once, in
+                              the vocabulary the catalogue already uses. */}
+                          {weighed && (
+                            <span className="rounded-md bg-amber-100 px-1.5 py-0.5 text-xs text-amber-800">
+                              {tCatalog("weighed")}
+                            </span>
+                          )}
+                          {editable ? (
+                            <>
+                              <LineQtyForm
+                                orderId={order.id}
+                                itemId={line.id}
+                                qty={line.qty}
+                                isWeighed={weighed}
+                                locale={locale}
+                                tab={tab}
+                                labels={{
+                                  save: t("saveQty"),
+                                  saveFor: t("saveQtyFor", { name }),
+                                  qtyFor: t("lineQtyFor", { name }),
+                                  kg: t("kg"),
+                                }}
+                              />
+                              {/* The packaging fact the read-only row states,
+                                  kept on the editable one: `CAJA×24` is what
+                                  makes the price beside it legible, and 待确认
+                                  is the tab where somebody is deciding a
+                                  quantity against it. */}
+                              <span className="text-xs text-muted tabular-nums">
+                                {unitLabel(line.unit, line.units_per_case)} ×{" "}
+                                {perCase}
+                              </span>
+                            </>
+                          ) : (
+                            <span className="text-xs text-muted tabular-nums">
+                              {line.qty}{" "}
+                              {unitLabel(line.unit, line.units_per_case)} ×{" "}
+                              {perCase}
+                            </span>
+                          )}
+                          <span className="w-20 text-right tabular-nums">
+                            {formatEuros(line.line_total_cents, locale)}
+                          </span>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                ) : null;
               return (
                 // The queue is read by scanning down it, so the row answers the
-                // pointer the way an admin table does. The tint now reaches the
-                // full width of the card on its own — the `-mx-2 px-2` trick
-                // this row used to need is gone with the padding that replaced
-                // it: the card has none of its own and every row carries the
-                // mockup's 18px.
+                // pointer the way an admin table does. The tint reaches the
+                // full width of the card on its own: the card has no padding
+                // and every row carries the mockup's 18px.
                 //
-                // Row height is set by the RIGHT column, not the left. The left
-                // stack is 18.75px of 12.5px number over 16.5px of 11px date
-                // plus the 2px between them (1.5 line-height, from preflight's
-                // `html`) = 37.25px, and with `py-3.5`'s 28px that would be a
-                // 65.25px row. But the header is `items-start` and the right
-                // stack is TALLER: `OrderStatusBadge` is `px-2 py-1 text-xs`, so
-                // 16px of line box plus 8px of padding = 24px (no border), then
-                // `gap-1`'s 4px, then the subtotal — no size class, so the 16px
-                // base at 1.5 = 24px. 24 + 4 + 24 = 52px of content, 80px with
-                // the padding, before the `<details>` line under it. Past the
-                // mockup's 58px minimum either way, which is what the number is
-                // here to say — that minimum is a row of single-line cells.
+                // ONE LINE of card until somebody opens it — the owner's
+                // compaction call (2026-08-20). Everything the row says sits
+                // on a single `items-center` line: number · date · restaurant
+                // and meta on the left, then 明细 · 打印 · status · money as
+                // one control cluster on the right (`queue-row.tsx`). The
+                // stacked two-column header this replaces measured ~80px;
+                // this one is a 24px line in `py-2.5`, and it wraps — on a
+                // 390px drawer the cluster drops under the name rather than
+                // clipping it.
                 <li
                   key={order.id}
-                  className="px-[18px] py-3.5 transition-colors hover:bg-[#FCFBFA]"
+                  className="px-[18px] py-2.5 transition-colors hover:bg-[#FCFBFA]"
                 >
-                  <div className="flex flex-wrap items-start gap-x-3 gap-y-1.5">
-                    <div className="shrink-0">
-                      {/* `font-num` is for the DIGITS: Archivo carries no CJK,
-                          so 「订单」 falls back to the system sans and the
-                          number takes the numeral face — which is the half of
-                          this line that gets scanned down the column. */}
-                      <p className="font-num text-[12.5px] font-semibold">
-                        {tOrders("orderNumber", { n: order.order_number })}
-                      </p>
-                      {/* 提交时间, in the mockup's place: under the number,
-                          absolute (`formatOrderDate`) and not its relative
-                          今天 09:12 — an order queue is worked against dated
-                          paperwork. The visible label is dropped because in
-                          THIS position nothing else could be meant (the
-                          delivery date below carries its own), and it is kept
-                          for a screen reader, exactly as the subtotal's is.
-
-                          The DATE only, and the clock time deliberately not
-                          drawn. `order_number` is one global sequence
-                          (`order_number_seq start 1001`, `0003_orders.sql:2`,
-                          allocated by the INSERT inside `create_order`), so the
-                          number stacked directly above this line already ranks
-                          two orders of the same day against each other — a
-                          higher number is the later submission, which is all
-                          the clock would have added here. And the swap is not
-                          free: `formatMadridTime` (`bridge-status.ts:454-465`)
-                          buys the hour by dropping the YEAR, and the 全部 tab
-                          reaches back over orders of any age, where a bare
-                          08-11 is the one thing on this row that could be
-                          read wrong. The failure box below does use it — a
-                          bridge failure is hours old, not years. */}
-                      <p className="mt-0.5 text-[11px] text-muted">
-                        <span className="sr-only">{tOrders("placedAt")}: </span>
-                        {formatOrderDate(order.created_at, locale)}
-                      </p>
-                    </div>
-
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-[13.5px] font-semibold">
-                        {order.companies?.name ?? "—"}
-                      </p>
-                      {meta.length > 0 && (
-                        <p className="mt-0.5 text-[11.5px] text-muted">
-                          {meta.join(" · ")}
-                        </p>
-                      )}
-                    </div>
-
-                    {/* Money is right-aligned and `tabular-nums` down the whole
-                        queue, so the euro columns line up digit under digit the
-                        way they do on the albarán being checked against it.
-
-                        It is also, deliberately, the largest text on the row —
-                        no size class, so the 16px base against 13.5px for the
-                        restaurant and 12.5px for the order number. That is a
-                        DEVIATION, not an oversight: the mockup's queue row
-                        carries no money at all (its columns are 单号 / 客户·门店
-                        / 种类 / 件数 / 提交时间 / 状态 / 操作 —
-                        `docs/design/dada-staff-admin.dc.html:215-238`),
-                        and the subtotal is the figure a staff member checks
-                        against the albarán. The thing the row exists to verify
-                        gets the row's biggest type. */}
-                    <div className="ml-auto flex shrink-0 flex-col items-end gap-1">
-                      <OrderStatusBadge status={order.status} />
+                  <QueueRow
+                    lines={linesFold}
+                    toggleLabel={t("orderLines", { n: lines.length })}
+                    toggleAria={t("orderLinesFor", { n: order.order_number })}
+                    printHref={`/${locale}/staff/pedidos/${order.id}/imprimir`}
+                    printLabel={t("print.link")}
+                    printAria={t("print.linkFor", { n: order.order_number })}
+                    badge={<OrderStatusBadge status={order.status} />}
+                    price={
+                      // Money keeps the row's biggest type and its
+                      // `tabular-nums` — the figure a staff member checks
+                      // against the albarán, digit under digit down the queue.
                       <p className="font-semibold tabular-nums">
                         <span className="sr-only">{tCart("subtotal")}: </span>
                         {formatEuros(order.subtotal_cents, locale)}
                       </p>
-                      {/* The A4 sheet, in a tab of its own so the queue —
-                          filters, scroll position, an open line editor — is
-                          still exactly where it was when the print dialog
-                          closes. Named per order for a screen reader; the
-                          visible word alone repeats fifty times down the
-                          queue. */}
-                      <Link
-                        href={`/${locale}/staff/pedidos/${order.id}/imprimir`}
-                        target="_blank"
-                        aria-label={t("print.linkFor", {
-                          n: order.order_number,
-                        })}
-                        className="text-[12.5px] text-brand-ink underline underline-offset-4"
-                      >
-                        {t("print.link")}
-                      </Link>
-                    </div>
-                  </div>
+                    }
+                  >
+                    {/* `font-num` is for the DIGITS: Archivo carries no CJK, so
+                        「订单」 falls back to the system sans and the number
+                        takes the numeral face. */}
+                    <span className="shrink-0 font-num text-[12.5px] font-semibold">
+                      {tOrders("orderNumber", { n: order.order_number })}
+                    </span>
+                    {/* 提交时间 — absolute date, no clock: the order number
+                        beside it already ranks two orders of one day, and the
+                        全部 tab reaches back over orders of any age, where a
+                        bare 08-11 without a year is the one thing on this row
+                        that could be read wrong. Labelled for a screen reader
+                        only; in this position nothing else could be meant. */}
+                    <span className="shrink-0 text-[11px] text-muted">
+                      <span className="sr-only">{tOrders("placedAt")}: </span>
+                      {formatOrderDate(order.created_at, locale)}
+                    </span>
+                    {/* Restaurant and meta share ONE truncating span: two
+                        separate `truncate`s on one flex line would fight over
+                        the same free space and clip both; here the codcli and
+                        ERP numbers simply run until the line does. */}
+                    <span className="min-w-0 flex-1 truncate text-[13.5px]">
+                      <span className="font-semibold">
+                        {order.companies?.name ?? "—"}
+                      </span>
+                      {meta.length > 0 && (
+                        <span className="text-[11.5px] text-muted">
+                          {" "}
+                          · {meta.join(" · ")}
+                        </span>
+                      )}
+                    </span>
+                  </QueueRow>
 
                   {order.customer_note && (
                     <p className="mt-2 text-[12.5px]">
@@ -707,118 +769,6 @@ export default async function StaffOrdersPage({
                         <p>{t("bridgeFailure.detailsUnavailable")}</p>
                       )}
                     </div>
-                  )}
-
-                  {/* Lines fold away so a screen of orders stays a screen; no
-                      client component is needed for a <details>. The summary is
-                      also where the line COUNT lives, which is why the mockup's
-                      种类 column is not on the row above — the plan's A4 OUT
-                      list settles both of that pair
-                      (`docs/superpowers/plans/2026-08-19-14-staff-admin-redesign.md`,
-                      Task A4, :94): "种类/件数 columns (line count lives on the
-                      details summary; a cajas+kg sum would lie)", 件数 being a
-                      cajas-plus-kilos sum and so a number in no unit at all.
-
-                      And NO lines, no disclosure — the same position
-                      `order-card.tsx:183` takes for the customer, for the same
-                      reason: an order always HAS lines (`create_order` refuses
-                      EMPTY_ORDER), so an empty array is this page's line read
-                      having come back short, and 明细（0 项）would be a false
-                      statement about a real order rather than a degraded
-                      summary. The count is WITHHELD instead of printed wrong,
-                      on both paths that can produce it — the exactly-1000
-                      truncation and a plain query error — and the row keeps
-                      everything else it says: chip, meta, subtotal, failure
-                      box, 确认/取消/修正后重试. The reason lives in the server log
-                      beside the read. */}
-                  {lines.length > 0 && (
-                    <details className="mt-2">
-                      <summary className="cursor-pointer text-[12.5px] text-muted transition-colors hover:text-ink">
-                        {t("orderLines", { n: lines.length })}
-                      </summary>
-                      <ul className="mt-1 space-y-1 text-sm">
-                        {lines.map((line) => {
-                          // The live flag, with the line's own snapshot as the
-                          // fallback — the same coalesce the RPC makes, so the box
-                          // this row draws and the rule that judges it agree. Saving
-                          // the row also writes that value onto the line, so the
-                          // snapshot the bridge later reads agrees with it too.
-                          const weighed =
-                            line.products?.is_weighed ?? line.is_weighed;
-                          // The per-caja price. `qty` is CAJAS and
-                          // `unit_price_cents` is the ERP's per-base-unit price, so
-                          // those two do not multiply out to the total beside them —
-                          // `units_per_case x unit_price_cents` does, both
-                          // snapshotted on the line, so `qty x this =
-                          // line_total_cents` exactly and the row reads the way a
-                          // staff member checking an albarán needs it to.
-                          const perCase = formatEuros(
-                            line.units_per_case * line.unit_price_cents,
-                            locale,
-                          );
-                          const name = localizedName(line.name, locale);
-                          return (
-                            <li
-                              key={line.id}
-                              className="flex flex-wrap items-center gap-x-2 gap-y-0.5"
-                            >
-                              <span className="font-mono text-xs text-muted">
-                                {line.codart}
-                              </span>
-                              {/* The name is the order's own snapshot, not the
-                                  product's — a renamed article still reads the way
-                                  the customer ordered it. */}
-                              <span className="min-w-0 flex-1 truncate">
-                                {name}
-                              </span>
-                              {/* Why this line's box takes decimals, said once, in
-                                  the vocabulary the catalogue already uses. */}
-                              {weighed && (
-                                <span className="rounded-md bg-amber-100 px-1.5 py-0.5 text-xs text-amber-800">
-                                  {tCatalog("weighed")}
-                                </span>
-                              )}
-                              {editable ? (
-                                <>
-                                  <LineQtyForm
-                                    orderId={order.id}
-                                    itemId={line.id}
-                                    qty={line.qty}
-                                    isWeighed={weighed}
-                                    locale={locale}
-                                    tab={tab}
-                                    labels={{
-                                      save: t("saveQty"),
-                                      saveFor: t("saveQtyFor", { name }),
-                                      qtyFor: t("lineQtyFor", { name }),
-                                      kg: t("kg"),
-                                    }}
-                                  />
-                                  {/* The packaging fact the read-only row states,
-                                      kept on the editable one: `CAJA×24` is what
-                                      makes the price beside it legible, and 待确认
-                                      is the tab where somebody is deciding a
-                                      quantity against it. */}
-                                  <span className="text-xs text-muted tabular-nums">
-                                    {unitLabel(line.unit, line.units_per_case)} ×{" "}
-                                    {perCase}
-                                  </span>
-                                </>
-                              ) : (
-                                <span className="text-xs text-muted tabular-nums">
-                                  {line.qty}{" "}
-                                  {unitLabel(line.unit, line.units_per_case)} ×{" "}
-                                  {perCase}
-                                </span>
-                              )}
-                              <span className="w-20 text-right tabular-nums">
-                                {formatEuros(line.line_total_cents, locale)}
-                              </span>
-                            </li>
-                          );
-                        })}
-                      </ul>
-                    </details>
                   )}
 
                   {cancellable && (
