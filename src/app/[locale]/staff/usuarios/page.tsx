@@ -56,7 +56,7 @@ export const dynamic = "force-dynamic";
 
 type CustomerCompany = Pick<
   Database["public"]["Tables"]["companies"]["Row"],
-  "name" | "codcli" | "tarcli" | "is_active"
+  "name" | "codcli" | "tarcli" | "is_active" | "notes"
 >;
 
 /**
@@ -124,25 +124,11 @@ const ROW =
   "flex flex-wrap items-center gap-x-3 gap-y-2 py-2.5 text-sm transition-colors hover:bg-[#FCFBFA]";
 /** The card's own gutter, for the rows that start at it. */
 const ROW_X = "px-[18px]";
-/**
- * …and the indent for an account row, which starts where its restaurant's NAME
- * does: the card's 18px + the 34px avatar + the row's own 12px gap = 64px, which
- * is `pl-16` exactly.
- */
-const ROW_INDENT = "pl-16 pr-[18px]";
 
 /** Active = the account can sign in; inactive is this app's delete. */
 const BADGE = "rounded-md px-1.5 py-0.5 text-xs";
 const BADGE_ON = `${BADGE} bg-green-100 text-green-800`;
 const BADGE_OFF = `${BADGE} bg-amber-100 text-amber-800`;
-/**
- * The initial disc, at the mockup's own metrics (`:399`): 34px, its `#F4F0EC`
- * fill — the row-rule shade, used here as a tint — and `#79726B` letters, which
- * map to `text-ink-soft` under the standing rule (the mockup's grey is lighter
- * than either candidate token; darker is the safe way to miss).
- */
-const AVATAR =
-  "flex size-[34px] shrink-0 items-center justify-center rounded-full bg-[#F4F0EC] text-[12.5px] font-semibold text-ink-soft";
 /** The row controls, which the actor's own row renders disabled. */
 const ROW_BTN = `${BTN_QUIET} h-[30px] px-2.5 text-[12.5px] disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-border-strong disabled:hover:text-ink`;
 
@@ -320,7 +306,12 @@ export default async function StaffUsersPage({
     admin
       .from("portal_users")
       .select(
-        "id, display_name, is_active, company_id, companies:company_id(name, codcli, tarcli, is_active)",
+        // `notes` rides the ADMIN client only — the column is revoked from
+        // authenticated (CLAUDE.md), and this is the one page that may read it:
+        // its first ` | ` segment is the restaurant's REAL name (the bulk
+        // import of 2026-08-20 wrote `真名 | 法人 | CIF` there, with the code
+        // as `companies.name`), which is the table's 公司 column.
+        "id, display_name, is_active, company_id, companies:company_id(name, codcli, tarcli, is_active, notes)",
       )
       .order("created_at"),
     // Owner only, and read only when the section that shows it will be drawn.
@@ -645,138 +636,137 @@ export default async function StaffUsersPage({
             {t("noCustomers")}
           </p>
         ) : (
-          <ul>
-            {groups.map((group) => {
-              const company = group.company;
-              const name = company?.name ?? t("noCompany");
-              const month = group.id === null ? null : monthCountOf(group.id);
-              return (
-                <li
-                  key={group.id ?? "none"}
-                  className="border-t border-[#EDE9E5] first:border-t-0"
-                >
-                  {/* The restaurant. Not hoverable and not a link: there is no
-                      company page to go to, and a row that lights up under the
-                      cursor promises one. */}
-                  <div
-                    className={`flex flex-wrap items-center gap-x-3 gap-y-2 ${ROW_X} py-3.5`}
-                  >
-                    <span aria-hidden="true" className={AVATAR}>
-                      {/* The first CHARACTER, taken with a spread rather than
-                          `[0]` so an astral one (an emoji in a restaurant's
-                          name) is not cut in half at the surrogate pair. A group
-                          with no company has no initial either — it takes the
-                          same dash every missing figure on this page does. */}
-                      {company
-                        ? ([...name][0] ?? "").toUpperCase()
-                        : DASH}
-                    </span>
-                    {/* The same 120px floor the account rows below carry, and
-                        this row has MORE reason to: three siblings follow it
-                        here (the tarifa, 本月单量 and the status chip) where an
-                        account row has two. Without the floor a `flex-1` column
-                        surrenders all of its width to them in a 390px drawer
-                        and a restaurant's name ellipsises to a character or
-                        two; with it the trailing three wrap onto a second line,
-                        which is what the row is `flex-wrap` for. */}
-                    <div className="min-w-30 flex-1">
-                      <p className="truncate text-[13.5px] font-semibold">
-                        {name}
-                      </p>
-                      {company?.codcli != null && (
-                        // The ERP's customer number, in the numeral face: it is
-                        // the string staff match against Wingest.
-                        <p className="truncate font-num text-[11px] text-muted">
-                          {company.codcli}
-                        </p>
-                      )}
-                    </div>
-
-                    {company && (
-                      <span
-                        className="font-num text-[12.5px] text-ink-soft"
-                        // Which of the six price columns this restaurant sees.
-                        // `T3` alone is the vocabulary the page already used;
-                        // the tooltip is the form's own label for the column.
-                        title={t("tarcli")}
+          // A TABLE, one row per restaurant — the owner's call (2026-08-20
+          // round two): the stacked company-row-plus-account-row shape spent
+          // two full-width lines on every restaurant, and with thirty-three of
+          // them the book stopped fitting a screen. The common case (one
+          // account per restaurant) is now ONE row carrying everything; only a
+          // restaurant with a second login grows extra rows, which show just
+          // the account half over blank company cells — the blank IS the
+          // grouping, the way a ledger repeats nothing.
+          <div className="overflow-x-auto">
+            <table className="w-full text-[13px]">
+              <thead>
+                <tr className="border-b border-[#EDE9E5] text-left text-[11.5px] text-ink-soft">
+                  <th className="py-2.5 pl-[18px] pr-3 font-medium">
+                    {t("colCode")}
+                  </th>
+                  <th className="px-3 py-2.5 font-medium">{t("colCompany")}</th>
+                  <th className="px-3 py-2.5 font-medium">{t("colCodcli")}</th>
+                  <th className="px-3 py-2.5 font-medium">{t("colEmail")}</th>
+                  <th className="px-3 py-2.5 font-medium">{t("colTarifa")}</th>
+                  <th className="px-3 py-2.5 text-right font-medium">
+                    {t("colMonth")}
+                  </th>
+                  <th className="px-3 py-2.5 font-medium">{t("colStatus")}</th>
+                  {/* Named for a screen reader, silent on screen — the repo's
+                      standing colActions convention. */}
+                  <th className="py-2.5 pl-3 pr-[18px]">
+                    <span className="sr-only">{t("colActions")}</span>
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {groups.flatMap((group) => {
+                  const company = group.company;
+                  const name = company?.name ?? t("noCompany");
+                  const month =
+                    group.id === null ? null : monthCountOf(group.id);
+                  // The restaurant's REAL name, from the notes convention the
+                  // bulk import wrote (`真名 | 法人 | CIF`). A company created
+                  // by hand may have no notes — the cell dashes, it does not
+                  // guess.
+                  const realName =
+                    company?.notes?.split(" | ")[0]?.trim() || null;
+                  return group.accounts.map((row, index) => {
+                    const accountName = nameOf(row.id, row.display_name);
+                    const email = emails.get(row.id) ?? DASH;
+                    const first = index === 0;
+                    return (
+                      <tr
+                        key={row.id}
+                        // A restaurant's rows open with the card-rule shade;
+                        // its extra account rows with the lighter row rule —
+                        // the two-tone hairline is what still groups them now
+                        // that indentation is gone.
+                        className={`border-t ${
+                          first ? "border-[#EDE9E5]" : "border-[#F4F0EC]"
+                        } align-middle transition-colors hover:bg-[#FCFBFA]`}
                       >
-                        T{company.tarcli}
-                      </span>
-                    )}
-
-                    {group.id !== null && (
-                      /* 本月单量. The figure is the mockup's 14px/600 numeral
-                         and the words around it are its 11.5px grey (`:411-412`)
-                         — one message with the number inside a `<n>` tag, so the
-                         Spanish plural and the Chinese 本月 … 单 word order both
-                         come out of the translation rather than out of the JSX.
-                         The cart bar's `kindsCount` is the same construction. */
-                      <p className="text-[11.5px] text-muted">
-                        {month === null ? (
-                          <span className="font-num text-[14px] font-semibold tabular-nums">
-                            {DASH}
-                          </span>
+                        {first ? (
+                          <>
+                            <td className="py-2.5 pl-[18px] pr-3">
+                              <span className="text-[13.5px] font-semibold">
+                                {name}
+                              </span>
+                              {company && !company.is_active && (
+                                /* 公司已停用, once, on the thing that was
+                                   switched off — a live account under it still
+                                   cannot sign in (`requireCompanyUser` refuses
+                                   both). */
+                                <span className={`ml-2 ${BADGE_OFF}`}>
+                                  {t("companyInactive")}
+                                </span>
+                              )}
+                            </td>
+                            <td
+                              className="max-w-64 truncate px-3 py-2.5"
+                              // The full name survives the ellipsis under the
+                              // pointer.
+                              title={realName ?? undefined}
+                            >
+                              {realName ?? DASH}
+                            </td>
+                            <td className="px-3 py-2.5 font-num tabular-nums">
+                              {company?.codcli ?? DASH}
+                            </td>
+                          </>
                         ) : (
-                          t.rich("monthOrders", {
-                            count: month,
-                            n: (chunks) => (
-                              <b className="font-num text-[14px] font-semibold tabular-nums text-ink">
-                                {chunks}
-                              </b>
-                            ),
-                          })
+                          // The company half, blank on purpose: repeating the
+                          // code on every login row would make two logins read
+                          // as two restaurants. Empty, not omitted — the cells
+                          // keep the columns aligned.
+                          <td colSpan={3} className="py-2 pl-[18px]" />
                         )}
-                      </p>
-                    )}
-
-                    {company && (
-                      /* The company's own chip. 公司已停用 rather than a bare
-                         已停用 because that sentence used to be repeated on
-                         every account row underneath — a live account under a
-                         switched-off company still cannot sign in,
-                         `requireCompanyUser` refuses both — and this is the row
-                         it belongs on: said once, on the thing that was
-                         switched off. */
-                      <span
-                        className={company.is_active ? BADGE_ON : BADGE_OFF}
-                      >
-                        {company.is_active ? t("active") : t("companyInactive")}
-                      </span>
-                    )}
-                  </div>
-
-                  <ul>
-                    {group.accounts.map((row) => {
-                      const accountName = nameOf(row.id, row.display_name);
-                      return (
-                        <li
-                          key={row.id}
-                          className={`${ROW} ${ROW_INDENT} border-t border-[#F4F0EC]`}
-                        >
-                          {/* The truncating column holds only text: a badge
-                              inside it would be the first thing an ellipsis
-                              eats. `min-w-30` is the floor that keeps the row
-                              readable in a 390px drawer: without it a flex item
-                              at `min-w-0` gives up ALL its width to the badge
-                              and the button beside it and an address ellipsises
-                              to two characters. With it the controls wrap onto
-                              a second line instead, which is what the row is
-                              `flex-wrap` for. */}
-                          <div className="min-w-30 flex-1">
-                            <p className="truncate text-[13px]">
+                        <td className="max-w-72 px-3 py-2.5">
+                          <span className="block truncate">{email}</span>
+                          {/* The display name only when it adds something the
+                              code column has not already said. */}
+                          {accountName !== name && (
+                            <span className="block truncate text-xs text-muted">
                               {accountName}
-                            </p>
-                            <p className="truncate text-xs text-muted">
-                              {emails.get(row.id) ?? DASH}
-                            </p>
-                          </div>
-
-                          <span className={row.is_active ? BADGE_ON : BADGE_OFF}>
+                            </span>
+                          )}
+                        </td>
+                        {first ? (
+                          <>
+                            <td
+                              className="px-3 py-2.5 font-num text-[12.5px] text-ink-soft"
+                              title={t("tarcli")}
+                            >
+                              {company ? `T${company.tarcli}` : DASH}
+                            </td>
+                            <td className="px-3 py-2.5 text-right font-num font-semibold tabular-nums">
+                              {month ?? DASH}
+                            </td>
+                          </>
+                        ) : (
+                          <td colSpan={2} />
+                        )}
+                        <td className="px-3 py-2.5">
+                          <span
+                            className={row.is_active ? BADGE_ON : BADGE_OFF}
+                          >
                             {row.is_active ? t("active") : t("inactive")}
                           </span>
-
-                          <form action={setUserActive}>
-                            <input type="hidden" name="locale" value={locale} />
+                        </td>
+                        <td className="py-2.5 pl-3 pr-[18px] text-right">
+                          <form action={setUserActive} className="inline-block">
+                            <input
+                              type="hidden"
+                              name="locale"
+                              value={locale}
+                            />
                             <input type="hidden" name="kind" value="customer" />
                             <input type="hidden" name="user_id" value={row.id} />
                             <input
@@ -798,16 +788,15 @@ export default async function StaffUsersPage({
                               {row.is_active ? t("deactivate") : t("activate")}
                             </button>
                           </form>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                </li>
-              );
-            })}
-          </ul>
+                        </td>
+                      </tr>
+                    );
+                  });
+                })}
+              </tbody>
+            </table>
+          </div>
         )}
-
       </section>
 
       {/* Owner only — the whole 超级管理员 half of the page, form included. A
