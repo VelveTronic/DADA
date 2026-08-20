@@ -24,6 +24,7 @@ import {
 } from "@/lib/user-admin";
 import { CreateCustomerForm, type CompanyOption } from "./create-customer-form";
 import { CreateStaffForm } from "./create-staff-form";
+import { CreateUserDialog } from "./create-user-dialog";
 
 export const dynamic = "force-dynamic";
 
@@ -513,6 +514,57 @@ export default async function StaffUsersPage({
         </p>
       )}
 
+      {/* ＋新建用户, at the TOP, opening the modal that now holds both create
+          forms. The mockup drew this button and the first build refused it —
+          "a button whose only honest behaviour is to scroll down is a button
+          that lies" — because the forms lived at the card feet. The owner then
+          worked the page with thirty-three restaurants in it (2026-08-20) and
+          the feet were a scroll marathon; the modal is what makes the button
+          honest: the form comes to it. The forms themselves are unchanged and
+          server-composed here; the dialog only chooses between them. */}
+      <div className="mt-[18px] flex justify-end">
+        <CreateUserDialog
+          labels={{
+            trigger: t("createUser"),
+            title: t("createUser"),
+            typeCustomer: t("createCustomer"),
+            typeStaff: t("createStaff"),
+            close: t("closeDialog"),
+          }}
+          customerForm={
+            <CreateCustomerForm
+              locale={locale}
+              companies={companies}
+              errorLabels={errorLabels}
+              labels={{
+                ...formLabels,
+                company: t("company"),
+                companyExisting: t("companyExisting"),
+                companyExistingHint: t("companyExistingHint"),
+                companyNew: t("companyNew"),
+                companyNewHint: t("companyNewHint"),
+                companyPick: t("companyPick"),
+                companyName: t("companyName"),
+                codcli: t("codcli"),
+                codcliHint: t("codcliHint"),
+                tarcli: t("tarcli"),
+                noCompanies: t("noCompanies"),
+              }}
+            />
+          }
+          staffForm={
+            owner ? (
+              <CreateStaffForm
+                locale={locale}
+                labels={{ ...formLabels, role: t("role") }}
+                roleLabels={roleLabels}
+                errorLabels={errorLabels}
+              />
+            ) : undefined
+          }
+        />
+      </div>
+
       {/* ONE card holding three cells with internal rules, per the mockup's own
           `repeat(3,1fr)` strip (`:383-390`); `overflow-hidden` is what keeps
           those rules inside the 12px radius. Stacked below `sm`, where three
@@ -530,7 +582,7 @@ export default async function StaffUsersPage({
           too. 已启用账号 has that slot instead: it is the other number this page
           is about, and it is one this portal can actually answer. */}
       <div
-        className={`${ADMIN_CARD} mt-[18px] grid grid-cols-1 overflow-hidden sm:grid-cols-3`}
+        className={`${ADMIN_CARD} mt-3 grid grid-cols-1 overflow-hidden sm:grid-cols-3`}
       >
         {stats.map((stat, index) => (
           <div
@@ -568,15 +620,17 @@ export default async function StaffUsersPage({
           under each restaurant instead of a name in a cell; 结算 (`:414`) —
           月结/现结 is not recorded anywhere; and 代下单 / 详情 (`:416-419`) —
           neither exists. Its ＋新建客户 button (`:379`; the 导出名单 to its left
-          is `:378`) is not drawn either: the create form at the foot of this
-          card IS that action, and a button whose only honest behaviour is to
-          scroll down to it is a button that lies about being one.
+          is `:378`) IS drawn now, as the page-top ＋新建用户 — the first build
+          refused it while the form lived at this card's foot ("a button whose
+          only honest behaviour is to scroll down lies about being one"), and
+          the modal is what changed the verdict: the form comes to the button.
 
           This is an ACCOUNT list grouped by restaurant, not a company list: it
           is built from `portal_users`, so a company with no account yet never
-          appears here at all. Those are exactly the companies the create form's
-          「选择已有公司」 select below offers — that select reads `companies`
-          directly, which is where a restaurant with no login is visible. */}
+          appears here at all. Those are exactly the companies the ＋新建用户
+          dialog's 「挂到已有公司」 select offers — that select reads
+          `companies` directly, which is where a restaurant with no login is
+          visible. */}
       <section className={`${ADMIN_CARD} mt-[18px]`}>
         <h2 className="border-b border-[#EDE9E5] px-[18px] py-4 text-[15px] font-bold">
           {/* 客户账号 / «Cuentas de cliente», unchanged. The PAGE is now titled
@@ -754,24 +808,6 @@ export default async function StaffUsersPage({
           </ul>
         )}
 
-        <div className="border-t border-[#EDE9E5] px-[18px] py-[18px]">
-          <h3 className="text-[13.5px] font-semibold">{t("createCustomer")}</h3>
-          <CreateCustomerForm
-            locale={locale}
-            companies={companies}
-            errorLabels={errorLabels}
-            labels={{
-              ...formLabels,
-              company: t("company"),
-              companyExisting: t("companyExisting"),
-              companyNew: t("companyNew"),
-              companyName: t("companyName"),
-              codcli: t("codcli"),
-              tarcli: t("tarcli"),
-              noCompanies: t("noCompanies"),
-            }}
-          />
-        </div>
       </section>
 
       {/* Owner only — the whole 超级管理员 half of the page, form included. A
@@ -885,15 +921,6 @@ export default async function StaffUsersPage({
             </ul>
           )}
 
-          <div className="border-t border-[#EDE9E5] px-[18px] py-[18px]">
-            <h3 className="text-[13.5px] font-semibold">{t("createStaff")}</h3>
-            <CreateStaffForm
-              locale={locale}
-              labels={{ ...formLabels, role: t("role") }}
-              roleLabels={roleLabels}
-              errorLabels={errorLabels}
-            />
-          </div>
         </section>
       )}
     </StaffShell>

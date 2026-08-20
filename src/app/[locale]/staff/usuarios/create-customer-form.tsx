@@ -25,7 +25,7 @@ export type CompanyOption = { id: string; name: string; codcli: number | null };
  * without the value leaving the DOM.
  *
  * The two branches are mutually exclusive IN THE DOM, not merely visually: the
- * hidden `company_choice` says which one the staff member chose and the other
+ * `company_choice` radios say which one the staff member chose and the other
  * branch's inputs are unmounted, so a form that sends both — which
  * `validateNewCustomer` refuses as BAD_COMPANY rather than guessing — cannot be
  * produced by using the page normally.
@@ -65,9 +65,13 @@ export function CreateCustomerForm({
     displayName: string;
     company: string;
     companyExisting: string;
+    companyExistingHint: string;
     companyNew: string;
+    companyNewHint: string;
+    companyPick: string;
     companyName: string;
     codcli: string;
+    codcliHint: string;
     tarcli: string;
     submit: string;
     noCompanies: string;
@@ -93,7 +97,6 @@ export function CreateCustomerForm({
   return (
     <form action={formAction} className="mt-3 grid gap-3 sm:grid-cols-2">
       <input type="hidden" name="locale" value={locale} />
-      <input type="hidden" name="company_choice" value={choice} />
 
       <label className="flex flex-col gap-1 text-sm">
         {labels.email}
@@ -133,27 +136,63 @@ export function CreateCustomerForm({
         />
       </label>
 
-      <label className="flex flex-col gap-1 text-sm">
-        {labels.company}
-        {/* No `name`: the hidden field above is what the action reads, so this
-            control can stay a pure piece of UI state. */}
-        <select
-          value={choice}
-          onChange={(event) =>
-            setChoice(event.target.value === "new" ? "new" : "existing")
-          }
-          className={FIELD}
-        >
-          <option value="existing" disabled={companies.length === 0}>
-            {labels.companyExisting}
-          </option>
-          <option value="new">{labels.companyNew}</option>
-        </select>
-      </label>
+      {/* The two modes as VISIBLE radio cards, not a dropdown. The dropdown
+          version hid 新建公司 behind a closed select whose first option read
+          like a placeholder — the owner stood in front of this form on
+          2026-08-20 and could not find where the Wingest customer number goes,
+          which for a mode switch is the whole verdict. Both cards now state
+          their meaning up front, the new-company card names the codcli
+          capability on its face, and the radios ARE the `company_choice`
+          field (the hidden input is gone — a checked radio submits its own
+          value). Branch exclusivity in the DOM is unchanged. */}
+      <fieldset className="sm:col-span-2">
+        <legend className="text-sm">{labels.company}</legend>
+        <div className="mt-1 grid gap-2 sm:grid-cols-2">
+          {(
+            [
+              {
+                mode: "existing" as const,
+                title: labels.companyExisting,
+                hint: labels.companyExistingHint,
+                disabled: companies.length === 0,
+              },
+              {
+                mode: "new" as const,
+                title: labels.companyNew,
+                hint: labels.companyNewHint,
+                disabled: false,
+              },
+            ]
+          ).map(({ mode, title, hint, disabled }) => (
+            <label
+              key={mode}
+              className={`flex cursor-pointer flex-col gap-0.5 rounded-[10px] border p-3 transition-colors ${
+                choice === mode
+                  ? "border-brand bg-brand-soft/40"
+                  : "border-border-strong hover:border-brand"
+              } ${disabled ? "cursor-not-allowed opacity-50" : ""}`}
+            >
+              <span className="flex items-center gap-2 text-sm font-medium">
+                <input
+                  type="radio"
+                  name="company_choice"
+                  value={mode}
+                  checked={choice === mode}
+                  disabled={disabled}
+                  onChange={() => setChoice(mode)}
+                  className="size-4 accent-[#E0231C]"
+                />
+                {title}
+              </span>
+              <span className="pl-6 text-xs text-muted">{hint}</span>
+            </label>
+          ))}
+        </div>
+      </fieldset>
 
       {choice === "existing" ? (
         <label className="flex flex-col gap-1 text-sm sm:col-span-2">
-          {labels.companyExisting}
+          {labels.companyPick}
           {/* The `key` is what makes the restore work on a SELECT. React applies
               a `defaultValue` to a select's options when it MOUNTS and never
               again — an uncontrolled select whose defaultValue prop changes is
@@ -207,6 +246,7 @@ export function CreateCustomerForm({
                 defaultValue={kept?.codcli ?? ""}
                 className={FIELD}
               />
+              <span className="text-xs text-muted">{labels.codcliHint}</span>
             </label>
             <label className="flex flex-col gap-1 text-sm">
               {labels.tarcli}
