@@ -101,12 +101,14 @@
 
 **Files:** modify `src/app/[locale]/staff/page.tsx`, `src/lib/orders.ts` (+test) if a helper is needed, `messages/zh.json`, `messages/es.json`.
 
-- [ ] KPI strip (4 cells, `font-num text-[34px]`): 今日订单 (created_at ≥ Madrid today — reuse `madridDay`/month helper family; add `madridDayStartIso` to orders.ts WITH tests — mind the DST flip days: unlike the month helper, the last Sundays of March/October ARE candidate days, so the noon-probe argument does not transfer; the tests must pin 2026-03-29 and 2026-10-25), 待确认 (submitted), 进行中 (confirmed+processing+injected), 停售商品 (products is_available=false — the staff word, decision 2). All `head:true` counts through `readCount`, one perf.step, null → em dash never 0; NO mockup deltas/+3 (no historical data); KPI3 gets an honest breakdown sub-line 已确认 {a} · 处理中 {b} · 已注入 {c}. Home title becomes 概览/Resumen with a Madrid-date sub-line (mockup 今日概览 over-claims: only KPI1 is day-scoped; 截单时间 is unbuilt — OUT).
-- [ ] 状态漏斗 card: the current non-terminal pipeline — bars for submitted/confirmed/processing/injected(+bridge_failed in red) sized relative to max, `font-num` counts; colors per the token-map ramp with the one-off note. Pure percentage math in a lib helper + test if non-trivial.
-- [ ] 最近订单 card: 6 latest orders (number, company, kinds?=skip if it needs the lines read — company+status+time only; 全部订单 → link to queue), real chips.
-- [ ] 停售商品 card (wash `#FFF8F7`/`#FBE4E2` per mockup — the two red-wash one-offs, noted): products is_available=false, name+codart, first 6, 去处理 → productos. 待处理事项 card: bridge_failed orders (real, each linking the queue) + oldest submitted age; empty state 暂无待办 (the items are backlog, not day-scoped — 今日 would lie).
-- [ ] The bridge heartbeat card STAYS (restyled to the admin card look, TONE_CLASS intact).
-- [ ] Gate; fixture (counts {24,5,8,6} and all-zero; funnel with zero total); commit `feat(staff): dashboard — real KPIs, pipeline funnel, alerts, heartbeat kept`.
+- [x] KPI strip (4 cells, `font-num text-[34px]`): 今日订单 (created_at ≥ Madrid today — reuse `madridDay`/month helper family; add `madridDayStartIso` to orders.ts WITH tests — mind the DST flip days: unlike the month helper, the last Sundays of March/October ARE candidate days, so the noon-probe argument does not transfer; the tests must pin 2026-03-29 and 2026-10-25), 待确认 (submitted), 进行中 (confirmed+processing+injected), 停售商品 (products is_available=false — the staff word, decision 2). All `head:true` counts through `readCount`, one perf.step, null → em dash never 0; NO mockup deltas/+3 (no historical data); KPI3 gets an honest breakdown sub-line 已确认 {a} · 处理中 {b} · 已注入 {c}. Home title becomes 概览/Resumen with a Madrid-date sub-line (mockup 今日概览 over-claims: only KPI1 is day-scoped; 截单时间 is unbuilt — OUT).
+- [x] 状态漏斗 card: the current non-terminal pipeline — bars for submitted/confirmed/processing/injected(+bridge_failed in red) sized relative to max, `font-num` counts; colors per the token-map ramp with the one-off note. Pure percentage math in a lib helper + test if non-trivial.
+- [x] 最近订单 card: 6 latest orders (number, company, kinds?=skip if it needs the lines read — company+status+time only; 全部订单 → link to queue), real chips.
+- [x] 停售商品 card (wash `#FFF8F7`/`#FBE4E2` per mockup — the two red-wash one-offs, noted): products is_available=false, name+codart, first 6, 去处理 → productos. 待处理事项 card: bridge_failed orders (real, each linking the queue) + oldest submitted age; empty state 暂无待办 (the items are backlog, not day-scoped — 今日 would lie).
+- [x] The bridge heartbeat card STAYS (restyled to the admin card look, TONE_CLASS intact).
+- [x] Gate; fixture (counts {24,5,8,6} and all-zero; funnel with zero total); commit `feat(staff): dashboard — real KPIs, pipeline funnel, alerts, heartbeat kept`.
+
+> Shipped: `eddaa8a` + fix round `78ae4e8` (DST-proof madridDayStartIso brute-forced over 17,520 hourly probes; counted todos footer; true RLS prose with the disclosed bridge_status exception; duration ages — no 昨天/ayer in age columns; 1031 tests / 30 files).
 
 ### Task A6: Clients page — mockup look on /staff/usuarios
 
@@ -127,6 +129,7 @@
 
 - [ ] Full gate from clean; cross-task final review (whole Plan-14 range): token one-off ledger (#FCFBFA/#EDE9E5/funnel ramp all noted), AA sweep on the new admin text, i18n parity + closed lists, security gates (supabase/ diff EMPTY, no new RPC, package.json untouched), staff mobile drawer intact, categories comparator single-source (catalog imports the lib).
 - [ ] Recorded follow-ups from A1's round to close or hand off: `/cuenta`'s four head-count logs are blind the same way the shell's were (no status on an empty-body error — apply shell-counts' F2 fix there, or record in HANDOFF); accepted states to leave alone: dual brand-link names (sidebar «DADA» vs phone-bar 员工后台, both truthful) and the usuarios crumb-客户/title-用户管理 transient that A6 closes.
+- [ ] A3-A5 ledger: converge the TD/TH header/cell constants now duplicated across productos/pedidos/staff-home into ui.ts (byte-identical strings); normalise `profile.customerNo` es «Nº» → «N.º» to match `staff.colOrder`; the cache() count unification now has THREE readers (shell + queue chips + dashboard — same submitted/bridge_failed/paused predicates, up to 3 duplicate rounds per load) and rises in priority accordingly.
 - [ ] Owner to-dos recorded (live walkthrough incl. category reorder against the real rail, staff-role matrix by logging in as each role).
 - [ ] HANDOFF.md updated; push.
 
