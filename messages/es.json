@@ -221,7 +221,7 @@
       "ordersWithCount": "Pedidos, {n, plural, one {# pendiente} other {# pendientes}}"
     },
     "ordersQueue": "Cola de confirmación de pedidos",
-    "queueFlow": "El cliente envía el pedido → confirmación → inyección en el ERP → albarán",
+    "queueFlow": "Pedido del cliente → confirmación → inyección en el ERP → albarán",
     "tabSubmitted": "Pendientes",
     "tabConfirmed": "Confirmados",
     "tabBridgeFailed": "Error de inyección",

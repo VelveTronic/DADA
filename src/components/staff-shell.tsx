@@ -125,6 +125,15 @@ export async function StaffShell({
   // already resolved — the price of real counts in the nav, taken deliberately
   // over polling or over a number that is only refreshed by luck.
   //
+  // On ONE page these predicates have a second reader: `/staff/pedidos` counts
+  // `submitted` and `bridge_failed` again for its own tab chips
+  // (`staff/pedidos/page.tsx`, the `countQuery` note). Same request, separate
+  // round — the queue's counts go out beside its guard, these go out after the
+  // page has rendered — so the sidebar badge and the chip beside it can differ
+  // by the milliseconds between the two. Both figures are real; neither is
+  // stale by design. Unifying them behind one `cache()`d read is a recorded
+  // follow-up, deliberately not done here.
+  //
   // Its own `perfRun` for the same reason: the page's run called `end()` before
   // it rendered this shell, so a `perfStep` would be recorded into a line that
   // has already been printed (see the cache-slot note in `lib/perf.ts`). One
