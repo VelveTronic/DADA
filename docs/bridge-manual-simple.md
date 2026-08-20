@@ -77,9 +77,71 @@ LEASE_SECONDS=300
 
 三条铁律：**① 密钥不截图、不外传、不存副本；② `WINGEST_SERVER` 必须写 `SERVER,50352` 这种「逗号+端口」格式，绝不要写反斜杠实例名；③ `WINGEST_DB=wgdemo` 就是生产库**（想先在沙盒试，改成 `wg_test` 即可，程序连上后会自己核对库名，连错库会拒绝干活而不是写错地方）。
 
-### 第 4 步【SERVER】给 SQL 账号授权
+### 第 4 步【SERVER】给桥接的数据库账号"办工作证"
 
-在 SSMS 里连上数据库，**完整执行技术版 §⑤ 的授权脚本**（对 `wgdemo` 库，给 `dada_bridge` 只读商品/客户/批次 + 只写 Pedido 三张表和计数器，最后收回 db_owner）。执行完跑脚本末尾的核对查询，确认权限列表和脚本一致。
+**这一步在做什么（一句话）**：数据库里有一个专给桥接用的账号，叫 `dada_bridge`。现在给它发一张权限刚刚好的"工作证"——只能**读**商品、客户、库存资料，只能**新增**订单，其他什么都碰不了、删不了。整个过程就是复制粘贴一段现成的文字，不需要懂数据库。
+
+**4a. 打开数据库管理工具并连接**
+
+在 SERVER 桌面或开始菜单找 **SQL Server Management Studio**（图标是一个黄色扳手+圆柱，简称 SSMS）打开。弹出的连接窗口里：
+
+| 栏位 | 填什么 |
+| --- | --- |
+| Server name / 服务器名称 | `localhost,50352` |
+| Authentication / 身份验证 | Windows Authentication（Windows 身份验证，不用输密码） |
+
+点 **Connect / 连接**。（找不到 SSMS 这个程序？停下，喊技术支持远程做，这一步总共 5 分钟。）
+
+**4b. 粘贴脚本并运行**
+
+点左上角 **New Query / 新建查询**，出现一个空白编辑区。把下面整块**从第一行到最后一行完整复制**进去，然后按键盘 **F5**（或点工具栏的 Execute / 执行）：
+
+```sql
+USE wgdemo;
+GO
+
+-- 账号进入 wgdemo 库（已存在则跳过）
+IF NOT EXISTS (SELECT 1 FROM sys.database_principals WHERE name = 'dada_bridge')
+    CREATE USER dada_bridge FOR LOGIN dada_bridge;
+GO
+
+-- 只读：商品、客户、库存批次、税率、操作员、单据
+GRANT SELECT ON dbo.clientes      TO dada_bridge;
+GRANT SELECT ON dbo.articulo      TO dada_bridge;
+GRANT SELECT ON dbo.stolot        TO dada_bridge;
+GRANT SELECT ON dbo.tipivaar      TO dada_bridge;
+GRANT SELECT ON dbo.iva           TO dada_bridge;
+GRANT SELECT ON dbo.susuario      TO dada_bridge;
+GRANT SELECT ON dbo.albfacca      TO dada_bridge;
+GRANT SELECT ON dbo.albfacli      TO dada_bridge;
+GRANT SELECT ON dbo.pedclicah     TO dada_bridge;
+
+-- 读 + 新增：订单的三张表（改不了、删不了已有内容）
+GRANT SELECT, INSERT ON dbo.pedclica     TO dada_bridge;
+GRANT SELECT, INSERT ON dbo.pedclili     TO dada_bridge;
+GRANT SELECT, INSERT ON dbo.pedclica_adi TO dada_bridge;
+
+-- 读 + 更新：单号计数器（只会 +1）
+GRANT SELECT, UPDATE ON dbo.newcontador  TO dada_bridge;
+GO
+
+-- 收回以前测试阶段图省事给的大权限（本来就没有的话自动跳过）
+IF IS_ROLEMEMBER('db_owner', 'dada_bridge') = 1
+    ALTER ROLE db_owner DROP MEMBER dada_bridge;
+GO
+
+-- 核对：打印这张"工作证"上的全部权限
+SELECT o.name AS objeto, p.permission_name AS permiso
+FROM sys.database_permissions p
+JOIN sys.objects o ON o.object_id = p.major_id
+WHERE USER_NAME(p.grantee_principal_id) = 'dada_bridge'
+ORDER BY o.name, p.permission_name;
+```
+
+**4c. 看结果，两个判据**
+
+- 运行后下方出现一张小表格，**恰好 17 行**——每行是一条权限，最右列只会出现 `SELECT` / `INSERT` / `UPDATE` 三种字样。是 17 行就算通过，截个图发给技术支持存档。
+- 如果出现**红色错误文字**：什么都不要改、不要重试，把整个窗口截图发给技术支持。这个脚本只发权限，不动任何数据，跑一半也不会弄坏东西。
 
 ### 第 5 步【SERVER】手动跑一轮验证
 
