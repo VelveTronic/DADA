@@ -1,7 +1,9 @@
 import type { Locale } from "next-intl";
 import { getTranslations, setRequestLocale } from "next-intl/server";
+import Link from "next/link";
+import { OrderStatusBadge } from "@/components/order-status-badge";
 import { StaffShell } from "@/components/staff-shell";
-import { CARD } from "@/components/ui";
+import { ADMIN_CARD } from "@/components/ui";
 import { beginStaff, finishStaff } from "@/lib/auth/guards";
 import {
   bridgeCountLabelKey,
@@ -12,7 +14,18 @@ import {
   type BridgeJob,
   type BridgeTone,
 } from "@/lib/bridge-status";
+import { localizedName } from "@/lib/catalog/display";
+import {
+  formatOrderDate,
+  funnelWidth,
+  madridDayStartIso,
+  type OrderStatus,
+} from "@/lib/orders";
 import { perfRun } from "@/lib/perf";
+import { type CountResult, readCount } from "@/lib/shell-counts";
+import type { Database } from "@/lib/supabase/database.types";
+import type { PublicOrder } from "@/lib/supabase/public.types";
+import { PUBLIC_ORDER_COLUMNS } from "@/lib/supabase/public.types";
 
 export const dynamic = "force-dynamic";
 
@@ -29,6 +42,111 @@ const TONE_CLASS: Record<BridgeTone, string> = {
   bad: "bg-red-100 text-red-800",
 };
 
+/**
+ * How much of each list this page draws. Six recent orders is the mockup's own
+ * count (`docs/design/dada-staff-admin.dc.html:139`) and six paused products is
+ * its alert card's (:167); the failure list is FIVE because every one of its
+ * rows is a job somebody has to do by hand, and a to-do card that scrolls is a
+ * to-do card nobody finishes — the sidebar's 待办 figure and the funnel's own
+ * bridge_failed row both carry the real total beside it.
+ */
+const RECENT_LIMIT = 6;
+const PAUSED_LIMIT = 6;
+const FAILED_LIMIT = 5;
+
+/**
+ * The funnel's colour ramp, in pipeline order —
+ * `docs/design/dada-staff-admin.dc.html:585-590`: `#E0231C`, `#F0806A`,
+ * `#C4B7AC`, `#1C1917`, red draining to ink as an order moves down the machine.
+ *
+ * Three of its five stops are values the palette ALREADY carries, so they are
+ * named rather than retyped: `#E0231C` is `--color-brand`, `#1C1917` is
+ * `--color-ink` and the alarm bar's `#B31710` is `--color-brand-ink`
+ * (`globals.css:76-81`). Only the two middle shades have no token — a washed
+ * coral and a warm stone that exist nowhere else in the portal — and those stay
+ * literal under the standard "not a token because" rule: they are one admin
+ * chart's ramp, not palette entries a customer screen may reach for.
+ *
+ * The bars are DECORATION beside the figures — every row prints its own count in
+ * `font-num` to the right of the track — so no contrast ratio is claimed for
+ * them; the numbers carry the data.
+ */
+const FUNNEL_STAGES: readonly { status: OrderStatus; bar: string }[] = [
+  { status: "submitted", bar: "bg-brand" },
+  { status: "confirmed", bar: "bg-[#F0806A]" },
+  { status: "processing", bar: "bg-[#C4B7AC]" },
+  { status: "injected", bar: "bg-ink" },
+];
+
+/**
+ * The alarm row, drawn under a rule and apart from the four above it:
+ * `bridge_failed` is not a stage an order passes THROUGH, it is where one stops.
+ */
+const FUNNEL_FAILED: { status: OrderStatus; bar: string } = {
+  status: "bridge_failed",
+  bar: "bg-brand-ink",
+};
+
+/** The mini table's header cell, at the house's admin-table metrics. */
+const TH = "h-10 px-3 text-left align-middle font-medium";
+const TD = "px-3 py-2.5 align-middle";
+
+/**
+ * The KPI strip's internal hairlines, per cell, at both of its layouts.
+ *
+ * `divide-x` alone will not do it. Tailwind puts the rule on every child but the
+ * LAST, so in the mockup's four-across it is right — three rules between four
+ * cells — but in the two-across this page falls back to below `lg` it borders
+ * cells 0, 1 and 2, and cell 1 sits at the card's own right edge: a stray
+ * hairline doubling the card border. Naming each cell's rules instead draws the
+ * 2×2 cross the mobile layout actually wants (a vertical rule between the
+ * columns, a horizontal one between the rows) and the mockup's three verticals
+ * at `lg`.
+ */
+const KPI_RULES = [
+  "",
+  "border-l lg:border-l",
+  "border-t lg:border-t-0 lg:border-l",
+  "border-l border-t lg:border-t-0",
+];
+
+/**
+ * One dashboard count, or `null` when the read cannot be trusted to have one.
+ *
+ * The decision is `readCount` in `lib/shell-counts.ts`, pure and under test;
+ * this is the logging half, and it is the shape `/staff/pedidos` logs its tab
+ * counts in (`pedidos/page.tsx:156-165`) down to the wording — both failure
+ * shapes printed, because a `head: true` request that fails quietly is the
+ * easiest kind to miss: a HEAD response has no body, so postgrest-js has no
+ * error JSON to parse and `error.message` would be `""` even when it does fill
+ * one in. The status is printed too, and a result with no error at all is named
+ * as what it is.
+ *
+ * `null` reaches the screen as an em dash, never as 0. A count that did not
+ * arrive must not be able to tell a staff member there is nothing to do.
+ */
+function readHomeCount(name: string, result: CountResult): number | null {
+  const value = readCount(result);
+  if (value === null) {
+    console.error(
+      `staff home ${name} count (status ${result.status}):`,
+      result.error ?? "no content-range on the response",
+    );
+  }
+  return value;
+}
+
+/** The recent-orders row: the customer-readable columns plus the restaurant. */
+type RecentOrder = PublicOrder & {
+  companies: { name: string; codcli: number | null } | null;
+};
+
+/** A paused article, as the alert card draws it. */
+type PausedProduct = Pick<
+  Database["public"]["Tables"]["products"]["Row"],
+  "id" | "codart" | "name"
+>;
+
 export default async function StaffHome({
   params,
 }: {
@@ -39,37 +157,292 @@ export default async function StaffHome({
   const perf = perfRun(`/${locale}/staff`);
   const { supabase, pendingStaff } = await beginStaff(locale);
   const t = await getTranslations("staff");
+  // The status vocabulary is the customer's, reused rather than duplicated into
+  // the staff namespace — the funnel's row labels and the 进行中 breakdown are
+  // the same seven words the badge prints.
+  const tOrders = await getTranslations("orders");
 
-  // The grid of link cards that used to open this page is gone: the sidebar now
-  // carries those four destinations on every staff screen, role-gated by the
-  // same two predicates the cards used, and a home page whose whole content is a
-  // second copy of the nav beside it is a home page with nothing on it. What is
-  // left is the one thing only this page has ever shown — whether the bridge is
-  // running.
+  /**
+   * One `head: true` count on one status. No row comes back, only the
+   * `Content-Range` header — the idiom the shell and the queue both read their
+   * figures with. The select list names one real column: `orders` is
+   * column-revoked (`staff_note`) and a `*` there 403s the whole query.
+   *
+   * These predicates now have THREE readers. `StaffShell` counts `submitted`,
+   * `bridge_failed` and `products.is_available = false` for the sidebar's 待办
+   * block and its 订单 badge (`staff-shell.tsx:155-172`); `/staff/pedidos`
+   * counts `submitted`, `confirmed` and `bridge_failed` again for its tab chips
+   * (`pedidos/page.tsx:244-249`); and this page counts six of them for the KPI
+   * strip and the funnel. Same request, separate rounds — the shell renders
+   * after this page's reads have resolved — so the sidebar figure and the KPI
+   * beside it can differ by the milliseconds between them. Both are real;
+   * neither is stale by design. Unifying them behind one `cache()`d read stays
+   * the recorded follow-up it was in A4, deliberately not done here.
+   */
+  const orderCount = (status: OrderStatus) =>
+    supabase
+      .from("orders")
+      .select("id", { count: "exact", head: true })
+      .eq("status", status);
+
+  // Every read on this page is a SESSION read under staff RLS — `orders_read`
+  // and `products_read` open both tables to staff and to nobody else — so all of
+  // them go out BESIDE the guard rather than behind it: a caller who turns out
+  // not to be staff reads their own restaurant's orders at worst, and
+  // `finishStaff` redirects out of this `Promise.all` before a row is rendered.
+  // The same argument the queue and the categories page already make.
   //
-  // The ordinary session client, not the service-role one: `bridge_status`
-  // grants `authenticated` a SELECT that RLS gates to staff, which is exactly
-  // what this caller is. The admin client would also work and would cost more
-  // than it buys — it throws when `SUPABASE_SERVICE_ROLE_KEY` is absent, and a
-  // status card must never be the reason the whole staff home 500s and takes
-  // the links to the order queue with it.
+  // `bridge_status` is the same shape (`bridge_status_staff_read`), and it stays
+  // on the ordinary session client rather than the admin one for the reason it
+  // always has: the admin client throws when `SUPABASE_SERVICE_ROLE_KEY` is
+  // absent, and a status card must never be the reason the whole staff home
+  // 500s and takes the dashboard with it.
   //
-  // …and being the session client is also why it may go out BESIDE the staff
-  // profile row instead of behind it: `bridge_status_staff_read` is the same
-  // gate the guard is about, so a caller who turns out not to be staff gets an
-  // empty result and a redirect, never a row.
-  const [staffUser, { data: heartbeats, error }] = await Promise.all([
+  // The seven counts ride under ONE step because they go out together; each list
+  // keeps its own step so a slow one is visible in the `[perf]` line by name.
+  const [
+    staffUser,
+    { data: heartbeats, error },
+    countResults,
+    recentResult,
+    pausedResult,
+    failedResult,
+    oldestResult,
+  ] = await Promise.all([
     finishStaff(pendingStaff, locale),
     perf.step(
       "bridge",
       supabase.from("bridge_status").select("job, last_run_at, ok, detail"),
     ),
+    perf.step(
+      "counts",
+      Promise.all([
+        // TODAY, on Madrid's calendar and not on UTC's — see
+        // `madridDayStartIso`, whose whole difficulty is the two days a year
+        // when the two answers differ by an hour. This is the helper's only
+        // call site; the offset arithmetic is what needed the unit test, not
+        // the query.
+        supabase
+          .from("orders")
+          .select("id", { count: "exact", head: true })
+          .gte("created_at", madridDayStartIso(new Date())),
+        orderCount("submitted"),
+        orderCount("confirmed"),
+        orderCount("processing"),
+        orderCount("injected"),
+        orderCount("bridge_failed"),
+        supabase
+          .from("products")
+          .select("id", { count: "exact", head: true })
+          .eq("is_available", false),
+      ]),
+    ),
+    perf.step(
+      "recent",
+      supabase
+        .from("orders")
+        .select(`${PUBLIC_ORDER_COLUMNS}, companies:company_id(name, codcli)`)
+        .order("created_at", { ascending: false })
+        .limit(RECENT_LIMIT),
+    ),
+    // `is_available`, `codart` and `name` are all authenticated-granted columns
+    // (only the six `price_N_cents` are revoked), so this is a session read like
+    // the rest — the same table the shell already COUNTS on the session client.
+    perf.step(
+      "paused",
+      supabase
+        .from("products")
+        .select("id, codart, name")
+        .eq("is_available", false)
+        .order("codart")
+        .limit(PAUSED_LIMIT),
+    ),
+    // OLDEST first, both here and below: a to-do list is worked from the end
+    // that has been waiting longest.
+    perf.step(
+      "failed",
+      supabase
+        .from("orders")
+        .select(PUBLIC_ORDER_COLUMNS)
+        .eq("status", "bridge_failed")
+        .order("created_at", { ascending: true })
+        .limit(FAILED_LIMIT),
+    ),
+    perf.step(
+      "oldestSubmitted",
+      supabase
+        .from("orders")
+        .select("created_at")
+        .eq("status", "submitted")
+        .order("created_at", { ascending: true })
+        .limit(1),
+    ),
   ]);
   perf.end();
-  // A failed query renders the same "nothing has ever reported" state as an
-  // empty table. It is the honest thing to show — we know nothing either way —
-  // and the reason lands in the server log rather than on a staff screen.
+
+  // A failed bridge read renders the same "nothing has ever reported" state as
+  // an empty table. It is the honest thing to show — we know nothing either way
+  // — and the reason lands in the server log rather than on a staff screen.
   if (error) console.error("staff bridge_status query:", error);
+
+  // The three lists take the same position, and on the two ALERT cards it is
+  // worth saying out loud: a list that came back empty because the query failed
+  // is indistinguishable, on screen, from a list that is genuinely empty — 无停售商品
+  // and 暂无待办 are what both look like. The COUNTS beside them are the honest
+  // signal, and those dash on failure rather than reading 0; the reason lands in
+  // the log below.
+  if (recentResult.error)
+    console.error("staff home recent orders query:", recentResult.error);
+  if (pausedResult.error)
+    console.error("staff home paused products query:", pausedResult.error);
+  if (failedResult.error)
+    console.error("staff home bridge failures query:", failedResult.error);
+  if (oldestResult.error)
+    console.error("staff home oldest submitted query:", oldestResult.error);
+
+  const recent: RecentOrder[] = recentResult.data ?? [];
+  const paused: PausedProduct[] = pausedResult.data ?? [];
+  const failed: PublicOrder[] = failedResult.data ?? [];
+  const oldestSubmittedAt: string | null =
+    oldestResult.data?.[0]?.created_at ?? null;
+
+  const [
+    todayResult,
+    submittedResult,
+    confirmedResult,
+    processingResult,
+    injectedResult,
+    bridgeFailedResult,
+    pausedCountResult,
+  ] = countResults;
+  const todayCount = readHomeCount("today", todayResult);
+  const submittedCount = readHomeCount("submitted", submittedResult);
+  const confirmedCount = readHomeCount("confirmed", confirmedResult);
+  const processingCount = readHomeCount("processing", processingResult);
+  const injectedCount = readHomeCount("injected", injectedResult);
+  const bridgeFailedCount = readHomeCount("bridge failed", bridgeFailedResult);
+  const pausedCount = readHomeCount("paused", pausedCountResult);
+
+  // ── everything below this line is derivation and markup ───────────────────
+
+  /** What a figure that did not arrive looks like, everywhere on this page. */
+  const DASH = "—";
+
+  /**
+   * 进行中: the three states between confirmation and the delivery note. It is
+   * `null` when ANY of the three is — a sum with a hole in it is not a sum, and
+   * "12 in flight" computed from two counts and a failure would be a smaller
+   * number stated with the same confidence as a whole one.
+   */
+  const activeCount =
+    confirmedCount === null || processingCount === null || injectedCount === null
+      ? null
+      : confirmedCount + processingCount + injectedCount;
+
+  /**
+   * The five bars, each carrying its own count. Keyed by status rather than
+   * zipped by position so the ramp above and the figures here cannot drift apart
+   * — a row whose colour and number came from two different lists is the one bug
+   * this card could have that nobody would see.
+   */
+  const funnelCounts: Record<string, number | null> = {
+    submitted: submittedCount,
+    confirmed: confirmedCount,
+    processing: processingCount,
+    injected: injectedCount,
+    bridge_failed: bridgeFailedCount,
+  };
+  const funnel = [...FUNNEL_STAGES, FUNNEL_FAILED].map((stage) => ({
+    ...stage,
+    count: funnelCounts[stage.status] ?? null,
+  }));
+  /**
+   * The longest bar. `Math.max(0, …)` rather than `Math.max(…)` so an all-null
+   * funnel is 0 and not `-Infinity`; `funnelWidth` turns a zero max into an
+   * empty track for every row (its own table pins that).
+   */
+  const funnelMax = Math.max(0, ...funnel.map((row) => row.count ?? 0));
+  /**
+   * 共 {n} 单 in the funnel header, or NO header figure at all when one of the
+   * five counts is missing. There is no em-dash option here: `queueTotal` is an
+   * ICU plural in Spanish («{n, plural, …}»), so it needs a number, and a total
+   * computed over a hole would be a smaller figure stated as a whole one — the
+   * same call `activeCount` makes above. The rows' own dashes carry the news.
+   */
+  const funnelTotal = funnel.some((row) => row.count === null)
+    ? null
+    : funnel.reduce((sum, row) => sum + (row.count ?? 0), 0);
+
+  const relative = new Intl.RelativeTimeFormat(locale === "zh" ? "zh-CN" : "es-ES", {
+    numeric: "auto",
+  });
+
+  /**
+   * How long something has been waiting, as a DURATION («42 minutos», 42分钟)
+   * rather than as a point in the past.
+   *
+   * `Intl.RelativeTimeFormat` — which every other age on this page uses — would
+   * give «hace 42 minutos» / 42分钟前, and 已等待 {time} / «lleva {time}» around
+   * that reads "has been waiting 42 minutes ago". Same split of the interval
+   * (`relativeAge`, the heartbeat's own), formatted as a quantity of units.
+   */
+  const waited = (ms: number): string => {
+    const { value, unit } = relativeAge(ms);
+    return new Intl.NumberFormat(locale === "zh" ? "zh-CN" : "es-ES", {
+      style: "unit",
+      unit,
+      unitDisplay: "long",
+    }).format(value);
+  };
+
+  // `new Date().getTime()` rather than `Date.now()`: the purity lint rejects the
+  // latter by name, and every other clock read in this file — the heartbeat's,
+  // the day filter's — is already a `new Date()`.
+  const now = new Date().getTime();
+  /**
+   * REAL items only: every bridge failure sitting in the queue, oldest first,
+   * and one row for how long the oldest unconfirmed order has been waiting. The
+   * mockup's 催报价 / 修改了收货时段 / 待审核客户 (`:600-604`) are three CRM
+   * events this portal does not record (decision 1), and inventing them here
+   * would put a to-do list in front of staff that nothing can ever clear.
+   */
+  const todos: {
+    key: string;
+    text: string;
+    href: string | null;
+    age: string | null;
+    at: string | null;
+  }[] = failed.map((order) => {
+    const { value, unit } = relativeAge(
+      now - new Date(order.created_at).getTime(),
+    );
+    return {
+      key: order.id,
+      text: t("todoBridgeFailed", { n: order.order_number }),
+      href: `/${locale}/staff/pedidos?estado=bridge_failed`,
+      // The order's OWN age, not the failure's: `failed_at` lives behind
+      // `staff_get_order_bridge_failures` (the sensitive columns are revoked
+      // from authenticated), and this card is not worth a fourth round trip to
+      // move a relative time by a few minutes. The `title` says which instant
+      // it is, the way the heartbeat's does.
+      age: relative.format(-value, unit),
+      at: formatMadridTime(order.created_at, locale),
+    };
+  });
+  if (oldestSubmittedAt) {
+    todos.push({
+      key: "oldest-submitted",
+      text: t("todoOldestSubmitted", {
+        time: waited(now - new Date(oldestSubmittedAt).getTime()),
+      }),
+      // No link: the row is not one order, it is the age of the whole 待确认
+      // backlog — the sidebar entry and the KPI beside it both open that view.
+      href: null,
+      // …and no second time on the right either: the sentence IS the age.
+      age: null,
+      at: formatMadridTime(oldestSubmittedAt, locale),
+    });
+  }
 
   const statuses = deriveBridgeStatuses(heartbeats ?? [], new Date());
   // "Nothing has EVER written here" is a different message from "one job is
@@ -79,9 +452,6 @@ export default async function StaffHome({
   // views rather than the raw result set.
   const deployed = statuses.some((status) => status.freshness !== "missing");
 
-  const relative = new Intl.RelativeTimeFormat(locale === "zh" ? "zh-CN" : "es-ES", {
-    numeric: "auto",
-  });
   /**
    * The label for one count, looked up under ITS OWN job: `injected` means
    * "written into Wingest" for `orders` and "waiting for an albarán" for
@@ -92,100 +462,487 @@ export default async function StaffHome({
     return labelKey ? t(`bridge.counts.${labelKey}`) : key;
   };
 
+  /**
+   * The four KPI cells. Only the FIRST is day-scoped, which is why the page is
+   * headed 概览 and not the mockup's 今日概览 (`:88`) — three of these four
+   * figures are backlog, exactly as the sidebar's 待办 block is, and a 今日 over
+   * them would be a lie about three quarters of the strip.
+   *
+   * No deltas and no sub-lines but one. The mockup gives every cell a `+3` and a
+   * sentence (`:573-578`); both need history this portal does not keep — there
+   * is no yesterday's count stored anywhere — and 截单前还有 5 小时 20 分 needs a
+   * cut-off time that is not a feature (decision 3). The ONE honest sub is
+   * 进行中's, which spells out the three states its own figure adds up.
+   */
+  const kpis: { key: string; label: string; value: number | null; sub: string | null }[] =
+    [
+      { key: "today", label: t("kpiToday"), value: todayCount, sub: null },
+      {
+        key: "submitted",
+        label: t("tabSubmitted"),
+        value: submittedCount,
+        sub: null,
+      },
+      {
+        key: "active",
+        label: t("kpiActive"),
+        value: activeCount,
+        sub: [
+          `${tOrders("status.confirmed")} ${confirmedCount ?? DASH}`,
+          `${tOrders("status.processing")} ${processingCount ?? DASH}`,
+          `${tOrders("status.injected")} ${injectedCount ?? DASH}`,
+        ].join(" · "),
+      },
+      {
+        key: "paused",
+        label: t("shell.backlogUnavailable"),
+        value: pausedCount,
+        sub: null,
+      },
+    ];
+
   return (
     <StaffShell
       locale={locale}
-      title={t("title")}
+      // 概览 / Resumen. No breadcrumb: the trail of the home page would be its
+      // own root crumb and nothing else, which is why `StaffShell` makes the
+      // prop optional.
+      title={t("homeTitle")}
       user={{
         name: staffUser.display_name ?? staffUser.id,
         role: staffUser.role,
       }}
     >
-      <section className={`${CARD} mt-6 p-5`}>
-        <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-          <h2 className="font-medium">{t("bridge.title")}</h2>
+      {/* The mockup's date line (`:89`), minus the half of it that is fiction:
+          its 截单时间 15:00 前 is a cut-off feature nobody has built (decision
+          3), so what is left is the real thing this page can say — today, on
+          MADRID's calendar, because the clock the counts are filtered on is the
+          Spanish one and the ERP server it talks to runs on China time. Its 今日
+          dropdown and 批量报价 5 单 button beside it are out for the same reason
+          (decisions 1 and 3). */}
+      <p className="mt-2 text-[13px] text-muted">
+        {new Intl.DateTimeFormat(locale === "zh" ? "zh-CN" : "es-ES", {
+          timeZone: "Europe/Madrid",
+          weekday: "long",
+          year: "numeric",
+          month: "long",
+          day: "numeric",
+        }).format(new Date())}
+      </p>
+
+      {/* ONE card holding four cells with internal rules, per the mockup's own
+          `repeat(4,1fr)` strip (`:97-109`); `overflow-hidden` is what keeps
+          those rules inside the 12px radius. Two across below `lg`, where 4×34px
+          figures would be four columns of 60px. */}
+      <div
+        className={`${ADMIN_CARD} mt-[18px] grid grid-cols-2 overflow-hidden lg:grid-cols-4`}
+      >
+        {kpis.map((kpi, index) => (
+          <div
+            key={kpi.key}
+            className={`flex flex-col gap-2.5 border-[#EDE9E5] p-5 ${KPI_RULES[index]}`}
+          >
+            {/* The mockup's `#79726B` label. It maps to `text-ink-soft`
+                (#57504A, 7.3:1 on white) rather than to `text-muted` (#6E6760,
+                5.6:1): the mockup's own shade sits between the two at 4.7:1, and
+                of the pair the DARKER one is the honest reading of a label that
+                names a figure somebody is scanning for. */}
+            <p className="text-[12.5px] text-ink-soft">{kpi.label}</p>
+            <p className="font-num text-[34px] font-bold leading-none tabular-nums">
+              {kpi.value === null ? (
+                // An em dash at 34px is a 20-pixel black bar — it reads as a
+                // redaction, not as "we do not know". Two thirds of the size and
+                // muted says the same thing quietly; `leading-none` on the
+                // parent keeps the line box 34px either way, so a dashed cell is
+                // exactly as tall as its neighbours.
+                <span className="text-[24px] text-muted">{DASH}</span>
+              ) : (
+                kpi.value
+              )}
+            </p>
+            {kpi.sub && (
+              <p className="text-[11.5px] text-muted">{kpi.sub}</p>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {/* The mockup's `1fr 380px` (`:111`). Below `lg` the two columns stack in
+          source order — funnel, recent orders, then the two alert cards — and
+          nothing on this page has a fixed width, so a 390px drawer scrolls
+          vertically and never sideways. */}
+      <div className="mt-[18px] grid gap-[18px] lg:grid-cols-[1fr_380px] lg:items-start">
+        {/* `min-w-0` on both columns, and it is load-bearing: a grid item's
+            default `min-width: auto` is its CONTENT's width, so the recent
+            table's `min-w-[560px]` would push this column — and with it the
+            whole page — past 390px on a phone-width drawer, which is exactly the
+            sideways scroll the table's own `overflow-x-auto` exists to
+            prevent. Same fix `staff-shell.tsx:202` makes for the main column. */}
+        <div className="flex min-w-0 flex-col gap-[18px]">
+          <section className={ADMIN_CARD}>
+            <div className="flex items-baseline justify-between gap-3 border-b border-[#EDE9E5] px-5 py-4">
+              <h2 className="text-[15px] font-bold">{t("funnelTitle")}</h2>
+              {/* NOW, not the mockup's 本周 (`:118`): every bar is a count of
+                  orders SITTING in that state at this instant, so a time word
+                  over it would describe a different query. `queueTotal` is the
+                  queue's own 共 {n} 单, reused. */}
+              {funnelTotal !== null && (
+                <p className="text-xs text-muted">
+                  {t("queueTotal", { n: funnelTotal })}
+                </p>
+              )}
+            </div>
+            <div className="flex flex-col gap-3.5 px-5 py-[18px]">
+              {funnel.map((row) => (
+                <div
+                  key={row.status}
+                  className={`flex items-center gap-3.5 ${
+                    // The alarm row sits apart, under the rule: the four above
+                    // it are stages an order passes through, this is where one
+                    // stops.
+                    row.status === "bridge_failed"
+                      ? "border-t border-[#F4F0EC] pt-3.5"
+                      : ""
+                  }`}
+                >
+                  {/* 104px, not the mockup's 76 (`:123`): its labels are 3-4
+                      character inventions (待报价, 待发货) and ours are the
+                      SHIPPED status words — 需要人工处理 is six CJK characters =
+                      78px at 13px, and «Revisión manual» is wider still. The
+                      column is sized so neither wraps. */}
+                  <span
+                    className={`w-[104px] shrink-0 text-[13px] ${
+                      row.status === "bridge_failed"
+                        ? "font-semibold text-brand-ink"
+                        : "text-ink-soft"
+                    }`}
+                  >
+                    {tOrders(`status.${row.status}`)}
+                  </span>
+                  <span className="h-[26px] flex-1 overflow-hidden rounded-md bg-[#F4F0EC]">
+                    <span
+                      className={`block h-full rounded-md ${row.bar}`}
+                      style={{ width: funnelWidth(row.count, funnelMax) }}
+                    />
+                  </span>
+                  <span
+                    className={`w-[46px] shrink-0 text-right font-num text-base font-semibold tabular-nums ${
+                      // Label and figure take the same ink on the failure row,
+                      // so the whole line reads as one alarm rather than as a
+                      // red word beside a black number.
+                      row.status === "bridge_failed" ? "text-brand-ink" : ""
+                    }`}
+                  >
+                    {row.count ?? DASH}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          <section className={`${ADMIN_CARD} overflow-hidden`}>
+            <div className="flex items-baseline justify-between gap-3 border-b border-[#EDE9E5] px-5 py-4">
+              <h2 className="text-[15px] font-bold">{t("recentTitle")}</h2>
+              <Link
+                href={`/${locale}/staff/pedidos?estado=all`}
+                className="shrink-0 text-[12.5px] font-semibold text-brand-ink"
+              >
+                {t("allOrders")}
+                <span aria-hidden="true"> →</span>
+              </Link>
+            </div>
+
+            {recent.length === 0 ? (
+              <p className="p-10 text-center text-muted">{t("noOrders")}</p>
+            ) : (
+              /* `overflow-x-auto` on the wrapper, so the TABLE is what scrolls
+                 sideways in a 390px drawer and the page body never does — the
+                 products table's own arrangement. */
+              <div className="overflow-x-auto">
+                {/* A real `<table>`, not the mockup's div grid (`:140`): four
+                    columns with a header each is tabular data, and the grid
+                    version hands a screen reader four unrelated boxes per row.
+                    Every `<th>` takes `scope="col"`, as `/staff/productos`
+                    does.
+
+                    NO 商品 / 种 column, which the mockup puts third (`:145`):
+                    the line count is not on `orders`, so it would cost a second
+                    read of `order_items` for six rows — the plan drops it for
+                    this card and the queue's own `<details>` summary already
+                    carries it where somebody is working the order. */}
+                <table className="w-full min-w-[560px] text-sm">
+                  <thead>
+                    <tr className="border-b border-[#EDE9E5] bg-field text-[11.5px] text-muted">
+                      {/* 120px / 130px / 150px, all three sized off the SPANISH
+                          header, which is the long one in every case
+                          («N.º de pedido», «Fecha del pedido», «Estado» over
+                          «Revisión manual»); zh's 单号 / 下单日期 / 状态 are half
+                          that. At the mockup's own widths the first two headers
+                          wrapped onto a second line. */}
+                      <th scope="col" className={`${TH} w-[120px] pl-5`}>
+                        {t("colOrder")}
+                      </th>
+                      {/* 客户 / Clientes — the sidebar's own word for the
+                          restaurant that placed it (decision 7's relabel), not
+                          a second noun invented for a column header. */}
+                      <th scope="col" className={TH}>
+                        {t("nav.users")}
+                      </th>
+                      {/* 下单日期 / Fecha del pedido: `created_at`'s shipped
+                          label, the same one the queue row gives it. */}
+                      <th scope="col" className={`${TH} w-[130px]`}>
+                        {tOrders("placedAt")}
+                      </th>
+                      {/* 150px, measured rather than guessed: the widest chip
+                          here is 需要人工处理 / «Revisión manual», and at the
+                          badge's 12px semibold + `px-2` that is ~88px in zh and
+                          ~104px in es — against the 118px this column leaves
+                          once its own 12px and the card's 20px are taken. At
+                          the mockup's 110 both wrapped to two lines. */}
+                      <th scope="col" className={`${TH} w-[150px] pr-5 text-right`}>
+                        {t("colStatus")}
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-[#F4F0EC]">
+                    {recent.map((order) => (
+                      <tr key={order.id}>
+                        {/* `font-num` for the DIGITS: Archivo carries no CJK, so
+                            the numeral face is exactly what a column of order
+                            numbers wants. */}
+                        <td className={`${TD} pl-5 font-num text-[12.5px]`}>
+                          {order.order_number}
+                        </td>
+                        <td className={`${TD} max-w-0`}>
+                          <p className="truncate text-[13px] font-semibold">
+                            {order.companies?.name ?? DASH}
+                          </p>
+                          {order.companies?.codcli != null && (
+                            <p className="truncate font-num text-[11.5px] text-muted">
+                              {order.companies.codcli}
+                            </p>
+                          )}
+                        </td>
+                        {/* Absolute, not 今天 09:12: a queue is worked against
+                            dated paperwork, and this card reaches back over
+                            whatever the six newest orders happen to be. */}
+                        <td className={`${TD} text-[12.5px] text-ink-soft`}>
+                          {formatOrderDate(order.created_at, locale)}
+                        </td>
+                        <td className={`${TD} pr-5 text-right`}>
+                          <OrderStatusBadge status={order.status} />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
+        </div>
+
+        <div className="flex min-w-0 flex-col gap-[18px]">
+          {/* The mockup's red-wash alert card — border `#FBE4E2` on `#FFF8F7`
+              with an inner `#FBE9E7` row rule (`:159-171`). The three are ONE
+              card's wash, the only red-wash surface anywhere on /staff, which is
+              exactly why they are literals here and not palette entries: the
+              token map's admin row lists `#FCFBFA` and `#EDE9E5` as the two
+              admin one-offs, and this trio is the third — noted, scoped to this
+              card, and reachable by no customer screen.
+
+              Its subject is NOT the mockup's 缺货 / 库存预警: there is no
+              inventory in this system (decision 2). The real signal is
+              `is_available = false`, whose staff word already shipped as 停售 on
+              the products toggle and as 停售商品 in the sidebar's backlog. */}
+          <section className="overflow-hidden rounded-xl border border-[#FBE4E2] bg-[#FFF8F7]">
+            <div className="flex items-center justify-between gap-3 border-b border-[#FBE4E2] px-[18px] py-4">
+              <h2 className="text-[15px] font-bold text-brand-ink">
+                {t("shell.backlogUnavailable")}
+              </h2>
+              {/* The KPI's own figure — the count of the whole table, not the
+                  length of the six-row list under it. */}
+              <p className="font-num font-bold tabular-nums text-brand-ink">
+                {pausedCount ?? DASH}
+              </p>
+            </div>
+            {paused.length === 0 ? (
+              <p className="px-[18px] py-6 text-[13px] text-muted">
+                {t("noPaused")}
+              </p>
+            ) : (
+              <ul>
+                {paused.map((product) => (
+                  <li
+                    key={product.id}
+                    className="border-b border-[#FBE9E7] px-[18px] py-3"
+                  >
+                    <p className="text-[13px] font-semibold">
+                      {localizedName(product.name, locale)}
+                    </p>
+                    {/* The mockup's second line is a 规格 (10 斤 / 箱); ours is
+                        the codart, which is the thing staff match against
+                        Wingest and the freepos export. */}
+                    <p className="mt-0.5 font-num text-[11.5px] text-muted">
+                      {product.codart}
+                    </p>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <Link
+              href={`/${locale}/staff/productos`}
+              className="block px-[18px] py-3 text-[12.5px] font-semibold text-brand-ink"
+            >
+              {t("goProducts")}
+              <span aria-hidden="true"> →</span>
+            </Link>
+          </section>
+
+          <section className={`${ADMIN_CARD} overflow-hidden`}>
+            <h2 className="border-b border-[#EDE9E5] px-[18px] py-4 text-[15px] font-bold">
+              {t("todosTitle")}
+            </h2>
+            {todos.length === 0 ? (
+              // 暂无待办, not 今日无待办: both kinds of row on this card are
+              // BACKLOG — a failed injection and an unconfirmed order are as old
+              // as they are — so a day word here would be the same lie the
+              // sidebar's 待办 block was renamed to avoid.
+              <p className="px-[18px] py-6 text-[13px] text-muted">
+                {t("todosEmpty")}
+              </p>
+            ) : (
+              <ul>
+                {todos.map((todo) => (
+                  <li
+                    key={todo.key}
+                    className="flex items-center gap-3 border-b border-[#F4F0EC] px-[18px] py-3.5 last:border-b-0"
+                  >
+                    <span
+                      aria-hidden="true"
+                      className="size-1.5 shrink-0 rounded-full bg-brand"
+                    />
+                    {todo.href ? (
+                      <Link href={todo.href} className="min-w-0 flex-1 text-[13px]">
+                        {todo.text}
+                      </Link>
+                    ) : (
+                      <span className="min-w-0 flex-1 text-[13px]">{todo.text}</span>
+                    )}
+                    {todo.age && (
+                      <span
+                        className="shrink-0 text-[11.5px] text-muted"
+                        // The exact moment on Madrid's clock, as the heartbeat
+                        // rows carry it.
+                        title={
+                          todo.at ? t("bridge.at", { time: todo.at }) : undefined
+                        }
+                      >
+                        {todo.age}
+                      </span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+        </div>
+      </div>
+
+      {/* THE HEARTBEAT STAYS. The mockup has no such panel and this portal has
+          no substitute for it: it is the one place in the product that says
+          whether orders are reaching Wingest at all (decision 4). Everything
+          below is the card this page shipped with — the same derivation, the
+          same four tones, the same deployed / not-deployed branches, the same
+          counts, sample, notes and hints. Only the shell is restyled: `CARD` →
+          `ADMIN_CARD`, and the header to the 15px/bold the three cards above it
+          use. */}
+      <section className={`${ADMIN_CARD} mt-[18px]`}>
+        <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 border-b border-[#EDE9E5] px-5 py-4">
+          <h2 className="text-[15px] font-bold">{t("bridge.title")}</h2>
           <p className="text-xs text-muted">{t("bridge.subtitle")}</p>
         </div>
 
-        {deployed ? (
-          <ul className="mt-4 space-y-3">
-            {statuses.map((status) => {
-              const state = bridgeStateKey(status);
-              const { value, unit } = relativeAge(status.ageMs ?? 0);
-              return (
-                <li
-                  key={status.job}
-                  className="border-t border-border pt-3 first:border-t-0 first:pt-0"
-                >
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="font-medium">{t(`bridge.jobs.${status.job}`)}</span>
-                    <span
-                      className={`rounded-md px-1.5 py-0.5 text-xs ${TONE_CLASS[status.tone]}`}
-                    >
-                      {t(`bridge.state.${state}`)}
-                    </span>
-                    {state === "failed" && status.code ? (
-                      <code className="text-xs text-muted">{status.code}</code>
+        <div className="px-5 py-[18px]">
+          {deployed ? (
+            <ul className="space-y-3">
+              {statuses.map((status) => {
+                const state = bridgeStateKey(status);
+                const { value, unit } = relativeAge(status.ageMs ?? 0);
+                return (
+                  <li
+                    key={status.job}
+                    className="border-t border-border pt-3 first:border-t-0 first:pt-0"
+                  >
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-medium">{t(`bridge.jobs.${status.job}`)}</span>
+                      <span
+                        className={`rounded-md px-1.5 py-0.5 text-xs ${TONE_CLASS[status.tone]}`}
+                      >
+                        {t(`bridge.state.${state}`)}
+                      </span>
+                      {state === "failed" && status.code ? (
+                        <code className="text-xs text-muted">{status.code}</code>
+                      ) : null}
+                      <span
+                        className="ml-auto text-xs text-muted"
+                        // The exact moment on Madrid's clock, because the machine
+                        // that wrote it runs on China time.
+                        title={
+                          status.lastRunAt
+                            ? t("bridge.at", {
+                                time: formatMadridTime(status.lastRunAt, locale),
+                              })
+                            : undefined
+                        }
+                      >
+                        {status.ageMs === null
+                          ? t("bridge.never")
+                          : relative.format(-value, unit)}
+                      </span>
+                    </div>
+
+                    {/* The numbers, not just the badge: only `injected 3` says
+                        orders are reaching Wingest, and only `markFailed 1` names
+                        the thing somebody has to go and fix. */}
+                    {status.counts.length > 0 ? (
+                      <p className="mt-1 text-xs text-muted">
+                        {status.counts
+                          .map(
+                            (count) =>
+                              `${countLabel(status.job, count.key)} ${count.value ?? DASH}`,
+                          )
+                          .join(" · ")}
+                      </p>
                     ) : null}
-                    <span
-                      className="ml-auto text-xs text-muted"
-                      // The exact moment on Madrid's clock, because the machine
-                      // that wrote it runs on China time.
-                      title={
-                        status.lastRunAt
-                          ? t("bridge.at", {
-                              time: formatMadridTime(status.lastRunAt, locale),
-                            })
-                          : undefined
-                      }
-                    >
-                      {status.ageMs === null
-                        ? t("bridge.never")
-                        : relative.format(-value, unit)}
-                    </span>
-                  </div>
 
-                  {/* The numbers, not just the badge: only `injected 3` says
-                      orders are reaching Wingest, and only `markFailed 1` names
-                      the thing somebody has to go and fix. */}
-                  {status.counts.length > 0 ? (
-                    <p className="mt-1 text-xs text-muted">
-                      {status.counts
-                        .map(
-                          (count) =>
-                            `${countLabel(status.job, count.key)} ${count.value ?? "—"}`,
-                        )
-                        .join(" · ")}
-                    </p>
-                  ) : null}
+                    {status.sample.length > 0 ? (
+                      <p className="mt-1 break-words text-xs text-muted">
+                        {t("bridge.sample")}: {status.sample.join(", ")}
+                      </p>
+                    ) : null}
 
-                  {status.sample.length > 0 ? (
-                    <p className="mt-1 break-words text-xs text-muted">
-                      {t("bridge.sample")}: {status.sample.join(", ")}
-                    </p>
-                  ) : null}
+                    {status.notes.map((note) => (
+                      <p key={note.key} className="mt-1 break-words text-xs text-muted">
+                        {countLabel(status.job, note.key)}: {note.value}
+                      </p>
+                    ))}
 
-                  {status.notes.map((note) => (
-                    <p key={note.key} className="mt-1 break-words text-xs text-muted">
-                      {countLabel(status.job, note.key)}: {note.value}
-                    </p>
-                  ))}
-
-                  {state === "ok" ? null : (
-                    <p className="mt-1 text-xs text-muted">{t(`bridge.hint.${state}`)}</p>
-                  )}
-                </li>
-              );
-            })}
-          </ul>
-        ) : (
-          <div className="mt-4 flex flex-wrap items-center gap-2">
-            <span className={`rounded-md px-1.5 py-0.5 text-xs ${TONE_CLASS.warn}`}>
-              {t("bridge.notDeployed")}
-            </span>
-            <p className="text-xs text-muted">{t("bridge.notDeployedHint")}</p>
-          </div>
-        )}
+                    {state === "ok" ? null : (
+                      <p className="mt-1 text-xs text-muted">{t(`bridge.hint.${state}`)}</p>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          ) : (
+            <div className="flex flex-wrap items-center gap-2">
+              <span className={`rounded-md px-1.5 py-0.5 text-xs ${TONE_CLASS.warn}`}>
+                {t("bridge.notDeployed")}
+              </span>
+              <p className="text-xs text-muted">{t("bridge.notDeployedHint")}</p>
+            </div>
+          )}
+        </div>
       </section>
     </StaffShell>
   );
