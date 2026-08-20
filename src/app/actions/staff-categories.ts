@@ -4,7 +4,7 @@ import { hasLocale } from "next-intl";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { routing } from "@/i18n/routing";
-import { getSessionUser } from "@/lib/auth/session";
+import { assertStaff } from "@/lib/auth/assert-staff";
 import type { CategoryError, CategoryFormState } from "@/lib/categories";
 import {
   CATEGORY_LIMIT,
@@ -32,11 +32,12 @@ import { createServerSupabase } from "@/lib/supabase/server";
  * feature needed neither a migration nor a new SECURITY DEFINER function — which
  * is why the accepted security-advisor baseline in CLAUDE.md is unchanged by it.
  *
- * `assertStaff` below is not that gate. It is the early, kinder half: a Server
- * Action is its own POST endpoint, reachable by anyone who knows the action id
- * without ever rendering the page, and a caller who gets that far should be
- * stopped here rather than one round trip later. If it were ever removed, RLS
- * would still refuse every statement in this file.
+ * `assertStaff` (`lib/auth/assert-staff.ts`, shared with the products and orders
+ * actions) is not that gate. It is the early, kinder half: a Server Action is
+ * its own POST endpoint, reachable by anyone who knows the action id without
+ * ever rendering the page, and a caller who gets that far should be stopped
+ * here rather than one round trip later. If it were ever removed, RLS would
+ * still refuse every statement in this file.
  *
  * Products are the deliberate contrast: `staff-products.ts` writes with the
  * SERVICE-ROLE client because the six price columns are revoked from
@@ -52,30 +53,6 @@ function safeLocale(value: FormDataEntryValue | null) {
 }
 
 /**
- * Server-action staff gate: verifies an active staff_users row; throws otherwise.
- *
- * The third byte-identical copy of this helper (`staff-products.ts:27`,
- * `staff-orders.ts:35`). It is copied rather than shared ON PURPOSE for now:
- * Plan 14's Task A3 touches `staff-products.ts` and converges all three into one
- * exported helper, and converging them from HERE would edit two files this task
- * has no other business in. It throws rather than redirects, which is the Server
- * Action idiom in this app — there is no page to send anybody back to.
- */
-async function assertStaff() {
-  const user = await getSessionUser();
-  if (!user) throw new Error("UNAUTHENTICATED");
-
-  const supabase = await createServerSupabase();
-  const { data: staffUser, error } = await supabase
-    .from("staff_users")
-    .select("id, is_active")
-    .eq("id", user.id)
-    .maybeSingle();
-  if (error) console.error("assertStaff:", error);
-  if (!staffUser?.is_active) throw new Error("NOT_STAFF");
-}
-
-/**
  * Every path the rail's order or wording can reach, cleared at once.
  *
  * Both pages are `force-dynamic`, so the SERVER re-reads on the next request
@@ -83,10 +60,18 @@ async function assertStaff() {
  * copy that would otherwise let somebody navigate BACK to a catalogue rendered
  * from the old order. Both locales, because the staff member's language is not
  * the restaurant's — a rename in the zh back office has to reach the es rail.
+ *
+ * `/staff/productos` is on the list because that page draws this table too: its
+ * 分类 column is a `<select>` of every category, so a rename changes the option
+ * labels and a hide/show moves the （已隐藏） marker on one of them. Nothing
+ * there is invalidated by a MOVE, but the four writes share one revalidation
+ * for the same reason they share one file — a caller that had to pick would
+ * eventually pick wrong.
  */
 function revalidateCategoryPaths() {
   for (const locale of routing.locales) {
     revalidatePath(`/${locale}/staff/categorias`);
+    revalidatePath(`/${locale}/staff/productos`);
     revalidatePath(`/${locale}/catalogo`);
   }
 }

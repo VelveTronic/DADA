@@ -1,48 +1,79 @@
 "use server";
 
-import { hasLocale } from "next-intl";
 import { revalidatePath } from "next/cache";
 import { routing } from "@/i18n/routing";
-import { getSessionUser } from "@/lib/auth/session";
+import { assertStaff } from "@/lib/auth/assert-staff";
+import { parseCategoryId } from "@/lib/categories";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { createServerSupabase } from "@/lib/supabase/server";
 
-/** The locale arrives in a form field, so it is never trusted as a path segment. */
-function safeLocale(value: FormDataEntryValue | null) {
-  const candidate = String(value ?? routing.defaultLocale);
-  return hasLocale(routing.locales, candidate)
-    ? candidate
-    : routing.defaultLocale;
+/**
+ * A form field as trimmed text, or "" for anything that is not a string.
+ *
+ * `FormData.get` is typed `string | File` and a crafted POST can send a file
+ * part, which `String()` would turn into the 13-character "[object File]" — a
+ * value that passes a non-empty check and reaches the database. Same rule, and
+ * the same reason, as `raw` in `staff-categories.ts` and `text` in
+ * `lib/categories.ts`.
+ */
+function text(value: FormDataEntryValue | null): string {
+  return typeof value === "string" ? value.trim() : "";
 }
 
 /**
- * Server-action staff gate: verifies an active staff_users row; throws otherwise.
+ * Every page a product's own columns are drawn on, in BOTH languages.
  *
- * The page guard does not cover this. A Server Action is its own POST endpoint,
- * reachable by anyone who knows the action id without ever rendering the page,
- * and the writes below run on the service-role client, which has no RLS left to
- * fall back on. So this fails CLOSED — a throw, not the silent return the
- * favorites action can afford.
+ * These four writes used to clear one locale's `/staff/productos` and nothing
+ * else, and that was two gaps at once. The obvious one: the staff member's
+ * language is not the restaurant's, so a flip made in the zh back office left
+ * the es copy of the same table stale. The one that reached a CUSTOMER: every
+ * column written here is drawn on the storefront too — `is_available` is the
+ * 断货 badge and, through the generated `is_orderable`, whether the stepper on
+ * that row does anything at all; `is_weighed` is the 称重 badge and the
+ * fractional quantity step; `is_current_variant` decides which of a group's
+ * variants the catalogue lists at all. So 停售 pressed here left the catalogue
+ * and the search page still offering the product from the Router Cache.
+ *
+ * All three pages, both locales. `force-dynamic` means the SERVER re-reads
+ * either way; what this clears is the client-side copy a Back button would
+ * otherwise redraw from.
+ *
+ * Both locales is also why no action in this file reads a `locale` field any
+ * more, and why the forms on `/staff/productos` no longer send one: there is
+ * nothing left for it to decide. (`safeLocale` went with it — the nine copies
+ * in the other action files are untouched, each in a file that still redirects
+ * to, or revalidates, ONE language's path.)
  */
-async function assertStaff() {
-  const user = await getSessionUser();
-  if (!user) throw new Error("UNAUTHENTICATED");
+function revalidateProductPaths() {
+  for (const locale of routing.locales) {
+    revalidatePath(`/${locale}/staff/productos`);
+    revalidatePath(`/${locale}/catalogo`);
+    revalidatePath(`/${locale}/buscar`);
+  }
+}
 
-  const supabase = await createServerSupabase();
-  const { data: staffUser, error } = await supabase
-    .from("staff_users")
-    .select("id, is_active")
-    .eq("id", user.id)
-    .maybeSingle();
-  if (error) console.error("assertStaff:", error);
-  if (!staffUser?.is_active) throw new Error("NOT_STAFF");
+/**
+ * …and the one page a product's FILING is drawn on, for the write that changes
+ * it.
+ *
+ * Two named helpers rather than one with a flag: `/staff/categorias` prints a
+ * per-category product count and lists the products under the open category, so
+ * `setProductCategory` moves a row from one of those lists to another and both
+ * counts change — while the three toggles below cannot touch either (that page
+ * reads neither availability nor the weighed flag nor the variant column). A
+ * boolean parameter would put that distinction at the CALL SITE as
+ * `revalidateProductPaths(true)`, which says nothing; the names say it.
+ */
+function revalidateAssignmentPaths() {
+  revalidateProductPaths();
+  for (const locale of routing.locales) {
+    revalidatePath(`/${locale}/staff/categorias`);
+  }
 }
 
 /** Pause or re-enable a product for ordering (`is_orderable` is generated from it). */
 export async function setProductAvailability(formData: FormData) {
   await assertStaff();
-  const productId = String(formData.get("product_id") ?? "");
-  const locale = safeLocale(formData.get("locale"));
+  const productId = text(formData.get("product_id"));
   const available = formData.get("available") === "1";
   if (!productId) return;
 
@@ -53,7 +84,73 @@ export async function setProductAvailability(formData: FormData) {
     .eq("id", productId);
   if (error) console.error("setProductAvailability:", error);
 
-  revalidatePath(`/${locale}/staff/productos`);
+  revalidateProductPaths();
+}
+
+/**
+ * File a product under a category, or take it out of every category.
+ *
+ * The one write on `/staff/productos` that is not a flag, and the reason that
+ * page has a 分类 column at all: `products.category_id` arrives from the freepos
+ * import and nothing else maintains it, so a product the ERP filed nowhere — or
+ * filed under a category this portal has since retired — can only be moved by
+ * hand, from here.
+ *
+ * **Silent on failure, like its three siblings.** This page has no `?result=`
+ * banner convention (the categories and orders and users pages do; this one has
+ * never had one), so a refused write is a log line and a table that redraws
+ * unchanged, which is what a staff member sees for a bad `is_available` write
+ * today. Giving this one action a banner would mean giving the page a result
+ * vocabulary for one of its four buttons.
+ */
+export async function setProductCategory(formData: FormData) {
+  await assertStaff();
+  const productId = text(formData.get("product_id"));
+  if (!productId) return;
+
+  // "" is the 未分类 option and means NULL — the only value that is not an id.
+  // Everything else goes through the same parser `staff-categories.ts` reads
+  // `categories.id` with (digits only, a safe integer, above zero), so a
+  // crafted or stale POST cannot reach Postgres as a cast error. A missing
+  // field is not "" and is refused with the rest: the select always posts one.
+  const field = formData.get("category");
+  const wantsNone = typeof field === "string" && field.trim() === "";
+  const categoryId = wantsNone ? null : parseCategoryId(field);
+  if (!wantsNone && categoryId === null) {
+    console.error("setProductCategory: bad category field");
+    return;
+  }
+
+  const admin = createAdminClient();
+  if (categoryId !== null) {
+    // The FK would refuse an id that does not exist, but it would refuse it as
+    // a 409 the staff member never sees; this turns that into one log line
+    // naming the id. `is_active` is deliberately NOT part of the test: a hidden
+    // category still holds products (hiding takes it off the customer's rail,
+    // it does not empty it — see `setCategoryActive`), so filing something
+    // under one is a legitimate, and sometimes the only correct, answer.
+    const { data, error } = await admin
+      .from("categories")
+      .select("id")
+      .eq("id", categoryId)
+      .maybeSingle();
+    if (error) {
+      console.error("setProductCategory category lookup:", error);
+      return;
+    }
+    if (!data) {
+      console.error(`setProductCategory: no category ${categoryId}`);
+      return;
+    }
+  }
+
+  const { error } = await admin
+    .from("products")
+    .update({ category_id: categoryId })
+    .eq("id", productId);
+  if (error) console.error("setProductCategory:", error);
+
+  revalidateAssignmentPaths();
 }
 
 /**
@@ -83,8 +180,7 @@ export async function setProductAvailability(formData: FormData) {
  */
 export async function setProductWeighed(formData: FormData) {
   await assertStaff();
-  const productId = String(formData.get("product_id") ?? "");
-  const locale = safeLocale(formData.get("locale"));
+  const productId = text(formData.get("product_id"));
   const weighed = formData.get("weighed") === "1";
   if (!productId) return;
 
@@ -95,7 +191,7 @@ export async function setProductWeighed(formData: FormData) {
     .eq("id", productId);
   if (error) console.error("setProductWeighed:", error);
 
-  revalidatePath(`/${locale}/staff/productos`);
+  revalidateProductPaths();
 }
 
 /**
@@ -106,9 +202,8 @@ export async function setProductWeighed(formData: FormData) {
  */
 export async function setCurrentVariant(formData: FormData) {
   await assertStaff();
-  const productId = String(formData.get("product_id") ?? "");
-  const baseSku = String(formData.get("base_sku") ?? "");
-  const locale = safeLocale(formData.get("locale"));
+  const productId = text(formData.get("product_id"));
+  const baseSku = text(formData.get("base_sku"));
   if (!productId || !baseSku) return;
 
   const admin = createAdminClient();
@@ -127,5 +222,5 @@ export async function setCurrentVariant(formData: FormData) {
     .eq("base_sku", baseSku);
   if (promote.error) console.error("setCurrentVariant promote:", promote.error);
 
-  revalidatePath(`/${locale}/staff/productos`);
+  revalidateProductPaths();
 }
