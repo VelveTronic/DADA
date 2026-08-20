@@ -22,9 +22,11 @@
  *   request gets, since a HEAD response has no body to carry the error JSON —
  *   is rewritten to `204 No Content` and never becomes an `error` at all.
  *
- * So `error` alone is not the test. The test is the count itself: a successful
- * `head: true` + `count: "exact"` response ALWAYS carries its figure, so
- * `count === null` means the figure did not arrive, whatever `error` says.
+ * So `error` alone is not the test. A set `error` still disqualifies on its
+ * own — a refusal is a refusal even when a count arrives beside it — but the
+ * figure is only trusted when it actually came: a successful `head: true` +
+ * `count: "exact"` response ALWAYS carries one, so `count === null` fails the
+ * read whichever way `error` fell.
  *
  * Pure on purpose — it imports no client and issues no request, so the
  * decision is pinned by the table beside it rather than by pointing a browser

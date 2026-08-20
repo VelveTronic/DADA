@@ -137,9 +137,10 @@ export async function StaffShell({
   // than the page's. Any `perfStep` later in the same render would land in it —
   // and `perf.end()` on the next line closes it, so that span would be recorded
   // into a printed line and silently dropped rather than falling back to
-  // `standalone()`. Nothing does that today: `perfStep` is called only from
-  // `lib/auth/guards.ts`, which every page enters through BEFORE it renders, and
-  // Server Actions are separate requests with slots of their own.
+  // `standalone()`. Nothing does that today: the only production caller of
+  // `perfStep` is `lib/auth/guards.ts`, which every page enters through BEFORE
+  // it renders (its unit tests call it too), and Server Actions are separate
+  // requests with slots of their own.
   const supabase = await createServerSupabase();
   const perf = perfRun("staff-shell");
   const [submittedResult, bridgeFailedResult, unavailableResult] =
