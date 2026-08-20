@@ -94,17 +94,23 @@ type SidebarProps = Identity & {
  * comes out tinted but ink-coloured. See `ICON_BTN` in `ui.ts`, which had
  * exactly this bug.
  *
- * The HEIGHT is not in here, because the two places this row is drawn want
- * different ones: 38px on the rail and on the desktop sidebar (the mockup's
- * admin row), 44px minimum inside the drawer, which is the phone's whole
- * navigation and holds to the 44px touch target the rest of the phone UI does.
- * `SidebarBody` picks from `collapsible`.
+ * The HEIGHT is not in here, because the three widths this row is drawn at do
+ * not want the same one: 44px minimum inside the drawer (the phone's whole
+ * navigation), 44px on the `sm`–`lg` icon rail (a tablet's thumb is the same
+ * thumb, and the rail is a touch surface like any other), and the mockup's 38px
+ * only from `lg`, which is the single 1440px desktop frame the mockup actually
+ * draws — it says nothing at all about the 64px rail. `SidebarBody` picks from
+ * `collapsible`.
  *
  * `[&_svg]:size-[18px]` is how the glyphs come down from the icon module's own
  * 24px to the mockup's 18px: it compiles to `.row svg`, a (0,1,1) selector, and
  * beats the `.size-6` (0,1,0) that `ICON_PROPS` puts on every icon. Done here
- * rather than in `icons.tsx` on purpose — the storefront header draws the same
- * glyphs at 24px and must not change size because the admin did.
+ * rather than in `icons.tsx` on purpose — not because the two screens share
+ * glyphs (they share none: the storefront header draws Shop/Search/Cart/User,
+ * this sidebar draws Home/Clipboard/Box/Grid/Users/Sliders/Logout/Menu/Close)
+ * but because all thirteen are stamped from ONE `ICON_PROPS.className:
+ * "size-6"`, so editing that to suit the admin would resize the storefront's
+ * four with it.
  */
 const ROW_BASE =
   "flex items-center gap-2.5 rounded-lg px-3 text-[13.5px] transition-colors hover:bg-brand-soft hover:text-brand-ink focus-visible:bg-brand-soft focus-visible:text-brand-ink focus-visible:outline-none [&_svg]:size-[18px]";
@@ -177,10 +183,20 @@ function SidebarBody({
 
   /** Visually gone on the rail, still the control's accessible name. */
   const label = collapsible ? "sr-only lg:not-sr-only" : undefined;
-  /** Ornament and figures: no room for them in a 64px column. */
+  /**
+   * Ornament and figures: no room for them in a 64px column.
+   *
+   * This is the FIRST of three `collapsible` visibility ternaries that say one
+   * rule in three display values — this `hidden lg:block` block, the orders
+   * badge's `hidden lg:inline-flex` and the user card's `hidden lg:flex`. Same
+   * rule (drawn in the drawer, drawn from `lg`, gone on the rail between them),
+   * different `display` because the elements are a block, an inline pill and a
+   * flex row. They move together: changing the breakpoint on one and not the
+   * others leaves the rail half-furnished.
+   */
   const wide = collapsible ? "hidden lg:block" : "";
-  /** The row height, per the note on `ROW_BASE`. */
-  const height = collapsible ? "h-[38px]" : "min-h-11";
+  /** The row height, per the note on `ROW_BASE`: drawer 44, rail 44, desktop 38. */
+  const height = collapsible ? "h-11 lg:h-[38px]" : "min-h-11";
 
   return (
     <>
@@ -189,7 +205,8 @@ function SidebarBody({
           (#f2eeea), and promoting it would put a second "border" in the palette
           that no customer screen may use. Same call, same shade, same reason as
           `staff/categorias/page.tsx:55`. 48px of row inside 8px of padding is
-          the mockup's 64px brand header. */}
+          64px, plus this hairline: 65px shipped against the mockup's 64, whose
+          own border sits inside the frame rather than under it. */}
       <div className="border-b border-[#EDE9E5] p-2">
         <Link
           href={`/${locale}/staff`}
@@ -238,9 +255,11 @@ function SidebarBody({
                     // same boolean, so the colour and the announcement cannot drift.
                     aria-current={active ? "page" : undefined}
                     // The badge is decoration (`aria-hidden` below), so the
-                    // count is said in WORDS here instead — and only while it
-                    // shows. Without a badge the visible label is already the
-                    // whole name. Same contract as the cart tab.
+                    // count is said in WORDS here instead, whenever there IS a
+                    // count — including on the `sm`–`lg` rail, where the badge is
+                    // `hidden` and the name is the only place a figure can live
+                    // in a 64px column. With no count the visible label is
+                    // already the whole name. Same contract as the cart tab.
                     aria-label={
                       badgeCount === null
                         ? undefined
@@ -279,23 +298,43 @@ function SidebarBody({
             be a number that means something else than the word above it. The
             genuinely today-scoped figures are the dashboard's KPI strip. */}
         <section aria-label={t("shell.backlog")} className={wide}>
-          <h2 className="px-3 pb-2 text-[11px] font-semibold tracking-wide text-muted">
+          {/* A `<p>` and not an `<h2>`: the section's `aria-label` already names
+              this landmark with these exact words, and a heading repeating them
+              is the region announced twice. It is also 11px of micro-copy rather
+              than a division of the document — and the sidebar renders before
+              `<main>`, so an h2 here would be the FIRST heading in the document,
+              arriving ahead of the page's own h1. (`aria-labelledby` pointing at
+              this paragraph was the other way out; rejected because
+              `SidebarBody` is in the DOM twice below `sm` — rail plus drawer —
+              so a static id would collide, and a `useId` is more machinery than
+              dropping the tag.) */}
+          <p className="px-3 pb-2 text-[11px] font-semibold tracking-wide text-muted">
             {t("shell.backlog")}
-          </h2>
+          </p>
           {/* `space-y-2` is 8px between rows where the mockup draws 9px — the
-              scale's step, one pixel off a number that was never meaningful. */}
+              scale's step, one pixel off a number that was never meaningful.
+              `text-ink-soft` goes on each ROW rather than on its two spans, so
+              the label and the figure inherit one colour: the mockup paints
+              these rows #57504A, which is exactly what `--color-ink-soft`
+              already carries, and its numbers are the same shade as its words.
+              7.60:1 against the `bg-field` #FBFAF9 behind them (both values read
+              off `globals.css`) — past AAA. The label above stays `text-muted`,
+              one step lighter again, and the one override is the red below. */}
           <ul className="space-y-2">
-            <li className="flex items-center justify-between px-3 text-xs">
+            <li className="flex items-center justify-between px-3 text-xs text-ink-soft">
               {/* The queue's own words for the same two sets, borrowed by
                   reference: these rows count exactly what those tabs list, so
                   single-sourcing the labels is what keeps them saying it. */}
-              <span className="text-ink">{t("tabSubmitted")}</span>
+              <span>{t("tabSubmitted")}</span>
               <span className="font-num font-semibold tabular-nums">
                 {figure(counts.submitted)}
               </span>
             </li>
-            <li className="flex items-center justify-between px-3 text-xs">
-              <span className="text-ink">{t("tabBridgeFailed")}</span>
+            <li className="flex items-center justify-between px-3 text-xs text-ink-soft">
+              <span>{t("tabBridgeFailed")}</span>
+              {/* The one figure that colours itself: a bridge failure is the
+                  only one of the three that is an alarm rather than a workload,
+                  and only while there is one to raise. */}
               <span
                 className={`font-num font-semibold tabular-nums ${
                   counts.bridgeFailed !== null && counts.bridgeFailed > 0
@@ -306,8 +345,8 @@ function SidebarBody({
                 {figure(counts.bridgeFailed)}
               </span>
             </li>
-            <li className="flex items-center justify-between px-3 text-xs">
-              <span className="text-ink">{t("shell.backlogUnavailable")}</span>
+            <li className="flex items-center justify-between px-3 text-xs text-ink-soft">
+              <span>{t("shell.backlogUnavailable")}</span>
               <span className="font-num font-semibold tabular-nums">
                 {figure(counts.unavailable)}
               </span>
@@ -513,8 +552,13 @@ export function StaffTopBar(props: SidebarProps) {
             // Opaque, not glass: a translucent panel over a dimmed page samples
             // the dimming and takes the label contrast down with it. `bg-field`
             // is the sidebar's own wash and just as opaque — the drawer IS this
-            // sidebar on a phone, so it wears the same paint.
-            className="fixed inset-y-0 left-0 z-50 flex w-72 max-w-[85vw] flex-col border-r border-border bg-field shadow-xl sm:hidden"
+            // sidebar on a phone, so it wears the same paint, hairline included:
+            // `#EDE9E5` here too, and not the customer palette's `--color-border`
+            // the aside stopped using. Nothing visibly changes (this right edge
+            // sits against the dimmed backdrop), which is the point — the
+            // sentence above is now true of the whole panel and not just its
+            // fill.
+            className="fixed inset-y-0 left-0 z-50 flex w-72 max-w-[85vw] flex-col border-r border-[#EDE9E5] bg-field shadow-xl sm:hidden"
           >
             <div className="flex justify-end p-2 pb-0">
               <button

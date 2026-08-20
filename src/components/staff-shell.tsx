@@ -9,29 +9,31 @@ import {
 } from "@/components/staff-sidebar";
 import { NAV_LINK } from "@/components/ui";
 import { perfRun } from "@/lib/perf";
+import { type CountResult, readCount } from "@/lib/shell-counts";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { canManageStaff, canManageUsers, isStaffRole } from "@/lib/user-admin";
 
-/** As much of a `head:true` count response as the reader below needs. */
-type CountResult = {
-  count: number | null;
-  error: { message: string } | null;
-};
-
 /**
- * One backlog figure, or `null` when its query failed.
+ * One backlog figure, or `null` when the read cannot be trusted to have one.
  *
- * supabase-js does not throw for a query that did not work — a network failure,
- * a policy refusal and a bad column all come back in `error` — so the branch
- * that matters is this one, and it logs before it gives up. `null` travels to
- * the sidebar as an em dash; see `ShellCounts`.
+ * The decision itself is `readCount` in `lib/shell-counts.ts`, pure and under
+ * test; this is the logging half. It matters that it logs BOTH failure shapes,
+ * because a `head: true` request that fails quietly is the easiest kind to miss:
+ * a HEAD response has no body, so postgrest-js has no error JSON to parse and
+ * `error.message` would be `""` even when it does fill one in. The status is
+ * therefore printed too, and a result with no error at all is named as what it
+ * is rather than logged as `null`. `null` travels to the sidebar as an em dash;
+ * see `ShellCounts`.
  */
-function readCount(name: string, result: CountResult): number | null {
-  if (result.error) {
-    console.error(`staff shell ${name} count:`, result.error);
-    return null;
+function readShellCount(name: string, result: CountResult): number | null {
+  const value = readCount(result);
+  if (value === null) {
+    console.error(
+      `staff shell ${name} count (status ${result.status}):`,
+      result.error ?? "no content-range on the response",
+    );
   }
-  return result.count ?? 0;
+  return value;
 }
 
 /**
@@ -41,7 +43,7 @@ function readCount(name: string, result: CountResult): number | null {
  * The portal is two products under one login, and this is where they part
  * company. A customer gets `AppShell` — a storefront header of icons over a
  * centred column. A staff member gets THIS: the persistent left nav every admin
- * tool has, because the four back-office pages are worked in rotation all day
+ * tool has, because the six back-office pages are worked in rotation all day
  * and a header that has to be scrolled back to is a header that gets scrolled
  * back to forty times. The structure is Medusa v2's admin (studied at
  * `medusajs/medusa`, `packages/admin/dashboard/src/components/layout` — shell,
@@ -86,9 +88,12 @@ export async function StaffShell({
   // both redirect a staff member who types the URL, and every action behind them
   // repeats the check for the POST that skipped the page.
   //
-  // 分类 is ungated: category writes are open to any active staff member (it is
-  // the one table whose RLS still says `is_staff()` and nothing finer), and the
-  // page guards itself with `requireStaff` like every other one.
+  // 分类 is ungated: category writes are open to any active staff member — it is
+  // one of the tables whose write RLS is a bare `is_staff()` (so are `products`,
+  // migration 20260815101406:173-180) and, uniquely, the one whose id sequence is
+  // granted to authenticated (:719, the only such grant in the schema), which is
+  // what lets the session client INSERT a row at all. The page guards itself with
+  // `requireStaff` like every other one.
   const items: StaffNavKey[] = [
     "home",
     "orders",
@@ -123,7 +128,18 @@ export async function StaffShell({
   // Its own `perfRun` for the same reason: the page's run called `end()` before
   // it rendered this shell, so a `perfStep` would be recorded into a line that
   // has already been printed (see the cache-slot note in `lib/perf.ts`). One
-  // step for the three, because they go out together.
+  // step for the three, because they go out together. Every staff request now
+  // prints TWO `[perf]` lines — the page's and this one's — and that is the
+  // intended shape, not a duplicate.
+  //
+  // The nuance in taking a run here: `perfRun` claims the request's cache slot
+  // (`perf.ts:125`), so from this line on the slot points at THIS run rather
+  // than the page's. Any `perfStep` later in the same render would land in it —
+  // and `perf.end()` on the next line closes it, so that span would be recorded
+  // into a printed line and silently dropped rather than falling back to
+  // `standalone()`. Nothing does that today: `perfStep` is called only from
+  // `lib/auth/guards.ts`, which every page enters through BEFORE it renders, and
+  // Server Actions are separate requests with slots of their own.
   const supabase = await createServerSupabase();
   const perf = perfRun("staff-shell");
   const [submittedResult, bridgeFailedResult, unavailableResult] =
@@ -150,9 +166,9 @@ export async function StaffShell({
   // sidebar heads them 待办 and not the mockup's 今日. The today-scoped figures
   // belong to the dashboard's KPI strip.
   const counts: ShellCounts = {
-    submitted: readCount("submitted", submittedResult),
-    bridgeFailed: readCount("bridge failed", bridgeFailedResult),
-    unavailable: readCount("unavailable", unavailableResult),
+    submitted: readShellCount("submitted", submittedResult),
+    bridgeFailed: readShellCount("bridge failed", bridgeFailedResult),
+    unavailable: readShellCount("unavailable", unavailableResult),
   };
 
   const sidebar = {

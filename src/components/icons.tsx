@@ -122,7 +122,10 @@ export function GridIcon() {
   );
 }
 
-/** 用户 — two of them, so it cannot be mistaken for the account glyph above. */
+/**
+ * 客户 — two of them, the restaurants this portal serves, so the glyph cannot be
+ * mistaken for the single-figure account icon above.
+ */
 export function UsersIcon() {
   return (
     <svg {...ICON_PROPS}>

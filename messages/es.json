@@ -215,7 +215,7 @@
       "breadcrumb": "Ruta de navegación",
       "openMenu": "Abrir el menú",
       "closeMenu": "Cerrar el menú",
-      "badge": "Gestión",
+      "badge": "Interno",
       "backlog": "Por gestionar",
       "backlogUnavailable": "Productos pausados",
       "ordersWithCount": "Pedidos, {n, plural, one {# pendiente} other {# pendientes}}"
