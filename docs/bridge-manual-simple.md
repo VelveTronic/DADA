@@ -81,31 +81,21 @@ LEASE_SECONDS=300
 
 **这一步在做什么（一句话）**：数据库里有一个专给桥接用的账号，叫 `dada_bridge`。现在给它发一张权限刚刚好的"工作证"——只能**读**商品、客户、库存资料，只能**新增**订单，其他什么都碰不了、删不了。整个过程就是复制粘贴一段现成的文字，不需要懂数据库。
 
-**4a. 打开数据库管理工具并连接**
+**4a. 以管理员身份打开 PowerShell**
 
-在 SERVER 桌面或开始菜单找 **SQL Server Management Studio**（图标是一个黄色扳手+圆柱，简称 SSMS）打开。弹出的连接窗口里：
+在 SERVER 上：开始菜单 → 右键「Windows PowerShell」→ **以管理员身份运行**。（用管理员身份是为了让 Windows 账号自带的数据库最高权限生效，全程不需要输入任何数据库密码。）
 
-| 栏位 | 填什么 |
-| --- | --- |
-| Server name / 服务器名称 | `localhost,50352` |
-| Authentication / 身份验证 | Windows Authentication（Windows 身份验证，不用输密码） |
+**4b. 整块复制、粘贴、回车——就这一个动作**
 
-点 **Connect / 连接**。（找不到 SSMS 这个程序？停下，喊技术支持远程做，这一步总共 5 分钟。）
+把下面整块**从第一行到最后一行完整复制**，粘进 PowerShell 窗口，按回车：
 
-**4b. 粘贴脚本并运行**
-
-点左上角 **New Query / 新建查询**，出现一个空白编辑区。把下面整块**从第一行到最后一行完整复制**进去，然后按键盘 **F5**（或点工具栏的 Execute / 执行）：
-
-```sql
-USE wgdemo;
-GO
-
--- 账号进入 wgdemo 库（已存在则跳过）
+```powershell
+$cn = New-Object System.Data.SqlClient.SqlConnection("Server=localhost,50352;Database=wgdemo;Integrated Security=True")
+$cn.Open()
+$cmd = $cn.CreateCommand()
+$cmd.CommandText = @'
 IF NOT EXISTS (SELECT 1 FROM sys.database_principals WHERE name = 'dada_bridge')
     CREATE USER dada_bridge FOR LOGIN dada_bridge;
-GO
-
--- 只读：商品、客户、库存批次、税率、操作员、单据
 GRANT SELECT ON dbo.clientes      TO dada_bridge;
 GRANT SELECT ON dbo.articulo      TO dada_bridge;
 GRANT SELECT ON dbo.stolot        TO dada_bridge;
@@ -115,33 +105,30 @@ GRANT SELECT ON dbo.susuario      TO dada_bridge;
 GRANT SELECT ON dbo.albfacca      TO dada_bridge;
 GRANT SELECT ON dbo.albfacli      TO dada_bridge;
 GRANT SELECT ON dbo.pedclicah     TO dada_bridge;
-
--- 读 + 新增：订单的三张表（改不了、删不了已有内容）
 GRANT SELECT, INSERT ON dbo.pedclica     TO dada_bridge;
 GRANT SELECT, INSERT ON dbo.pedclili     TO dada_bridge;
 GRANT SELECT, INSERT ON dbo.pedclica_adi TO dada_bridge;
-
--- 读 + 更新：单号计数器（只会 +1）
 GRANT SELECT, UPDATE ON dbo.newcontador  TO dada_bridge;
-GO
-
--- 收回以前测试阶段图省事给的大权限（本来就没有的话自动跳过）
 IF IS_ROLEMEMBER('db_owner', 'dada_bridge') = 1
     ALTER ROLE db_owner DROP MEMBER dada_bridge;
-GO
-
--- 核对：打印这张"工作证"上的全部权限
-SELECT o.name AS objeto, p.permission_name AS permiso
-FROM sys.database_permissions p
-JOIN sys.objects o ON o.object_id = p.major_id
-WHERE USER_NAME(p.grantee_principal_id) = 'dada_bridge'
-ORDER BY o.name, p.permission_name;
+'@
+[void]$cmd.ExecuteNonQuery()
+$da = New-Object System.Data.SqlClient.SqlDataAdapter("SELECT o.name AS tabla, p.permission_name AS permiso FROM sys.database_permissions p JOIN sys.objects o ON o.object_id = p.major_id WHERE USER_NAME(p.grantee_principal_id) = 'dada_bridge' ORDER BY o.name, p.permission_name", $cn)
+$t = New-Object System.Data.DataTable
+[void]$da.Fill($t)
+"permisos: $($t.Rows.Count)  <- 应该是 17"
+$t | Format-Table -AutoSize
+$cn.Close()
 ```
+
+这段脚本做的事：让 `dada_bridge` 账号进入生产库 → 逐条发放"只读资料 + 只增订单"的权限 → 收回以前测试阶段临时给过的大权限 → 最后把发好的"工作证"打印出来给你看。
 
 **4c. 看结果，两个判据**
 
-- 运行后下方出现一张小表格，**恰好 17 行**——每行是一条权限，最右列只会出现 `SELECT` / `INSERT` / `UPDATE` 三种字样。是 17 行就算通过，截个图发给技术支持存档。
-- 如果出现**红色错误文字**：什么都不要改、不要重试，把整个窗口截图发给技术支持。这个脚本只发权限，不动任何数据，跑一半也不会弄坏东西。
+- 窗口出现 `permisos: 17` 和一张 17 行的小表格（每行一条权限，`permiso` 列只会有 `SELECT` / `INSERT` / `UPDATE` 三种字样）→ **通过**，截图发技术支持存档。
+- 出现**红色错误文字** → 什么都不要改、不要重试，整个窗口截图发技术支持。这脚本只发权限、不动任何数据，跑一半也不会弄坏东西。
+
+> 更喜欢图形界面？技术版手册 §⑤ 有同一套授权的 SSMS 做法，二选一即可。
 
 ### 第 5 步【SERVER】手动跑一轮验证
 
