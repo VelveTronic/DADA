@@ -154,6 +154,19 @@ schtasks /change /tn "DADA Bridge Prices" /disable
 
 停掉后**什么都不会坏**：门户照常接单（订单停在「已确认」排队），ERP 里已写入的单一张不丢、不重复。问题查清后把 `/disable` 换成 `/enable` 逐条恢复，积压订单会自动按顺序补进 ERP，无需人工补录。
 
+## 附录、Wingest 全店连不上 SQL（Error 08001）应急三板斧
+
+> 2026-08-20 真实事故的教训。症状：所有工位（甚至 SERVER 本机）开 Wingest 都弹
+> `No hemos podido conectar con el servidor SQL - Error 08001`。
+
+1. **刚重启过 SERVER？先等 2 分钟再试。** 这台服务器配置低，SQL 开机预热要一两分钟，期间报 08001 是正常的。
+2. **弹出「Conexion Servidor」对话框时，永远点 Cancelar，绝不点 Aceptar。** 点 Aceptar 会把框里的内容（往往是乱码）写回全店共用的配置文件 `C:\WINGEST8\conex.sql`，把小故障变成大故障。唯一例外：技术人员指导下有意重建配置时——填 `192.168.1.40\WINGEST` + 用户 `sa` + 密码后点 Aceptar。
+3. **两个常见根源**（都在 SERVER 上）：
+   - **防火墙被系统更新悄悄重新启用**：检查放行规则「SQL Server 50352 (Wingest LAN)」和「SQL Browser 1434 (Wingest LAN)」是否还在、是否启用（Windows 安全中心 → 防火墙 → 高级设置 → 入站规则）。
+   - **配置文件被写坏**：`C:\WINGEST8\conex.sql` 的修改日期如果是"刚刚"，说明被人点 Aceptar 写坏了——用备份还原：把 `C:\Users\Admin\Desktop\WINGEST8\conex.sql.bueno-20260820` 复制为 `C:\WINGEST8\conex.sql`，再开 Wingest。
+
+另有一颗定时炸弹待拆：SERVER 的 IP `192.168.1.40` 目前是路由器自动分配的（配置文件里写死了这个 IP），路由器哪天换了分配，全店就会重演 08001。**根治：在路由器 DHCP 设置里把 MAC `50-EB-F6-24-27-64` 永久保留为 `192.168.1.40`。**
+
 ## 七、红线（不要做的事）
 
 1. **不要**改 `bridge.env` 里的 `SUPABASE_URL`——程序只认这一个地址，改了直接罢工（防呆设计）。
