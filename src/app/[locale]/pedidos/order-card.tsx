@@ -103,16 +103,17 @@ export async function OrderCard({
       <div className="flex items-center justify-between gap-2">
         {/* The REAL `order_number` — the sequence Wingest and the delivery note
             both know this order by — not the mockup's invented `DD-20260818-014`.
-            Archivo, because it is a numeral. The mark is written `Nº`, which is
-            how a document number is written in Spain and reads as one anywhere;
-            the sr-only line beside it is the translated sentence, so a screen
-            reader announces 订单 1005 / Pedido 1005 rather than spelling a
-            symbol. */}
+            Archivo, because it is a numeral. The mark is written `N.º` — the
+            RAE's abbreviation of «número», the same form `profile.customerNo`
+            and the staff table heads print — and reads as a document number
+            anywhere; the sr-only line beside it is the translated sentence, so
+            a screen reader announces 订单 1005 / Pedido 1005 rather than
+            spelling a symbol. */}
         <span className="font-num text-xs text-muted">
           <span className="sr-only">
             {t("orderNumber", { n: order.order_number })}
           </span>
-          <span aria-hidden>Nº {order.order_number}</span>
+          <span aria-hidden>N.º {order.order_number}</span>
         </span>
         <OrderStatusBadge status={order.status} />
       </div>

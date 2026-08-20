@@ -123,7 +123,10 @@ export function SettingsForm({
             `--color-background` (#f1eeeb) is the page BEHIND the card and never
             touches this control, so overriding the offset to it would put a
             beige stripe on a white card. Should a switch ever be drawn straight
-            on the wash, that one needs `ring-offset-background`.
+            on the wash, that one needs the background-token offset utility —
+            `ring-offset-` plus the background token, written broken here
+            because Tailwind scans raw file text and would compile a dead rule
+            out of the prose.
 
             Contrast, both states: the ring is `#e0231c` and both colours now
             adjacent to it are `#ffffff` — the offset gap inside, the card
