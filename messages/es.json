@@ -343,9 +343,14 @@
       }
     },
     "users": {
-      "title": "Gestión de usuarios",
+      "title": "Clientes",
       "customersTitle": "Cuentas de cliente",
       "staffTitle": "Cuentas internas",
+      "statCompanies": "Restaurantes asociados",
+      "statMonthActive": "Clientes con pedidos este mes",
+      "statActiveAccounts": "Cuentas activas",
+      "monthOrders": "{count, plural, one {<n>#</n> pedido este mes} other {<n>#</n> pedidos este mes}}",
+      "noCompany": "Sin restaurante",
       "createCustomer": "Nueva cuenta de cliente",
       "createStaff": "Nueva cuenta interna",
       "email": "Correo electrónico",

@@ -343,9 +343,14 @@
       }
     },
     "users": {
-      "title": "用户管理",
+      "title": "客户",
       "customersTitle": "客户账号",
       "staffTitle": "员工账号",
+      "statCompanies": "合作餐厅",
+      "statMonthActive": "本月下单客户",
+      "statActiveAccounts": "已启用账号",
+      "monthOrders": "本月 <n>{count, number}</n> 单",
+      "noCompany": "无关联餐厅",
       "createCustomer": "新建客户账号",
       "createStaff": "新建员工账号",
       "email": "邮箱",
