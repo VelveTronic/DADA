@@ -9,7 +9,7 @@ import { groupAccountsByCompany } from "@/lib/company-accounts";
 import { madridMonthStartIso } from "@/lib/orders";
 import { perfRun } from "@/lib/perf";
 import { scanRange, scanTruncated, scanWindowCount } from "@/lib/scan-windows";
-import { type CountResult, readCount } from "@/lib/shell-counts";
+import { readLoggedCount } from "@/lib/shell-counts";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { Database } from "@/lib/supabase/database.types";
 import {
@@ -135,7 +135,7 @@ const BADGE = "rounded-md px-1.5 py-0.5 text-xs";
 const BADGE_ON = `${BADGE} bg-green-100 text-green-800`;
 const BADGE_OFF = `${BADGE} bg-amber-100 text-amber-800`;
 /**
- * The initial disc, at the mockup's own metrics (`:405`): 34px, its `#F4F0EC`
+ * The initial disc, at the mockup's own metrics (`:399`): 34px, its `#F4F0EC`
  * fill — the row-rule shade, used here as a tint — and `#79726B` letters, which
  * map to `text-ink-soft` under the standing rule (the mockup's grey is lighter
  * than either candidate token; darker is the safe way to miss).
@@ -146,33 +146,12 @@ const AVATAR =
 const ROW_BTN = `${BTN_QUIET} h-[30px] px-2.5 text-[12.5px] disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-border-strong disabled:hover:text-ink`;
 
 /**
- * One count, or `null` when the read cannot be trusted to have one — the shape
- * the shell and the dashboard both log their figures in, down to the wording.
- *
- * Both failure shapes are printed because a `head: true` request that fails
- * quietly is the easiest kind to miss: a HEAD response has no body, so
- * postgrest-js has no error JSON to parse and `error.message` would be `""` even
- * when it does fill one in. `null` reaches the strip as an em dash, never as 0 —
- * a count that did not arrive must not be able to tell a manager this portal has
- * no restaurants on it.
- */
-function readUsersCount(name: string, result: CountResult): number | null {
-  const value = readCount(result);
-  if (value === null) {
-    console.error(
-      `staff users ${name} count (status ${result.status}):`,
-      result.error ?? "no content-range on the response",
-    );
-  }
-  return value;
-}
-
-/**
  * How many orders each restaurant has placed THIS MONTH, tallied in memory.
  *
  * ONE query for every company's figure — `select company_id` over this month's
  * orders — rather than a `head: true` count per company, which is one round trip
- * per row of the list below (86 restaurants today, so 86 requests for one page).
+ * per row of the list below: this portal serves on the order of a hundred
+ * restaurants, so on the order of a hundred requests to draw one page.
  *
  * It is a loop and not a single request because PostgREST caps every response at
  * `max_rows` (1000 — `supabase/config.toml:18`, and 1000 is the cloud default
@@ -180,10 +159,11 @@ function readUsersCount(name: string, result: CountResult): number | null {
  * `.range(0, 4999)` over 2,300 orders comes back with 1000 rows, no error, and a
  * `Content-Range` of `0-999/2300`. So the scan walks windows of the cap until it
  * has covered the `count` the FIRST window reported — `scanWindowCount` is where
- * that arithmetic lives and is tested. **Today that is ONE window**: the whole
- * portal has placed a few hundred orders since it opened, so a single month is
- * far inside the first 1000 and the loop makes exactly one request. The cap is
- * silent, which is precisely why the loop is written before it is needed.
+ * that arithmetic lives and is tested. **Today that is ONE window**: a month's
+ * orders sit well inside one 1000-row window at this portal's volumes, so the
+ * loop makes exactly one request — and that holds for ANY month under 1000
+ * orders, which is the claim being made here rather than a counted figure. The
+ * cap is silent, which is precisely why the loop is written before it is needed.
  *
  * `.order("id")` is what makes the windows mean anything. Two `OFFSET` reads of
  * an unordered table are two independent scans as far as Postgres is concerned:
@@ -199,7 +179,17 @@ function readUsersCount(name: string, result: CountResult): number | null {
  * beside its name. So any window error, a missing `Content-Range` on the first
  * window (without it the scan cannot know how many windows it owes) and a plan
  * capped by `MAX_SCAN_WINDOWS` all return `null`, and every row on the page then
- * draws an em dash instead of a number.
+ * draws an em dash instead of a number. The ceiling is checked on the FIRST
+ * window, where the total is learned: a month past 10,000 orders is refused
+ * before the other nine requests are issued rather than after, since their rows
+ * are going to be thrown away either way.
+ *
+ * None of those three branches has a unit test, and that is the precedent
+ * `/staff/categorias` set for its own inline scan: testing a loop written
+ * against the supabase client means mocking the client, which pins the mock and
+ * not the page, so the loops are verified on a fixture render instead — while
+ * the arithmetic that could actually be wrong, the window count and the
+ * ceiling, has its own table in `scan-windows.test.ts`.
  *
  * Cancelled orders are IN the tally: 本月单量 counts what the restaurant placed,
  * and an order they cancelled was still placed. No status filter, therefore no
@@ -213,7 +203,6 @@ async function scanMonthOrders(
   // against a different month.
   const monthStart = madridMonthStartIso(new Date());
   const tally = new Map<string, number>();
-  let total = 0;
   // One, until the first response says how many are really needed. Bounded by
   // `MAX_SCAN_WINDOWS` inside `scanWindowCount`, so this cannot run away.
   let windows = 1;
@@ -244,17 +233,20 @@ async function scanMonthOrders(
         );
         return null;
       }
-      total = count;
-      windows = scanWindowCount(total);
+      windows = scanWindowCount(count);
+      // Checked HERE, on the window that learned the total, and not after the
+      // loop: a plan past the ceiling ends in `null` whatever the other windows
+      // come back with, so asking for them is nine round trips spent filling a
+      // tally that is about to be thrown away.
+      if (scanTruncated(count)) {
+        console.error(
+          `staff users month order scan: ${count} orders this month is past the window ceiling`,
+        );
+        return null;
+      }
     }
   }
 
-  if (scanTruncated(total)) {
-    console.error(
-      `staff users month order scan: ${total} orders this month is past the window ceiling`,
-    );
-    return null;
-  }
   return tally;
 }
 
@@ -384,8 +376,21 @@ export default async function StaffUsersPage({
   const staff: StaffRow[] = staffResult?.data ?? [];
   const companies: CompanyOption[] = companyResult.data ?? [];
 
-  const activeCompanies = readUsersCount("active companies", companyCountResult);
-  const activeAccounts = readUsersCount("active accounts", accountCountResult);
+  // Both counts read and logged by the shared half (`lib/shell-counts.ts`),
+  // which prints `staff users <name> count (status <n>)` — the scope string is
+  // the same "staff users" the query logs above use. `null` reaches the strip
+  // as an em dash, never as 0: a count that did not arrive must not be able to
+  // tell a manager this portal has no restaurants on it.
+  const activeCompanies = readLoggedCount(
+    "staff users",
+    "active companies",
+    companyCountResult,
+  );
+  const activeAccounts = readLoggedCount(
+    "staff users",
+    "active accounts",
+    accountCountResult,
+  );
 
   /**
    * This month's orders for one restaurant. `0` is a real answer — the tally
@@ -396,11 +401,39 @@ export default async function StaffUsersPage({
     monthTally === null ? null : (monthTally.get(companyId) ?? 0);
 
   /**
-   * 本月下单客户: how many DISTINCT restaurants are in the tally. It is the map's
-   * size rather than a second read — one key per company is exactly what the
-   * tally is — and it dashes with the scan for the same reason every row does.
+   * 本月下单客户: how many of the ACTIVE restaurants ordered this month.
+   *
+   * The tally's own key count is not that figure. Its keys are every company
+   * that placed an order since the 1st, deactivated ones included — switching a
+   * restaurant off does not unplace the orders it made on the 3rd — while
+   * 合作餐厅 in the cell beside it counts active companies only. Left as
+   * `monthTally.size` the pair could print a numerator larger than its
+   * denominator, and the two cells would be answering different questions in
+   * the same row of the same strip. Intersecting with the active ids the page
+   * has already read makes it a fraction again, which is what the mockup's own
+   * sub-line was (`:375` — 86 家餐厅 · 本月下单 62 家).
+   *
+   * So a restaurant deactivated AFTER it ordered this month is left out, BY
+   * DESIGN: this cell answers "how many of the restaurants we serve ordered
+   * this month", and one we have switched off is not one of them. Its orders
+   * are still in the tally and still on its own row's 本月单量, which is a
+   * different question and keeps its answer.
+   *
+   * It now depends on TWO reads, so it dashes when EITHER of them failed — the
+   * scan, as every row does, and the companies list. A half-known intersection
+   * is not a small number, it is an unknown one: printing it would tell a
+   * manager that fewer restaurants ordered than really did, in exactly the
+   * confident-looking way the em dash exists to prevent.
+   *
+   * The list is capped at 1000 rows like every read on this page, so past a
+   * thousand ACTIVE restaurants this would drift under the count beside it —
+   * the same "far inside one window" the scan above rests on, and it would want
+   * the same windowing on the day it stops being true.
    */
-  const monthCustomers = monthTally === null ? null : monthTally.size;
+  const monthCustomers =
+    monthTally === null || companyResult.error
+      ? null
+      : companies.filter((company) => monthTally.has(company.id)).length;
 
   /** What to call an account in a label: their name, else the address, else the id. */
   const nameOf = (id: string, displayName: string | null) =>
@@ -485,10 +518,16 @@ export default async function StaffUsersPage({
           26px figures would be three ~110px columns and «Clientes con pedidos
           este mes» would wrap four times inside one.
 
-          The mockup's sub-line under the title (`:376` — 86 家餐厅 · 本月下单 62
+          The mockup's sub-line under the title (`:375` — 86 家餐厅 · 本月下单 62
           家) is NOT drawn: it is these first two figures in a sentence, and a
           page that prints the same two numbers twice has two places to disagree
-          with itself the day one read fails. */}
+          with itself the day one read fails.
+
+          The mockup's THIRD cell is 月结客户 (`:652`) — how many restaurants are
+          on monthly settlement, the same 月结/现结 nothing in this schema
+          records, which is why the 结算 column is missing from the list below
+          too. 已启用账号 has that slot instead: it is the other number this page
+          is about, and it is one this portal can actually answer. */}
       <div
         className={`${ADMIN_CARD} mt-[18px] grid grid-cols-1 overflow-hidden sm:grid-cols-3`}
       >
@@ -506,12 +545,11 @@ export default async function StaffUsersPage({
             <p className="text-[12.5px] text-ink-soft">{stat.label}</p>
             <p className="font-num text-[26px] font-bold leading-none tabular-nums">
               {stat.value === null ? (
-                // Two thirds of the figure's size (26 × 2/3 ≈ 17.3 → 18px), the
-                // same proportion the dashboard gives its 34px cells: an em dash
-                // at full size is a black bar that reads as a redaction rather
-                // than as "we do not know". `leading-none` above keeps the line
-                // box 26px either way, so a dashed cell is exactly as tall as
-                // its neighbours.
+                // Roughly two thirds of the figure's size (18 of 26), as on the
+                // dashboard (24 of 34): an em dash at full size is a black bar
+                // that reads as a redaction rather than as "we do not know".
+                // `leading-none` above keeps the line box 26px either way, so a
+                // dashed cell is exactly as tall as its neighbours.
                 <span className="text-[18px] text-muted">{DASH}</span>
               ) : (
                 stat.value
@@ -523,14 +561,15 @@ export default async function StaffUsersPage({
 
       {/* The account book, grouped by restaurant. FOUR of the mockup's seven
           columns are not drawn, and none of them for want of space (decision 3):
-          门店 (`:400`) — there is no store concept, one company is one customer
-          number; 联系人 + 电话 (`:409-412`) — the real contacts ARE the portal
-          accounts, so they are the rows nested under each restaurant instead of
-          a name in a cell; 结算 (`:417`) — 月结/现结 is not recorded anywhere;
-          and 代下单 / 详情 (`:419-422`) — neither exists. Its ＋新建客户 button
-          (`:381`) is not drawn either: the create form at the foot of this card
-          IS that action, and a button whose only honest behaviour is to scroll
-          down to it is a button that lies about being one.
+          门店 (the cell `:405`, its header `:394`) — there is no store concept,
+          one company is one customer number; 联系人 + 电话 (`:406-409`) — the
+          real contacts ARE the portal accounts, so they are the rows nested
+          under each restaurant instead of a name in a cell; 结算 (`:414`) —
+          月结/现结 is not recorded anywhere; and 代下单 / 详情 (`:416-419`) —
+          neither exists. Its ＋新建客户 button (`:379`; the 导出名单 to its left
+          is `:378`) is not drawn either: the create form at the foot of this
+          card IS that action, and a button whose only honest behaviour is to
+          scroll down to it is a button that lies about being one.
 
           This is an ACCOUNT list grouped by restaurant, not a company list: it
           is built from `portal_users`, so a company with no account yet never
@@ -577,7 +616,15 @@ export default async function StaffUsersPage({
                         ? ([...name][0] ?? "").toUpperCase()
                         : DASH}
                     </span>
-                    <div className="min-w-0 flex-1">
+                    {/* The same 120px floor the account rows below carry, and
+                        this row has MORE reason to: three siblings follow it
+                        here (the tarifa, 本月单量 and the status chip) where an
+                        account row has two. Without the floor a `flex-1` column
+                        surrenders all of its width to them in a 390px drawer
+                        and a restaurant's name ellipsises to a character or
+                        two; with it the trailing three wrap onto a second line,
+                        which is what the row is `flex-wrap` for. */}
+                    <div className="min-w-30 flex-1">
                       <p className="truncate text-[13.5px] font-semibold">
                         {name}
                       </p>
@@ -604,7 +651,7 @@ export default async function StaffUsersPage({
 
                     {group.id !== null && (
                       /* 本月单量. The figure is the mockup's 14px/600 numeral
-                         and the words around it are its 11.5px grey (`:414-415`)
+                         and the words around it are its 11.5px grey (`:411-412`)
                          — one message with the number inside a `<n>` tag, so the
                          Spanish plural and the Chinese 本月 … 单 word order both
                          come out of the translation rather than out of the JSX.

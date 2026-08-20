@@ -93,13 +93,23 @@ export function SettingsForm({
             from the left. Vertically it is centred by the same 3: 3 + 20 + 3 =
             26. The fixture measures all four gaps in both states.
 
-            The knob is white in BOTH positions, with the mockup's own drop
-            shadow to draw its edge on the pale off track. The state is carried
-            by the track's colour and the knob's POSITION — the two things that
-            change — which is the switch every phone in the room draws. */}
+            The KNOB's colour is the one place this switch parts with the
+            mockup, and it has to. There the knob is white in both positions,
+            and white on the `#E4DED8` off track is 1.33:1 — under the 3:1 WCAG
+            asks of a non-text control, which makes the off switch a track with
+            nothing visible in it. So the knob is `--color-muted` off (#6e6760
+            on #e4ded8 = 4.17:1) and the mockup's white on (#ffffff on #e0231c =
+            4.74:1). One colour cannot serve both: white fails the off track and
+            muted on brand is 1.17:1, worse. The mockup's drop shadow stays in
+            both states.
+
+            The state is still carried by the track's colour and the knob's
+            POSITION — the two things that move — which is the switch every
+            phone in the room draws; the knob's colour only makes sure the knob
+            is one of the things you can see. */}
         <span
           aria-hidden="true"
-          className="relative ml-auto inline-block h-[26px] w-11 shrink-0 rounded-full bg-border-strong transition-colors after:absolute after:top-[3px] after:left-[3px] after:h-5 after:w-5 after:rounded-full after:bg-white after:shadow-[0_1px_3px_rgba(0,0,0,.2)] after:transition-transform peer-checked:bg-brand peer-checked:after:translate-x-[18px] peer-focus-visible:ring-2 peer-focus-visible:ring-brand"
+          className="relative ml-auto inline-block h-[26px] w-11 shrink-0 rounded-full bg-border-strong transition-colors after:absolute after:top-[3px] after:left-[3px] after:h-5 after:w-5 after:rounded-full after:bg-muted after:shadow-[0_1px_3px_rgba(0,0,0,.2)] after:transition-[transform,background-color] peer-checked:bg-brand peer-checked:after:translate-x-[18px] peer-checked:after:bg-white peer-focus-visible:ring-2 peer-focus-visible:ring-brand"
         />
       </label>
 

@@ -111,11 +111,11 @@ export default async function StaffSettingsPage({
             shared because a save redirects here with a single `?result=` — which
             is honest: only one form can be submitted at a time.
 
-            OUT, and deliberately: the mockup's 供应商资料 card (`:437-461`, a
+            OUT, and deliberately: the mockup's 供应商资料 card (`:436-460`, a
             company name / phone / warehouse / logo form backed by no table), the
             two dropdown rows inside 下单规则 (每日截单时间 and 最小起订量,
             `:666-667` — a cut-off time and a minimum order nobody has built,
-            decision 3), its 通知 card (`:479-491`) and the ONE global 保存修改
+            decision 3), its 通知 card (`:480-491`) and the ONE global 保存修改
             button over all of them (`:433`). That last one is not just missing
             data: `updateSetting` writes a single key per POST, so a button that
             claimed to save the whole page would save one switch (decision 9). */}

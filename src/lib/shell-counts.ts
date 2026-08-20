@@ -28,9 +28,11 @@
  * `count: "exact"` response ALWAYS carries one, so `count === null` fails the
  * read whichever way `error` fell.
  *
- * Pure on purpose — it imports no client and issues no request, so the
- * decision is pinned by the table beside it rather than by pointing a browser
- * at a broken database. The caller keeps the logging.
+ * `readCount` is pure on purpose — it imports no client and issues no request,
+ * so the decision is pinned by the table beside it rather than by pointing a
+ * browser at a broken database. `readLoggedCount` below is that same decision
+ * with the log line the readers print, kept here because four of them were
+ * writing the identical one.
  */
 
 /** As much of a `head: true` count response as `readCount` reads. */
@@ -54,4 +56,39 @@ export type CountResult = {
 export function readCount(result: CountResult): number | null {
   if (result.error) return null;
   return result.count;
+}
+
+/**
+ * `readCount`, plus the line the server log gets when the figure did not come:
+ * `<scope> <name> count (status <n>): <error>`.
+ *
+ * This is the logging half, the one every reader used to write for itself, and
+ * the reason it is worth a function of its own is that it has to print BOTH
+ * failure shapes. A `head: true` request that fails quietly is the easiest
+ * kind to miss: a HEAD response has no body, so postgrest-js has no error JSON
+ * to parse and `error.message` would be `""` even when it does fill one in. So
+ * the status is printed too, and a result that failed with no error at all is
+ * NAMED as what it is rather than logged as a bare `null`.
+ *
+ * `scope` says which reader is speaking ("staff users"), `name` which figure
+ * ("active companies"). The shell, the staff home and the order queue each
+ * still inline a copy of this that is byte-identical but for that first string;
+ * folding them in is a change of its own, being three more renders to check.
+ *
+ * The return travels exactly as `readCount`'s does: `0` is a real answer, and
+ * `null` is drawn as an em dash and never as 0.
+ */
+export function readLoggedCount(
+  scope: string,
+  name: string,
+  result: CountResult,
+): number | null {
+  const value = readCount(result);
+  if (value === null) {
+    console.error(
+      `${scope} ${name} count (status ${result.status}):`,
+      result.error ?? "no content-range on the response",
+    );
+  }
+  return value;
 }

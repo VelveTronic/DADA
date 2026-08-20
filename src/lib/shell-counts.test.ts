@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { type CountResult, readCount } from "./shell-counts";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { type CountResult, readCount, readLoggedCount } from "./shell-counts";
 
 /** postgrest-js's error object, as much of it as `readCount` ever looks at. */
 const REFUSAL = {
@@ -48,5 +48,68 @@ describe("readCount", () => {
       expect(silent.count ?? 0).toBe(0);
       expect(readCount(silent)).toBeNull();
     }
+  });
+});
+
+describe("readLoggedCount", () => {
+  const logged = () => vi.spyOn(console, "error").mockImplementation(() => {});
+  afterEach(() => vi.restoreAllMocks());
+
+  it("returns what readCount returns, for every shape", () => {
+    const cases: CountResult[] = [
+      ...SILENT,
+      { count: null, error: REFUSAL, status: 403 },
+      { count: 7, error: REFUSAL, status: 500 },
+      { count: 0, error: null, status: 200 },
+      { count: 42, error: null, status: 200 },
+    ];
+    logged();
+    for (const result of cases) {
+      expect(readLoggedCount("staff users", "active companies", result)).toBe(
+        readCount(result),
+      );
+    }
+  });
+
+  it("says nothing when the figure arrived", () => {
+    const error = logged();
+    expect(
+      readLoggedCount("staff users", "active companies", {
+        count: 0,
+        error: null,
+        status: 200,
+      }),
+    ).toBe(0);
+    expect(error).not.toHaveBeenCalled();
+  });
+
+  /**
+   * The line a reader is meant to find in the server log: WHO was reading, WHICH
+   * figure, and the status — because the two silent shapes have no error to
+   * print and would otherwise log as a bare `null` from an anonymous caller.
+   */
+  it.each<[string, CountResult, string, unknown]>([
+    [
+      "a policy refusal",
+      { count: null, error: REFUSAL, status: 403 },
+      "staff users active companies count (status 403):",
+      REFUSAL,
+    ],
+    [
+      "a HEAD 404 rewritten to 204",
+      SILENT[0],
+      "staff users active companies count (status 204):",
+      "no content-range on the response",
+    ],
+    [
+      "a 200 with the Content-Range stripped",
+      SILENT[1],
+      "staff users active companies count (status 200):",
+      "no content-range on the response",
+    ],
+  ])("names %s in the log", (_case, result, line, detail) => {
+    const error = logged();
+    expect(readLoggedCount("staff users", "active companies", result)).toBeNull();
+    expect(error).toHaveBeenCalledExactlyOnceWith(line, detail);
   });
 });
