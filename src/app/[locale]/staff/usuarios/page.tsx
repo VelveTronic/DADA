@@ -233,17 +233,18 @@ async function scanMonthOrders(
         );
         return null;
       }
-      windows = scanWindowCount(count);
       // Checked HERE, on the window that learned the total, and not after the
       // loop: a plan past the ceiling ends in `null` whatever the other windows
       // come back with, so asking for them is nine round trips spent filling a
-      // tally that is about to be thrown away.
+      // tally that is about to be thrown away. Before the window count is even
+      // computed — an assignment the ceiling makes dead would be noise.
       if (scanTruncated(count)) {
         console.error(
           `staff users month order scan: ${count} orders this month is past the window ceiling`,
         );
         return null;
       }
+      windows = scanWindowCount(count);
     }
   }
 

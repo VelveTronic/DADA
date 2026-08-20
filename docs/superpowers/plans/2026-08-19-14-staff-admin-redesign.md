@@ -114,22 +114,26 @@
 
 **Files:** modify `src/app/[locale]/staff/usuarios/page.tsx`, `messages/zh.json`, `messages/es.json`.
 
-- [ ] Page title → 客户/Clientes. Customers half → mockup table look: initial-disc avatar (company name first char), name + `codcli` `font-num text-[11px] text-muted`, tarifa, contact rows (the portal_users under the company: display_name + email), 本月单量 (`head:true` count per company is N+1 — ONE grouped read of this month's orders `select company_id` with the Madrid month helper, counted in memory; bound + comment), active chip (在售 pairs), actions = existing activate/deactivate + the create form (kept, restyled). Stats strip per mockup: 合作餐厅 / 本月下单客户 / 活跃账号 (real derivable numbers only).
-- [ ] Staff half (owner-only) keeps every mechanic (role select, self-lockout row, create form) restyled to the admin card.
-- [ ] Gate; fixture; commit `feat(staff): clients view per mockup — companies first, month counts, accounts kept`.
+- [x] Page title → 客户/Clientes. Customers half → mockup table look: initial-disc avatar (company name first char), name + `codcli` `font-num text-[11px] text-muted`, tarifa, contact rows (the portal_users under the company: display_name + email), 本月单量 (`head:true` count per company is N+1 — ONE grouped read of this month's orders `select company_id` with the Madrid month helper, counted in memory; bound + comment), active chip (在售 pairs), actions = existing activate/deactivate + the create form (kept, restyled). Stats strip per mockup: 合作餐厅 / 本月下单客户 / 活跃账号 (real derivable numbers only).
+- [x] Staff half (owner-only) keeps every mechanic (role select, self-lockout row, create form) restyled to the admin card.
+- [x] Gate; fixture; commit `feat(staff): clients view per mockup — companies first, month counts, accounts kept`.
+
+> Shipped: `07cee0d` + fix round `2912662` (company-grouped account book keyed by company_id, windowed month scan failing closed with an early ceiling return, three honest stats with the active-∩-ordered intersection, title transient closed; commit subject reads "clients view — companies first, real month counts" where this bullet sketched "per mockup").
 
 ### Task A7: Settings — admin cards + mockup toggle
 
 **Files:** modify `src/app/[locale]/staff/ajustes/page.tsx`, `src/app/[locale]/staff/ajustes/settings-form.tsx`, `messages/zh.json`, `messages/es.json`.
 
-- [ ] One admin card per setting from the registry (unchanged list), mockup row anatomy (title 13.5px semibold + desc 12px muted left, control right); `SettingsForm` toggle restyled to the 44×26 track/20px knob (`peer-checked:bg-brand`, off `bg-border-strong`) — the sr-only checkbox + hidden-`0` contract byte-preserved; per-card save kept (mockup's global 保存修改 is OUT — our per-setting form is the safer real shape).
-- [ ] Gate; fixture (toggle both states, focus ring visible); commit `feat(staff): settings on the admin cards with the mockup toggle`.
+- [x] One admin card per setting from the registry (unchanged list), mockup row anatomy (title 13.5px semibold + desc 12px muted left, control right); `SettingsForm` toggle restyled to the 44×26 track/20px knob (`peer-checked:bg-brand`, off `bg-border-strong`) — the sr-only checkbox + hidden-`0` contract byte-preserved; per-card save kept (mockup's global 保存修改 is OUT — our per-setting form is the safer real shape).
+- [x] Gate; fixture (toggle both states, focus ring visible); commit `feat(staff): settings on the admin cards with the mockup toggle`.
+
+> Shipped: `357162d` + fix round `2912662` (44×26/20/18 toggle on exact tokens, hidden-`0` contract byte-preserved, off-knob restored to bg-muted after the round caught a 1.33:1 regression; es subtitle «Opciones del portal de pedidos»; 1046 tests / 31 files).
 
 ### Task A8: Verification + HANDOFF
 
 - [ ] Full gate from clean; cross-task final review (whole Plan-14 range): token one-off ledger (#FCFBFA/#EDE9E5/funnel ramp all noted), AA sweep on the new admin text, i18n parity + closed lists, security gates (supabase/ diff EMPTY, no new RPC, package.json untouched), staff mobile drawer intact, categories comparator single-source (catalog imports the lib).
 - [ ] Recorded follow-ups from A1's round to close or hand off: `/cuenta`'s four head-count logs are blind the same way the shell's were (no status on an empty-body error — apply shell-counts' F2 fix there, or record in HANDOFF); accepted states to leave alone: dual brand-link names (sidebar «DADA» vs phone-bar 员工后台, both truthful) and the usuarios crumb-客户/title-用户管理 transient that A6 closes.
-- [ ] A3-A5 ledger: converge the TD/TH header/cell constants now duplicated across productos/pedidos/staff-home into ui.ts (byte-identical strings); normalise `profile.customerNo` es «Nº» → «N.º» to match `staff.colOrder`; the cache() count unification now has THREE readers (shell + queue chips + dashboard — same submitted/bridge_failed/paused predicates, up to 3 duplicate rounds per load) and rises in priority accordingly.
+- [ ] A3-A5 ledger: converge the TD/TH header/cell constants now duplicated across productos/pedidos/staff-home into ui.ts (byte-identical strings); normalise `profile.customerNo` es «Nº» → «N.º» to match `staff.colOrder`; the cache() count unification now has THREE readers (shell + queue chips + dashboard — same submitted/bridge_failed/paused predicates, up to 3 duplicate rounds per load) and rises in priority accordingly. Also: migrate the shell/home/queue inline count loggers onto lib/shell-counts' `readLoggedCount`; give the settings toggle's ON-state focus ring a `ring-offset-2` (brand ring on brand track reads as a fatter pill — pre-existing); fix `user-admin.ts:148`'s stale 用户管理 wording (page renamed 客户).
 - [ ] Owner to-dos recorded (live walkthrough incl. category reorder against the real rail, staff-role matrix by logging in as each role).
 - [ ] HANDOFF.md updated; push.
 

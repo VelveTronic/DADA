@@ -71,8 +71,9 @@ export function readCount(result: CountResult): number | null {
  * NAMED as what it is rather than logged as a bare `null`.
  *
  * `scope` says which reader is speaking ("staff users"), `name` which figure
- * ("active companies"). The shell, the staff home and the order queue each
- * still inline a copy of this that is byte-identical but for that first string;
+ * ("active companies"). The shell and the staff home still inline copies that
+ * are byte-identical but for that first string, and the order queue's takes a
+ * typed `QueueTab` in place of `name` around the same body and emitted line;
  * folding them in is a change of its own, being three more renders to check.
  *
  * The return travels exactly as `readCount`'s does: `0` is a real answer, and
