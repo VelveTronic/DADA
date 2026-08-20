@@ -17,6 +17,7 @@
  */
 
 import { localizedName } from "@/lib/catalog/display";
+import { formText } from "@/lib/form-text";
 
 /**
  * The gap between two neighbours after a re-sequence.
@@ -200,6 +201,80 @@ export function moveCategory<T extends NamedCategory & { id: number }>(
 }
 
 /**
+ * The one `?cat=` word that is not an `erp_code`: the products nobody filed.
+ *
+ * **Collision-safe by the WRITERS, not by the schema.** `categories.erp_code` is
+ * a plain unique text column, so nothing in Postgres would refuse a category
+ * literally coded `none`. What refuses it is that the app has exactly two
+ * writers and neither can mint one. All 61 freepos codes are decimal digit
+ * strings ("7", "83"), and `pnpm seed:categories` upserts on that same hard-coded
+ * table, so re-running it can only ever write those 61 again; a category created
+ * in this portal gets `makePortalErpCode` below, which is always `p<epoch-ms>`.
+ * A hand-written INSERT straight into the database could still break it, and
+ * that is the whole exposure.
+ */
+export const CAT_NONE = "none";
+
+/** What `resolveCatFilter` looks a `?cat=` word up in. */
+export interface CatCode {
+  id: number;
+  erp_code: string;
+}
+
+/**
+ * What `?cat=` resolved to: no filter at all, the products nobody filed, or one
+ * category's id.
+ *
+ * `null` is also where an `erp_code` that matches no category lands — the
+ * customer catalogue's own precedent for an unknown `?cat=` (`catalogo/page.tsx`
+ * resolves it "to nothing and the page renders unfiltered, never a failed
+ * query"), and the same rule keeps a stale bookmark from emptying a table.
+ */
+export type CatFilter = { kind: "none" } | { kind: "id"; id: number } | null;
+
+/**
+ * Whether resolving `?cat=` needs the category list at all.
+ *
+ * TRUE only for a word that has to be LOOKED UP. `resolveCatFilter` below is
+ * written AROUND this predicate — `categories` is read only inside its `true`
+ * branch — so `resolveCatFilter(catParam, [])` and
+ * `resolveCatFilter(catParam, realList)` are provably the same value whenever
+ * this returns false. That is what lets `/staff/productos` put the products
+ * query on the wire beside the category read instead of behind it, and it is why
+ * the two answers cannot drift apart: there is one rule, in one place, and the
+ * page's eager path is a CALL to it rather than a copy of it.
+ *
+ * (They did drift. The page shipped with `needsCategories` false for `none` —
+ * correct — and then raced a hard-coded unfiltered query, so the 未分类 view
+ * returned the whole table.)
+ */
+export function catNeedsCategories(catParam: string): boolean {
+  return catParam !== "" && catParam !== CAT_NONE;
+}
+
+/**
+ * `?cat=` as a filter over `products.category_id`.
+ *
+ * Four inputs, three answers: "" is no filter, `none` is the unfiled products,
+ * a known `erp_code` is that category's id, and anything else — a junk word, a
+ * retired code, a category past `CATEGORY_LIMIT` — is no filter again.
+ *
+ * `erp_code` and not `id` is the URL vocabulary of BOTH halves of the portal, so
+ * a staff member can paste a restaurant's catalogue link into the staff table
+ * and see the same slice.
+ */
+export function resolveCatFilter(
+  catParam: string,
+  categories: readonly CatCode[],
+): CatFilter {
+  if (!catNeedsCategories(catParam)) {
+    return catParam === CAT_NONE ? { kind: "none" } : null;
+  }
+  const match = categories.find((c) => c.erp_code === catParam);
+  return match ? { kind: "id", id: match.id } : null;
+}
+
+/**
  * The `erp_code` a category created in this portal gets.
  *
  * The column is NOT NULL and UNIQUE — it is the natural key the freepos seed
@@ -222,15 +297,13 @@ export type NameCheck =
   | { ok: false; code: Extract<CategoryError, "EMPTY_NAME" | "NAME_TOO_LONG"> };
 
 /**
- * A form field as trimmed text, or "" for anything that is not a string.
+ * The local name for the shared `formText` (`lib/form-text.ts`): a form field as
+ * trimmed text, or "" for anything that is not a string.
  *
- * `FormData.get` is typed `string | File` and a crafted POST can send an object;
- * `String()` would turn a File into "[object File]" and let it pass a length
- * check. Same rule, and the same reason, as `user-admin.ts`'s own `text`.
+ * An alias rather than a rename at every call site — this file's parsers below
+ * read as arithmetic and `text(value)` is how they have always read.
  */
-function text(value: unknown): string {
-  return typeof value === "string" ? value.trim() : "";
-}
+const text = formText;
 
 /**
  * The two name fields of the create and rename forms, as the jsonb the column

@@ -1,15 +1,17 @@
 /**
  * The class vocabulary the whole portal is built from — the card and the
  * controls that sit on it. Every page shares these strings so the look cannot
- * drift page by page, and every colour resolves through the tokens in
- * `globals.css`: change the palette there, not here.
+ * drift page by page, and every CUSTOMER-facing colour resolves through the
+ * tokens in `globals.css`: change the palette there, not here.
  *
- * Two deliberate exceptions, both of which would be noise as tokens. The
+ * Three deliberate exceptions, all of which would be noise as tokens. The
  * stepper's `+` carries a brand-tinted drop shadow — `rgba(224,35,28,.45)`,
  * `--color-brand` at 45% — which is one shadow on one control, not a palette
- * entry. And the seven status chips have their own one-off pairs; those live
+ * entry. The seven status chips have their own one-off pairs; those live
  * with the chip in `order-status-badge.tsx`, because they are a per-STATE map
- * rather than shared vocabulary.
+ * rather than shared vocabulary. And `ADMIN_CARD` below carries the back
+ * office's own `#EDE9E5` hairline literally, for the reason written on it: it
+ * is a /staff-only shade, and no customer screen may use it.
  *
  * Deliberately a plain module with NO imports: `login-form.tsx` is a client
  * component, and anything it pulls in that reaches `next/headers` (as
@@ -27,6 +29,20 @@
  * call site; a table card and a text card want different amounts.
  */
 export const CARD = "rounded-card border border-border bg-surface";
+
+/**
+ * The admin card. `#EDE9E5` is NOT a token because it appears only on /staff:
+ * it is the mockup's own hairline for the back office, a shade darker than the
+ * customer card's `--color-border` (#f2eeea), and promoting it would put a
+ * second "border" in the palette that no customer screen may use. Same for the
+ * 12px radius — `rounded-card` (14px) is the customer card and stays theirs.
+ *
+ * It lives in the shared vocabulary because two /staff screens draw one and the
+ * string was byte-identical in both. Sharing the CONSTANT is not promoting the
+ * COLOUR: the argument above is about the palette, and the palette still does
+ * not carry this shade — one back-office card, written once.
+ */
+export const ADMIN_CARD = "rounded-xl border border-[#EDE9E5] bg-surface";
 
 /**
  * Text/number/date inputs and textareas. The field is a shade OFF the card it

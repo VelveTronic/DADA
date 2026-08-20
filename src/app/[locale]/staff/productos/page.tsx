@@ -9,16 +9,40 @@ import {
 } from "@/app/actions/staff-products";
 import { ProductThumb } from "@/components/product-thumb";
 import { StaffShell } from "@/components/staff-shell";
-import { BTN_QUIET, FIELD_SM } from "@/components/ui";
+import { ADMIN_CARD, BTN_QUIET, FIELD_SM } from "@/components/ui";
 import { requireStaff } from "@/lib/auth/guards";
 import { localizedName, sanitizeSearch, unitLabel } from "@/lib/catalog/display";
-import { CATEGORY_LIMIT, sortCategories } from "@/lib/categories";
+import {
+  CAT_NONE,
+  type CatFilter,
+  CATEGORY_LIMIT,
+  catNeedsCategories,
+  resolveCatFilter,
+  sortCategories,
+} from "@/lib/categories";
 import { perfRun } from "@/lib/perf";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { Database } from "@/lib/supabase/database.types";
 
 export const dynamic = "force-dynamic";
 
+/**
+ * Rows per page.
+ *
+ * It also bounds the heaviest thing this page renders, which is not the rows:
+ * every row carries a `<select>` offering the WHOLE category list, so the option
+ * nodes are `PAGE_SIZE × (CATEGORY_LIMIT + 1)` in the worst case and
+ * 50 × (61 + 未分类) = 3,100 today, plus the 63 in the filter select above the
+ * table — 3,163 on a full page.
+ *
+ * MEASURED against the real 61-category seed, in the browser: those 3,100 row
+ * options are 126.3 KiB of zh markup and 138.5 KiB of es (the Spanish names are
+ * longer), 128.8 / 141.3 KiB with the filter select's own 63. It compresses to
+ * near nothing — the whole document is 823 KiB zh / 877 KiB es raw and 53 / 63
+ * KiB gzipped — because it is the same 61 strings repeated fifty times, which is
+ * exactly what a sliding window is for. The ceiling is what matters: this cost
+ * is `PAGE_SIZE × CATEGORY_LIMIT` and moves only when one of those two does.
+ */
 const PAGE_SIZE = 50;
 
 /**
@@ -34,17 +58,6 @@ const PAGE_SIZE = 50;
  * no chip offers.
  */
 const CHIP_LIMIT = 7;
-
-/**
- * The admin card. `#EDE9E5` is NOT a token because it appears only on /staff:
- * it is the mockup's own hairline for the back office, a shade darker than the
- * customer card's `--color-border` (#f2eeea), and promoting it would put a
- * second "border" in the palette that no customer screen may use. Same for the
- * 12px radius — `rounded-card` (14px) is the customer card and stays theirs.
- * Stated once on `/staff/categorias` (:54) when that page shipped; repeated here
- * because this is the second and last screen that draws one today.
- */
-const ADMIN_CARD = "rounded-xl border border-[#EDE9E5] bg-surface";
 
 /**
  * A filter chip. The mockup's active state is its ink swatch with white
@@ -64,6 +77,21 @@ const CHIP_OFF = `${CHIP} border border-border-strong bg-surface text-ink-soft t
  */
 const TH = "h-[42px] px-3 text-left align-middle font-medium";
 const TD = "px-3 py-2.5 align-middle";
+
+/*
+ * The two shades this table draws rows with, both already named on
+ * `/staff/categorias` (:58-65, on its `ROW`) and neither a token:
+ *
+ *  - `#F4F0EC` — the rule BETWEEN rows (`divide-y` on the tbody below),
+ *    lighter than `ADMIN_CARD`'s own edge. It is the existing product-row rule,
+ *    `product-row.tsx:104`, so a list of products is ruled the same on both
+ *    halves of the portal.
+ *  - `#FCFBFA` — the mockup's admin pane wash, used on the row hover.
+ *
+ * Neither is promoted because both appear only where a LIST is drawn on white,
+ * and the palette already carries `surface-dim` for the tints the storefront
+ * shares.
+ */
 
 /**
  * 可售 / 停售, as the mockup's two table chips.
@@ -111,17 +139,6 @@ type StaffProductRow = Pick<
   | "price_5_cents"
   | "price_6_cents"
 >;
-
-/**
- * What `?cat=` resolved to: no filter at all, the products nobody filed, or one
- * category's id.
- *
- * `null` is also where an `erp_code` that matches no category lands — the
- * customer catalogue's own precedent for an unknown `?cat=` (`catalogo/page.tsx`
- * resolves it "to nothing and the page renders unfiltered, never a failed
- * query"), and the same rule keeps a stale bookmark from emptying this table.
- */
-type CatFilter = { kind: "none" } | { kind: "id"; id: number } | null;
 
 /** How many of the six tarifa tiers actually carry a price. */
 function pricedTiers(p: StaffProductRow): number {
@@ -194,8 +211,26 @@ export default async function StaffProductsPage({
    * answered without knowing a single category, so on an ordinary load — and on
    * the 未分类 view — the products go out beside the categories rather than
    * behind them, and the page costs the one round trip it always cost.
+   *
+   * The question is asked of `lib/categories.ts` rather than answered here, and
+   * that is the whole repair: this page used to carry its own copy of the rule
+   * and then race a hard-coded `productsQuery(null)` beside it, so `?cat=none`
+   * was resolved correctly, ignored completely, and rendered the entire table
+   * under a 未分类 select.
    */
-  const needsCategories = catParam !== "" && catParam !== "none";
+  const needsCategories = catNeedsCategories(catParam);
+
+  /**
+   * The filter as it is known BEFORE a single category has been read.
+   *
+   * The empty list is not a placeholder — it IS this render's state of knowledge
+   * at this line, and `resolveCatFilter` answers it under exactly the rules it
+   * will answer the real list with. When `needsCategories` is false the function
+   * never looks at the list at all, so this value is provably the same one the
+   * table is later rendered under (`categories.test.ts` asserts that identity),
+   * and the raced query below cannot filter differently from the page around it.
+   */
+  const eagerCatFilter = resolveCatFilter(catParam, []);
 
   /**
    * The unfiltered size of the table, for the sub-line under the title.
@@ -230,7 +265,9 @@ export default async function StaffProductsPage({
           admin.from("products").select("id", { count: "exact", head: true }),
         )
       : null,
-    needsCategories ? null : perf.step("products", productsQuery(null)),
+    needsCategories
+      ? null
+      : perf.step("products", productsQuery(eagerCatFilter)),
   ]);
 
   if (categoryResult.error) {
@@ -246,20 +283,18 @@ export default async function StaffProductsPage({
   const categories = sortCategories(categoryResult.data ?? [], locale);
 
   /**
-   * `?cat=` is an `erp_code`, exactly as it is on the customer catalogue — one
-   * filter vocabulary for both halves of the portal, so a staff member can paste
-   * a restaurant's URL into this page. The one word that is not a code is the
-   * literal `none`.
+   * `?cat=` resolved for real, now that the list is in hand.
+   *
+   * Unconditional, and it has to be: when `needsCategories` was false this is
+   * the same value as `eagerCatFilter` by construction (the list is untouched on
+   * that branch), so the `racedProducts ??` short-circuit below hands back a
+   * slice that was queried under THIS filter and not some other one. When it was
+   * true, no race happened and this is the first and only resolution.
    */
-  const activeCategory = needsCategories
-    ? (categories.find((c) => c.erp_code === catParam) ?? null)
-    : null;
-  const catFilter: CatFilter =
-    catParam === "none"
-      ? { kind: "none" }
-      : activeCategory
-        ? { kind: "id", id: activeCategory.id }
-        : null;
+  const catFilter: CatFilter = resolveCatFilter(catParam, categories);
+
+  /** Which chip is lit — the one category the filter names, if it names one. */
+  const activeCategoryId = catFilter?.kind === "id" ? catFilter.id : null;
 
   const { data, count, error } =
     racedProducts ?? (await perf.step("products", productsQuery(catFilter)));
@@ -294,7 +329,11 @@ export default async function StaffProductsPage({
    * search away — and a chip resets the pager, because page 7 of 全部 is not a
    * page of anything once a category is picked. An unknown `erp_code` is dropped
    * rather than echoed: the table below it is unfiltered, so the pager must not
-   * claim otherwise (the catalogue's `activeCategory?.erp_code ?? ""` rule).
+   * claim otherwise (the catalogue's own `activeCategory?.erp_code ?? ""` rule,
+   * `catalogo/page.tsx:149` and `:288`).
+   *
+   * `null` is the ONE dropped case, so `?cat=none` — which resolves to a filter
+   * — survives every link and the select's `defaultValue` alike.
    */
   const settledCat = catFilter === null ? "" : catParam;
   const href = (next: { cat?: string; page?: number }) => {
@@ -320,6 +359,21 @@ export default async function StaffProductsPage({
     category.is_active
       ? category.label
       : t("categoryHidden", { name: category.label });
+
+  /**
+   * The label of ONE row's current filing, for the `title` on its select.
+   *
+   * Built off a Map rather than a `find` per row: 50 rows against 61 categories
+   * is 3,050 comparisons a page for a lookup that is a hash. It resolves against
+   * the SAME list the options are drawn from, so an id past `CATEGORY_LIMIT`
+   * misses here exactly as it misses there and both fall back to 未分类 —
+   * whatever the box shows, the tooltip says.
+   */
+  const categoryById = new Map(categories.map((c) => [c.id, c]));
+  const filingLabel = (categoryId: number | null) => {
+    const category = categoryId === null ? null : categoryById.get(categoryId);
+    return category ? optionLabel(category) : t("uncategorized");
+  };
 
   // Chips are the ACTIVE categories only — a chip is a shortcut to a view a
   // restaurant also has, and the hidden ones live in the select beside them
@@ -358,21 +412,37 @@ export default async function StaffProductsPage({
             key={category.id}
             href={href({ cat: category.erp_code, page: 1 })}
             className={
-              activeCategory?.id === category.id ? CHIP_ON : CHIP_OFF
+              activeCategoryId === category.id ? CHIP_ON : CHIP_OFF
             }
           >
             {category.label}
           </Link>
         ))}
 
-        {/* The whole list, for the 54 categories with no chip — plus 未分类,
-            which no chip offers and which is the entry point for the assignment
-            work this page exists for. An explicit 筛选 button and no onChange
-            submit: a select that navigates as the value changes is a keyboard
-            trap (arrowing through the options fires a request per option), and
-            this half of the portal ships no client JavaScript for its filters. */}
-        <form method="get" className="flex items-center gap-2">
-          {q && <input type="hidden" name="q" value={q} />}
+        {/* ONE form for BOTH controls, and that is a fix rather than a tidy-up.
+            They were two GET forms, each carrying the other's settled value in a
+            hidden field — so typing a new search and then pressing 筛选 sent the
+            OLD `q` (the hidden copy this render was built from) and threw the
+            typed one away, and picking a category and then pressing 搜索 did the
+            mirror image. Merged, the browser sends whatever is in the two
+            controls at the moment of the press, and no hidden fields are needed
+            between them at all. (The chips and the pager still carry both, via
+            `href` above — they are links, not this form.)
+
+            BOTH submit buttons stay. They submit the SAME form and therefore the
+            same pair of fields; neither carries a `name`, so nothing tells the
+            server which one was pressed and nothing needs to. Two buttons rather
+            than one because the mockup draws two, and because each names the
+            control beside it for a keyboard user tabbing along the row.
+
+            The select is the whole list — the 54 categories with no chip, plus
+            未分类, which no chip offers and which is the entry point for the
+            assignment work this page exists for. An explicit button and no
+            onChange submit: a select that navigates as the value changes is a
+            keyboard trap (arrowing through 63 options fires a request per
+            option), and this half of the portal ships no client JavaScript for
+            its filters. */}
+        <form method="get" className="flex flex-1 flex-wrap items-center gap-2">
           <select
             name="cat"
             defaultValue={settledCat}
@@ -380,7 +450,14 @@ export default async function StaffProductsPage({
             className={`${FIELD_SM} h-[34px] max-w-[190px] text-[12.5px]`}
           >
             <option value="">{tCatalog("railAll")}</option>
-            <option value="none">{t("uncategorized")}</option>
+            {/* The one option whose value is not an `erp_code`. It is
+                collision-safe by the WRITERS and not by the schema — the column
+                is plain unique text, so Postgres would take a category coded
+                `none`, but neither writer can produce one: all 61 freepos codes
+                are decimal digit strings (`scripts/seed-categories.ts`) and
+                every portal-minted code is `p<epoch-ms>` (`makePortalErpCode`).
+                Stated in full on `CAT_NONE`. */}
+            <option value={CAT_NONE}>{t("uncategorized")}</option>
             {categories.map((category) => (
               // The FILTER speaks the URL's language — `erp_code`, the same
               // word the customer catalogue's `?cat=` carries. The per-row
@@ -393,25 +470,24 @@ export default async function StaffProductsPage({
           <button type="submit" className={`${BTN_QUIET} h-[34px] shrink-0 whitespace-nowrap`}>
             {t("filterApply")}
           </button>
-        </form>
 
-        {/* The search keeps every mechanic it had — a GET form, `?q`,
-            `sanitizeSearch` on both ends — and takes the mockup's 34px field.
-            `cat` rides along hidden so searching inside a category stays inside
-            it. `ml-auto` is the mockup's own `margin-left:auto`, and only once
-            the row is wide enough to have any spare room. */}
-        <form method="get" className="flex flex-1 items-center gap-2 sm:ml-auto sm:flex-none">
-          {settledCat && <input type="hidden" name="cat" value={settledCat} />}
-          <input
-            name="q"
-            defaultValue={q}
-            aria-label={t("searchPlaceholder")}
-            placeholder={t("searchPlaceholder")}
-            className={`${FIELD_SM} h-[34px] w-full text-[12.5px] sm:w-[230px]`}
-          />
-          <button type="submit" className={`${BTN_QUIET} h-[34px] shrink-0 whitespace-nowrap`}>
-            {tCatalog("searchButton")}
-          </button>
+          {/* The search keeps every mechanic it had — `?q`, `sanitizeSearch` on
+              both ends, the mockup's 34px field. `ml-auto` is the mockup's own
+              `margin-left:auto`, and only once the row is wide enough to have
+              any spare room; below that the pair takes the width it needs and
+              wraps under the select. */}
+          <div className="flex flex-1 items-center gap-2 sm:ml-auto sm:flex-none">
+            <input
+              name="q"
+              defaultValue={q}
+              aria-label={t("searchPlaceholder")}
+              placeholder={t("searchPlaceholder")}
+              className={`${FIELD_SM} h-[34px] w-full text-[12.5px] sm:w-[230px]`}
+            />
+            <button type="submit" className={`${BTN_QUIET} h-[34px] shrink-0 whitespace-nowrap`}>
+              {tCatalog("searchButton")}
+            </button>
+          </div>
         </form>
       </div>
 
@@ -426,16 +502,37 @@ export default async function StaffProductsPage({
           {/* A real `<table>`, not the mockup's div grid: this is tabular data
               with a header per column, and the grid version gives a screen
               reader nine unrelated boxes per row. The mockup's rhythm is kept —
-              its column widths, its 42px header, its 64px rows. */}
+              its column widths, its 42px header, its 64px rows.
+
+              Every `<th>` takes `scope="col"`. This is the app's only real data
+              table, so the semantics are written out rather than left to a
+              browser's heuristic: `scope` is what associates each cell with its
+              header, and it is what lets a screen reader announce 分类 before
+              reading the select in that column. */}
           <table className="w-full min-w-[900px] text-sm">
             <thead>
               <tr className="border-b border-[#EDE9E5] bg-field text-[11.5px] text-muted">
-                <th className={`${TH} pl-[18px]`}>{t("colProduct")}</th>
-                <th className={`${TH} w-[190px]`}>{t("colCategory")}</th>
-                <th className={`${TH} w-[110px]`}>{t("colSpec")}</th>
-                <th className={`${TH} w-[110px]`}>{t("colStatus")}</th>
+                <th scope="col" className={`${TH} pl-[18px]`}>
+                  {t("colProduct")}
+                </th>
+                {/* 220px: the 140px select, the 6px gap and the 保存 beside it,
+                    inside the cell's own 24px of padding. A HINT, not a rule —
+                    the table is `table-layout: auto`, so the browser gives the
+                    column what its content needs and takes it off the flexible
+                    商品 column: measured at 1280 it settles at 220 in zh and 232
+                    in es, where the button reads «Guardar», and the card still
+                    does not clip. */}
+                <th scope="col" className={`${TH} w-[220px]`}>
+                  {t("colCategory")}
+                </th>
+                <th scope="col" className={`${TH} w-[110px]`}>
+                  {t("colSpec")}
+                </th>
+                <th scope="col" className={`${TH} w-[110px]`}>
+                  {t("colStatus")}
+                </th>
                 {/* A count, so it is aligned as one — with its column. */}
-                <th className={`${TH} w-[120px] text-right`}>
+                <th scope="col" className={`${TH} w-[120px] text-right`}>
                   {t("colPrices")}
                 </th>
                 {/* Named for screen readers, blank on screen: the column holds
@@ -448,7 +545,10 @@ export default async function StaffProductsPage({
                     gave the whole page a horizontal scrollbar the card was
                     there to prevent. One `relative` puts it back inside its own
                     cell. */}
-                <th className={`${TH} relative w-[230px] pr-[18px] text-right`}>
+                <th
+                  scope="col"
+                  className={`${TH} relative w-[230px] pr-[18px] text-right`}
+                >
                   <span className="sr-only">{t("colActions")}</span>
                 </th>
               </tr>
@@ -458,6 +558,7 @@ export default async function StaffProductsPage({
                 const groupSize = groupSizes.get(p.base_sku) ?? 1;
                 const inGroup = groupSize > 1 || p.variant_suffix !== "";
                 const name = localizedName(p.name, locale);
+                const filing = filingLabel(p.category_id);
                 return (
                   <tr
                     key={p.id}
@@ -503,10 +604,15 @@ export default async function StaffProductsPage({
                     {/* THE feature. One form per row, an explicit 保存, and no
                         client leaf: every mutation on this page is a form POST,
                         and a select that submitted on `change` would fire a
-                        write per option as a keyboard user arrows through 61 of
-                        them. The `<select>` is named by the product it belongs
-                        to, because 50 unlabelled selects in a column are 50
-                        identical controls to a screen reader. */}
+                        write per option as a keyboard user arrows through the
+                        62.
+
+                        BOTH controls are named after the product now. The select
+                        always was; the button was not, so a screen reader met
+                        fifty controls that all announced 「保存」 and nothing
+                        else — the same list of identical buttons `roleFor` /
+                        `saveRoleFor` already fixed on `/staff/usuarios`, and the
+                        pair is copied from there. */}
                     <td className={TD}>
                       <form
                         action={setProductCategory}
@@ -520,12 +626,38 @@ export default async function StaffProductsPage({
                           // to select and the browser would fall back to the
                           // first one — unreachable at 61 categories against a
                           // bound of 500, and the bound is shared so that stays
-                          // true.
+                          // true. `filing` above resolves against the same list,
+                          // so the title agrees with whatever the box shows.
                           defaultValue={
                             p.category_id === null ? "" : String(p.category_id)
                           }
                           aria-label={t("categoryFor", { name })}
-                          className={`${FIELD_SM} w-[104px] text-[12.5px]`}
+                          // The FULL filing, on hover and on focus, because the
+                          // box cannot hold it.
+                          //
+                          // The width arithmetic, MEASURED in the browser at
+                          // 12.5px: the control's chrome is 38.5px — 2px of
+                          // border, 16px of `FIELD_SM` padding and the ~20.5px
+                          // Chromium reserves for the native dropdown arrow — so
+                          // a 140px box shows 101.5px of text and the 104px this
+                          // shipped as showed 65.5px. «Especial restaurante
+                          // tailandés» is the longest name in the 61-row freepos
+                          // seed (30 characters, 167.5px), and 140px shows 17 of
+                          // them ("Especial restaura") where 104px showed 11
+                          // ("Especial re") — a name cut before its own noun,
+                          // and no room at all for the （已隐藏） marker a hidden
+                          // category carries at the END of its label. Chinese
+                          // advances a flat 12.5px per glyph, so ~8 fit.
+                          //
+                          // The pixels stop there: the column is 220px and the
+                          // 保存 beside it is the rest of them. Seventeen
+                          // characters is enough to TELL two filings apart, which
+                          // is what the column is scanned for; what recovers the
+                          // whole label is this title, and the OPEN dropdown,
+                          // which every browser lays out at the width of its
+                          // longest option rather than the width of the box.
+                          title={filing}
+                          className={`${FIELD_SM} w-[140px] text-[12.5px]`}
                         >
                           <option value="">{t("uncategorized")}</option>
                           {categories.map((category) => (
@@ -536,9 +668,10 @@ export default async function StaffProductsPage({
                         </select>
                         <button
                           type="submit"
+                          aria-label={t("saveCategoryFor", { name })}
                           className={`${BTN_QUIET} whitespace-nowrap`}
                         >
-                          {t("save")}
+                          {t("saveCategory")}
                         </button>
                       </form>
                     </td>

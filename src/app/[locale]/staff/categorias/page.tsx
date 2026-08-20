@@ -8,7 +8,7 @@ import {
 } from "@/app/actions/staff-categories";
 import { ProductThumb } from "@/components/product-thumb";
 import { StaffShell } from "@/components/staff-shell";
-import { BTN_PRIMARY, BTN_QUIET, FIELD_SM } from "@/components/ui";
+import { ADMIN_CARD, BTN_PRIMARY, BTN_QUIET, FIELD_SM } from "@/components/ui";
 import { beginStaff, finishStaff } from "@/lib/auth/guards";
 import { localizedName } from "@/lib/catalog/display";
 import type { CategoryError } from "@/lib/categories";
@@ -51,16 +51,7 @@ export const dynamic = "force-dynamic";
  * redirects out of the `Promise.all` before a row is rendered.
  */
 
-/**
- * The admin card. `#EDE9E5` is NOT a token because it appears only on /staff:
- * it is the mockup's own hairline for the back office, a shade darker than the
- * customer card's `--color-border` (#f2eeea), and promoting it would put a
- * second "border" in the palette that no customer screen may use. Same for the
- * 12px radius — `rounded-card` (14px) is the customer card and stays theirs.
- */
-const ADMIN_CARD = "rounded-xl border border-[#EDE9E5] bg-surface";
-
-/** The card's own head rule, in the same one-off shade. */
+/** The card's own head rule, in the same one-off shade as `ADMIN_CARD`. */
 const CARD_HEAD =
   "flex items-center justify-between border-b border-[#EDE9E5] px-[18px] py-3.5 text-[13px] font-bold";
 

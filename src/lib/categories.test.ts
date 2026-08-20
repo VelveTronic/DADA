@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  CAT_NONE,
   CATEGORY_ERRORS,
+  catNeedsCategories,
   compareCategories,
   isCategoryError,
   makePortalErpCode,
@@ -10,6 +12,7 @@ import {
   parseCategoryId,
   parseMoveDirection,
   resequence,
+  resolveCatFilter,
   SORT_STEP,
   sortCategories,
   validateCategoryName,
@@ -325,6 +328,98 @@ describe("parseActiveFlag", () => {
     [1, null],
   ])("%o → %o", (raw, expected) => {
     expect(parseActiveFlag(raw)).toBe(expected);
+  });
+});
+
+/**
+ * The rail as `/staff/productos` reads it for `?cat=`: freepos codes (decimal
+ * digit strings), one portal-minted `p<epoch-ms>`, and one hidden category —
+ * `is_active` is deliberately NOT part of the resolution, because the filter
+ * select offers the hidden ones too.
+ */
+const CAT_CODES = [
+  { id: 2, erp_code: "6" },
+  { id: 3, erp_code: "7" },
+  { id: 9, erp_code: "83" },
+  { id: 12, erp_code: "p1755600000000" },
+];
+
+describe("resolveCatFilter", () => {
+  it.each([
+    // No `?cat=` at all, and the 全部 chip's own value: the whole table.
+    ["", null],
+    // THE case this function was extracted for. It shipped resolved correctly
+    // here and ignored at the query, so the 未分类 view returned every product.
+    ["none", { kind: "none" }],
+    // A known code, in both flavours the column actually holds.
+    ["7", { kind: "id", id: 3 }],
+    ["83", { kind: "id", id: 9 }],
+    ["p1755600000000", { kind: "id", id: 12 }],
+    // Unknown: unfiltered, never an empty table and never a failed query — the
+    // customer catalogue's rule for a stale bookmark, applied here.
+    ["nope", null],
+    ["p123", null],
+    ["999", null],
+    // Case matters (`erp_code` is a text natural key, not a slug) and so does
+    // whitespace: these arrive raw from `searchParams`, untrimmed.
+    ["NONE", null],
+    [" none ", null],
+    ["none ", null],
+    [" ", null],
+    // A digit string that is not a code, and a would-be injection: both are
+    // just words that match no `erp_code`.
+    ["0", null],
+    ["7 OR 1=1", null],
+  ])("%o → %o", (catParam, expected) => {
+    expect(resolveCatFilter(catParam, CAT_CODES)).toEqual(expected);
+  });
+
+  it("resolves the first `erp_code` that matches, in list order", () => {
+    // The column is UNIQUE, so this cannot happen against the real table; the
+    // assertion pins the behaviour rather than leaving it to `find`.
+    expect(
+      resolveCatFilter("7", [
+        { id: 3, erp_code: "7" },
+        { id: 4, erp_code: "7" },
+      ]),
+    ).toEqual({ kind: "id", id: 3 });
+  });
+});
+
+describe("catNeedsCategories", () => {
+  it.each([
+    ["", false],
+    ["none", false],
+    ["7", true],
+    ["p1755600000000", true],
+    ["nope", true],
+    [" none ", true],
+    ["NONE", true],
+  ])("%o → %o", (catParam, expected) => {
+    expect(catNeedsCategories(catParam)).toBe(expected);
+  });
+
+  /**
+   * The contract `/staff/productos` races on, asserted rather than trusted:
+   * when the list is not needed, resolving against the EMPTY list gives exactly
+   * what resolving against the real one gives. This is what makes the eager
+   * `resolveCatFilter(catParam, [])` — the value the raced query is built from
+   * — provably the same filter the page later renders under.
+   */
+  it("means the empty list answers identically", () => {
+    for (const catParam of ["", CAT_NONE]) {
+      expect(catNeedsCategories(catParam)).toBe(false);
+      expect(resolveCatFilter(catParam, [])).toEqual(
+        resolveCatFilter(catParam, CAT_CODES),
+      );
+    }
+  });
+
+  it("is the only case where the empty list is safe", () => {
+    // The converse, so the predicate cannot quietly widen: every param it calls
+    // a lookup really does resolve differently without the list.
+    expect(resolveCatFilter("7", [])).toBeNull();
+    expect(resolveCatFilter("7", CAT_CODES)).toEqual({ kind: "id", id: 3 });
   });
 });
 
