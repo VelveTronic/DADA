@@ -8,7 +8,11 @@ import { SearchIcon } from "@/components/icons";
 import { ProductGrid } from "@/components/product-grid";
 import { ProductRow } from "@/components/product-row";
 import { beginCompanyUser, finishCompanyUser } from "@/lib/auth/guards";
-import { sortCategories } from "@/lib/categories";
+import {
+  groupCategories,
+  hiddenCategoryIds,
+  sortCategories,
+} from "@/lib/categories";
 import { perfRun } from "@/lib/perf";
 import { getSetting } from "@/lib/settings";
 import type { CustomerCatalogProduct } from "@/lib/supabase/public.types";
@@ -63,20 +67,42 @@ export default async function CatalogPage({
   // it existed — the setting must never cost a page a round trip of its own —
   // and the categories are the same kind of read: the whole active list, the
   // same for every caller.
-  const [portalUser, { data: categoryRows, error: categoryError }, showPrices] =
-    await Promise.all([
-      finishCompanyUser(pendingUser, locale),
-      perf.step(
-        "categories",
-        supabase
-          .from("categories")
-          .select("id, erp_code, name, sort_order")
-          .eq("is_active", true),
-      ),
-      perf.step("settings", getSetting(supabase, "show_prices")),
-    ]);
+  const [
+    portalUser,
+    { data: categoryRows, error: categoryError },
+    showPrices,
+    grantResult,
+  ] = await Promise.all([
+    finishCompanyUser(pendingUser, locale),
+    perf.step(
+      "categories",
+      supabase
+        .from("categories")
+        .select("id, erp_code, name, sort_order, parent_label, visibility")
+        .eq("is_active", true),
+    ),
+    perf.step("settings", getSetting(supabase, "show_prices")),
+    // The caller's OWN category grants — RLS hands a restaurant nothing else —
+    // which is one half of the visibility rule; the `visibility` column above
+    // is the other. Needs nothing from the profile (the policy derives the
+    // company itself), so it rides round one.
+    perf.step(
+      "categoryGrants",
+      supabase.from("category_companies").select("category_id"),
+    ),
+  ]);
 
   if (categoryError) console.error("catalog categories query:", categoryError);
+  if (grantResult.error) {
+    console.error("catalog category grants query:", grantResult.error);
+  }
+  // FAIL CLOSED on the grants read: with the allowlist unknown, a 'selected'
+  // category stays hidden rather than flashing a restaurant a shelf it was
+  // never meant to see. 'all' categories — the whole catalogue today — are
+  // untouched by a failed read.
+  const allowedIds = new Set(
+    (grantResult.data ?? []).map((row) => row.category_id),
+  );
   // Ordered here rather than in SQL: `name` is jsonb, so only the app knows
   // which of {zh, es} this locale actually shows — and that name is the
   // tiebreaker for the many freepos sort values that collide on one number.
@@ -85,9 +111,21 @@ export default async function CatalogPage({
   // 分类管理 page reorders this very rail: the ↑/↓ buttons there move rows in the
   // list THIS function produces, so both screens import one function rather than
   // keeping two sorts in step by hand.
-  const categories = sortCategories(categoryRows ?? [], locale);
-  // The whole validation of ?cat=: an erp_code that is not an active category
-  // resolves to nothing and the page renders unfiltered, never a failed query.
+  // The visibility split, made ONCE and used three ways: the rail draws only
+  // `visibleCategories`, `?cat=` resolves only against them (a hidden shelf's
+  // erp_code in the URL answers as "no such filter", not a 404 and not the
+  // shelf), and `hiddenIds` is what keeps the hidden shelves' PRODUCTS out of
+  // the pane below.
+  const allCategories = categoryRows ?? [];
+  const hiddenIds = hiddenCategoryIds(allCategories, allowedIds);
+  const hiddenIdSet = new Set(hiddenIds);
+  const categories = sortCategories(
+    allCategories.filter((row) => !hiddenIdSet.has(row.id)),
+    locale,
+  );
+  // The whole validation of ?cat=: an erp_code that is not an active, VISIBLE
+  // category resolves to nothing and the page renders unfiltered, never a
+  // failed query.
   const activeCategory = categories.find((c) => c.erp_code === rawCat) ?? null;
 
   // Customers read the priced VIEW only: it carries exactly one price column,
@@ -101,6 +139,17 @@ export default async function CatalogPage({
       query = query.in("id", favoriteFilter.length ? favoriteFilter : [NO_MATCH_ID]);
     }
     if (activeCategory) query = query.eq("category_id", activeCategory.id);
+    // A hidden shelf's products leave the unfiltered views too — 全部, 常购 and
+    // the search page all apply this same set. `category_id.is.null` rides in
+    // the `or` because `not.in` alone would ALSO drop the uncategorised rows:
+    // SQL's NOT IN answers unknown for null. Skipped entirely when a category
+    // is active — the rail only offers visible ones, so the eq above already
+    // decided.
+    else if (hiddenIds.length > 0) {
+      query = query.or(
+        `category_id.is.null,category_id.not.in.(${hiddenIds.join(",")})`,
+      );
+    }
     const from = (page - 1) * PAGE_SIZE;
     return query
       .order("codart", { ascending: true })
@@ -191,6 +240,19 @@ export default async function CatalogPage({
   // 全部 is the rail's own entry rather than the absence of one: a bare
   // `/catalogo` is exactly it, which is what keeps every existing link into the
   // catalogue landing on a lit rail.
+  //
+  // The categories arrive as the 一级/二级 tree `groupCategories` reads out of
+  // `parent_label` (owner, 2026-08-20): a shared label becomes a HEADER entry
+  // — a caption, not a link — with its children indented under it, and a label
+  // nobody shares stays a plain top-level entry. The rail draws structure; the
+  // filter is still one category per press.
+  const entryOf = (c: (typeof categories)[number], child: boolean) => ({
+    id: c.id,
+    label: c.label,
+    href: href({ tab: "all", cat: c.erp_code, page: 1 }),
+    active: tab === "all" && activeCategory?.id === c.id,
+    child,
+  });
   const railEntries: RailEntry[] = [
     {
       id: "all",
@@ -205,12 +267,17 @@ export default async function CatalogPage({
       active: tab === "favoritos",
       count: favoriteIds.size,
     },
-    ...categories.map((c) => ({
-      id: c.id,
-      label: c.label,
-      href: href({ tab: "all", cat: c.erp_code, page: 1 }),
-      active: tab === "all" && activeCategory?.id === c.id,
-    })),
+    ...groupCategories(
+      allCategories.filter((row) => !hiddenIdSet.has(row.id)),
+      locale,
+    ).flatMap((entry): RailEntry[] =>
+      entry.kind === "category"
+        ? [entryOf(entry.category, false)]
+        : [
+            { id: `group:${entry.label}`, header: true, label: entry.label },
+            ...entry.children.map((c) => entryOf(c, true)),
+          ],
+    ),
   ];
 
   // The pane says which rail entry it is answering, in the rail's own words.

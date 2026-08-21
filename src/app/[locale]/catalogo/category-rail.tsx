@@ -7,15 +7,29 @@ import { RailAutoscroll } from "./rail-autoscroll";
  * category MEANS in a URL (see `href()` in `page.tsx`), this file owns what one
  * looks like.
  */
-export type RailEntry = {
-  /** React key only — categories are keyed by their numeric DB id. */
-  id: string | number;
-  label: string;
-  href: string;
-  active: boolean;
-  /** Only 常购 carries one: the number of products this restaurant has starred. */
-  count?: number;
-};
+export type RailEntry =
+  | {
+      /** React key only — categories are keyed by their numeric DB id. */
+      id: string | number;
+      header?: false;
+      label: string;
+      href: string;
+      active: boolean;
+      /** Only 常购 carries one: the number of products this restaurant has starred. */
+      count?: number;
+      /** A 二级 row under its group heading — drawn indented. */
+      child?: boolean;
+    }
+  | {
+      /**
+       * A 一级 heading: a caption over its children, not a filter — pressing a
+       * group would have to mean "all of these at once", which the pane's
+       * one-category query does not speak. The children are the presses.
+       */
+      id: string;
+      header: true;
+      label: string;
+    };
 
 /**
  * The catalogue's left rail: 全部, 常购, then every active category, as a column
@@ -57,7 +71,18 @@ export async function CategoryRail({ entries }: { entries: RailEntry[] }) {
       // view, which is also the affordance that says there is more below.
       className="w-[92px] flex-none overflow-y-auto border-r border-border bg-surface-dim [scrollbar-width:none] lg:w-52 [&::-webkit-scrollbar]:hidden"
     >
-      {entries.map((entry) => (
+      {entries.map((entry) =>
+        entry.header ? (
+          // A group caption. `aria-hidden` would be wrong — the words structure
+          // the list for a screen reader exactly as they do visually — but it
+          // is presentation, not a control, so it is a div and not a link.
+          <div
+            key={entry.id}
+            className="border-b border-[#E9E4DF] bg-[#F1EDE9] px-3 pt-2.5 pb-1.5 text-[11px] font-semibold tracking-wide text-muted"
+          >
+            {entry.label}
+          </div>
+        ) : (
         <Link
           key={entry.id}
           href={entry.href}
@@ -73,7 +98,9 @@ export async function CategoryRail({ entries }: { entries: RailEntry[] }) {
           // `RailAutoscroll` finds it by.
           aria-current={entry.active ? "page" : undefined}
           data-rail-active={entry.active ? "" : undefined}
-          className={`relative flex min-h-11 items-center border-b border-[#E9E4DF] px-3 py-3 text-[12.5px] leading-tight ${
+          className={`relative flex min-h-11 items-center border-b border-[#E9E4DF] py-3 text-[12.5px] leading-tight ${
+            entry.child ? "pr-3 pl-4" : "px-3"
+          } ${
             entry.active
               ? "bg-surface font-bold text-brand-ink"
               : "text-ink-soft hover:text-ink"
@@ -111,7 +138,8 @@ export async function CategoryRail({ entries }: { entries: RailEntry[] }) {
             )}
           </span>
         </Link>
-      ))}
+        ),
+      )}
       {/* The rail's own tail, and it needs one for the same reason the pane
           beside it does: 63 entries with NOTHING after them, in a column that
           scrolls to the glass. The tab bar covers its last entries always (top

@@ -17,6 +17,7 @@ import {
   type CatFilter,
   CATEGORY_LIMIT,
   catNeedsCategories,
+  groupCategories,
   resolveCatFilter,
   sortCategories,
 } from "@/lib/categories";
@@ -45,29 +46,11 @@ export const dynamic = "force-dynamic";
  */
 const PAGE_SIZE = 50;
 
-/**
- * How many categories get a chip before the rest are left to the select beside
- * them.
- *
- * Seven, and the eighth control on the row is 全部. The mockup draws six chips
- * on a 1440 frame; ours are drawn in the ~990px this page's column is wide at
- * 1280 (max-w-5xl inside the 240px sidebar), so eight fit on one line with the
- * 230px search box beside them and wrap to a second when a category name is
- * long. There are 61 categories: a chip each would be a wall, and the `<select>`
- * that follows is the whole list — including the hidden ones and 未分类, which
- * no chip offers.
+/*
+ * There is no chip row above the table any more (owner, 2026-08-20): seven
+ * default category chips crowded the filter select off its line, and the
+ * select — grouped 一级/二级 below — is the whole list anyway.
  */
-const CHIP_LIMIT = 7;
-
-/**
- * A filter chip. The mockup's active state is its ink swatch with white
- * letters, which is the token map's `bg-ink text-white font-semibold`; the
- * resting one is the house's quiet control, the same border and hover the row
- * buttons carry so the row reads as one family.
- */
-const CHIP = "inline-flex h-[30px] items-center rounded-lg px-3 text-[12.5px]";
-const CHIP_ON = `${CHIP} bg-ink font-semibold text-white`;
-const CHIP_OFF = `${CHIP} border border-border-strong bg-surface text-ink-soft transition-colors hover:border-brand hover:text-brand-ink`;
 
 /**
  * The header row, per the mockup: 42px tall, on the `field` shade (its `#FBFAF9`
@@ -253,7 +236,7 @@ export default async function StaffProductsPage({
       "categories",
       admin
         .from("categories")
-        .select("id, erp_code, name, sort_order, is_active")
+        .select("id, erp_code, name, parent_label, sort_order, is_active")
         // The same bound and the same order as `/staff/categorias` and the move
         // action read under (`CATEGORY_LIMIT`, imported rather than retyped):
         // an unordered `limit` may hand back a different subset per request, and
@@ -296,9 +279,6 @@ export default async function StaffProductsPage({
    * true, no race happened and this is the first and only resolution.
    */
   const catFilter: CatFilter = resolveCatFilter(catParam, categories);
-
-  /** Which chip is lit — the one category the filter names, if it names one. */
-  const activeCategoryId = catFilter?.kind === "id" ? catFilter.id : null;
 
   const { data, count, error } =
     racedProducts ?? (await perf.step("products", productsQuery(catFilter)));
@@ -379,12 +359,37 @@ export default async function StaffProductsPage({
     return category ? optionLabel(category) : t("uncategorized");
   };
 
-  // Chips are the ACTIVE categories only — a chip is a shortcut to a view a
-  // restaurant also has, and the hidden ones live in the select beside them
-  // where the （已隐藏） marker can explain what they are.
-  const chipCategories = categories
-    .filter((c) => c.is_active)
-    .slice(0, CHIP_LIMIT);
+  /**
+   * The category list as the customer's rail reads it — 一级 headings with
+   * their 二级 rows under them — rendered into BOTH selects as `<optgroup>`s.
+   * Same derivation (`groupCategories`, same locale) as the rail, so the
+   * grouping a staff member files under is the grouping a restaurant scrolls.
+   *
+   * Two arrays because the two selects speak different values: the filter
+   * posts `erp_code` (the URL's word) and the per-row form posts the id (the
+   * column's word) — the same split the shipped selects already documented.
+   * Built ONCE and reused: the per-row copy appears 50 times a page, and a
+   * React element is an immutable description, not a mounted node.
+   */
+  const grouped = groupCategories(categories, locale);
+  const categoryOptions = (value: (c: (typeof categories)[number]) => string | number) =>
+    grouped.map((entry) =>
+      entry.kind === "group" ? (
+        <optgroup key={`g:${entry.label}`} label={entry.label}>
+          {entry.children.map((category) => (
+            <option key={category.id} value={value(category)}>
+              {optionLabel(category)}
+            </option>
+          ))}
+        </optgroup>
+      ) : (
+        <option key={entry.category.id} value={value(entry.category)}>
+          {optionLabel(entry.category)}
+        </option>
+      ),
+    );
+  const filterOptions = categoryOptions((category) => category.erp_code);
+  const rowOptions = categoryOptions((category) => category.id);
 
   return (
     <StaffShell
@@ -407,46 +412,29 @@ export default async function StaffProductsPage({
         {t("productsSummary", { n: totalProducts, m: categories.length })}
       </p>
 
-      <div className="mt-5 flex flex-wrap items-center gap-2.5">
-        <Link href={href({ cat: "", page: 1 })} className={catFilter === null ? CHIP_ON : CHIP_OFF}>
-          {tCatalog("railAll")}
-        </Link>
-        {chipCategories.map((category) => (
-          <Link
-            key={category.id}
-            href={href({ cat: category.erp_code, page: 1 })}
-            className={
-              activeCategoryId === category.id ? CHIP_ON : CHIP_OFF
-            }
-          >
-            {category.label}
-          </Link>
-        ))}
+      {/* ONE form for BOTH controls, and that is a fix rather than a tidy-up.
+          They were two GET forms, each carrying the other's settled value in a
+          hidden field — so typing a new search and then pressing 筛选 sent the
+          OLD `q` (the hidden copy this render was built from) and threw the
+          typed one away, and picking a category and then pressing 搜索 did the
+          mirror image. Merged, the browser sends whatever is in the two
+          controls at the moment of the press, and no hidden fields are needed
+          between them at all. (The pager still carries both, via `href` above —
+          it is links, not this form.)
 
-        {/* ONE form for BOTH controls, and that is a fix rather than a tidy-up.
-            They were two GET forms, each carrying the other's settled value in a
-            hidden field — so typing a new search and then pressing 筛选 sent the
-            OLD `q` (the hidden copy this render was built from) and threw the
-            typed one away, and picking a category and then pressing 搜索 did the
-            mirror image. Merged, the browser sends whatever is in the two
-            controls at the moment of the press, and no hidden fields are needed
-            between them at all. (The chips and the pager still carry both, via
-            `href` above — they are links, not this form.)
+          BOTH submit buttons stay. They submit the SAME form and therefore the
+          same pair of fields; neither carries a `name`, so nothing tells the
+          server which one was pressed and nothing needs to. Two buttons rather
+          than one because the mockup draws two, and because each names the
+          control beside it for a keyboard user tabbing along the row.
 
-            BOTH submit buttons stay. They submit the SAME form and therefore the
-            same pair of fields; neither carries a `name`, so nothing tells the
-            server which one was pressed and nothing needs to. Two buttons rather
-            than one because the mockup draws two, and because each names the
-            control beside it for a keyboard user tabbing along the row.
-
-            The select is the whole list — the 54 categories with no chip, plus
-            未分类, which no chip offers and which is the entry point for the
-            assignment work this page exists for. An explicit button and no
-            onChange submit: a select that navigates as the value changes is a
-            keyboard trap (arrowing through 63 options fires a request per
-            option), and this half of the portal ships no client JavaScript for
-            its filters. */}
-        <form method="get" className="flex flex-1 flex-wrap items-center gap-2">
+          The select is the whole list — every category, 一级-grouped, hidden
+          ones marked, plus 未分类, which is the entry point for the assignment
+          work this page exists for. An explicit button and no onChange submit:
+          a select that navigates as the value changes is a keyboard trap
+          (arrowing through 63 options fires a request per option), and this
+          half of the portal ships no client JavaScript for its filters. */}
+      <form method="get" className="mt-5 flex flex-wrap items-center gap-2">
           <select
             name="cat"
             defaultValue={settledCat}
@@ -462,14 +450,10 @@ export default async function StaffProductsPage({
                 every portal-minted code is `p<epoch-ms>` (`makePortalErpCode`).
                 Stated in full on `CAT_NONE`. */}
             <option value={CAT_NONE}>{t("uncategorized")}</option>
-            {categories.map((category) => (
-              // The FILTER speaks the URL's language — `erp_code`, the same
-              // word the customer catalogue's `?cat=` carries. The per-row
-              // select further down speaks the COLUMN's, and posts an id.
-              <option key={category.id} value={category.erp_code}>
-                {optionLabel(category)}
-              </option>
-            ))}
+            {/* The FILTER speaks the URL's language — `erp_code`, the same
+                word the customer catalogue's `?cat=` carries. The per-row
+                select further down speaks the COLUMN's, and posts an id. */}
+            {filterOptions}
           </select>
           <button type="submit" className={`${BTN_QUIET} h-[34px] shrink-0 whitespace-nowrap`}>
             {t("filterApply")}
@@ -492,8 +476,7 @@ export default async function StaffProductsPage({
               {tCatalog("searchButton")}
             </button>
           </div>
-        </form>
-      </div>
+      </form>
 
       {products.length === 0 ? (
         <p className={`${ADMIN_CARD} mt-[18px] p-10 text-center text-muted`}>
@@ -664,11 +647,7 @@ export default async function StaffProductsPage({
                           className={`${FIELD_SM} w-[140px] text-[12.5px]`}
                         >
                           <option value="">{t("uncategorized")}</option>
-                          {categories.map((category) => (
-                            <option key={category.id} value={category.id}>
-                              {optionLabel(category)}
-                            </option>
-                          ))}
+                          {rowOptions}
                         </select>
                         <button
                           type="submit"

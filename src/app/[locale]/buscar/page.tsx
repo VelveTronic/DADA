@@ -7,6 +7,7 @@ import { SearchIcon } from "@/components/icons";
 import { ProductRow } from "@/components/product-row";
 import { beginCompanyUser, finishCompanyUser } from "@/lib/auth/guards";
 import { sanitizeSearch } from "@/lib/catalog/display";
+import { hiddenCategoryIds } from "@/lib/categories";
 import { perfRun } from "@/lib/perf";
 import { getSetting } from "@/lib/settings";
 import type { CustomerCatalogProduct } from "@/lib/supabase/public.types";
@@ -74,31 +75,74 @@ export default async function SearchPage({
   // the product name in either language, because a restaurant orders in Chinese
   // from a supplier whose data is Spanish.
   const from = (page - 1) * PAGE_SIZE;
-  const pendingProducts = q
-    ? perf.step(
+
+  // Category visibility (owner, 2026-08-20) put the products read BACK a
+  // round: which shelves this restaurant may see decides the filter below, so
+  // the two small reads that answer it — the 'selected' categories, and the
+  // caller's own grants (RLS hands it nothing else) — ride round one and the
+  // products go out after them. That costs a search one round trip it did not
+  // pay before; both reads are a handful of rows, and the alternative was a
+  // result list that shows a hidden shelf's products to exactly the customers
+  // it is hidden from. A bare `/buscar` still issues none of it.
+  const [portalUser, showPrices, visResult, grantResult] = await Promise.all([
+    finishCompanyUser(pendingUser, locale),
+    perf.step("settings", getSetting(supabase, "show_prices")),
+    q
+      ? perf.step(
+          "categoriesVis",
+          supabase
+            .from("categories")
+            .select("id, visibility")
+            .eq("is_active", true)
+            .eq("visibility", "selected"),
+        )
+      : Promise.resolve(null),
+    q
+      ? perf.step(
+          "categoryGrants",
+          supabase.from("category_companies").select("category_id"),
+        )
+      : Promise.resolve(null),
+  ]);
+
+  if (visResult?.error) {
+    console.error("search category visibility query:", visResult.error);
+  }
+  if (grantResult?.error) {
+    console.error("search category grants query:", grantResult.error);
+  }
+  // The same one function the catalogue filters through, on the same two
+  // reads — see `hiddenCategoryIds` for the fail modes: a failed GRANTS read
+  // hides every 'selected' shelf (closed), a failed visibility read cannot
+  // name what to hide (open, logged above).
+  const hiddenIds = hiddenCategoryIds(
+    visResult?.data ?? [],
+    new Set((grantResult?.data ?? []).map((row) => row.category_id)),
+  );
+
+  let productsQuery = q
+    ? supabase
+        .from("products_priced")
+        .select("*", { count: "exact" })
+        .eq("is_current_variant", true)
+        .or(`codart.ilike.%${q}%,name->>zh.ilike.%${q}%,name->>es.ilike.%${q}%`)
+    : null;
+  if (productsQuery && hiddenIds.length > 0) {
+    // `category_id.is.null` rides in the `or` for the same reason the
+    // catalogue spells it: NOT IN answers unknown for null and would drop the
+    // uncategorised rows with the hidden ones.
+    productsQuery = productsQuery.or(
+      `category_id.is.null,category_id.not.in.(${hiddenIds.join(",")})`,
+    );
+  }
+  const productsResult = productsQuery
+    ? await perf.step(
         "products",
-        supabase
-          .from("products_priced")
-          .select("*", { count: "exact" })
-          .eq("is_current_variant", true)
-          .or(`codart.ilike.%${q}%,name->>zh.ilike.%${q}%,name->>es.ilike.%${q}%`)
+        productsQuery
           .order("codart", { ascending: true })
           .range(from, from + PAGE_SIZE - 1),
       )
     : null;
-
-  const [portalUser, showPrices] = await Promise.all([
-    finishCompanyUser(pendingUser, locale),
-    perf.step("settings", getSetting(supabase, "show_prices")),
-  ]);
-
-  // There is no round two: this page used to read the company's favourites
-  // here to draw a star on every result row, and the owner hid that star
-  // (2026-08-19, see `product-row.tsx`). The products query is the whole
-  // catalogue cost of a search now; a bare `/buscar` issues no catalogue query
-  // at all — only the guard's profile read and the settings read that every
-  // customer page already pays.
-  const productsResult = await pendingProducts;
 
   if (productsResult?.error) console.error("search query:", productsResult.error);
 

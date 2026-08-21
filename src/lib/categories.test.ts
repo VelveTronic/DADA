@@ -4,6 +4,8 @@ import {
   CATEGORY_ERRORS,
   catNeedsCategories,
   compareCategories,
+  groupCategories,
+  hiddenCategoryIds,
   isCategoryError,
   makePortalErpCode,
   MAX_CATEGORY_NAME_LENGTH,
@@ -11,8 +13,10 @@ import {
   parseActiveFlag,
   parseCategoryId,
   parseMoveDirection,
+  parseVisibility,
   resequence,
   resolveCatFilter,
+  resolveParentLabel,
   SORT_STEP,
   sortCategories,
   validateCategoryName,
@@ -429,5 +433,155 @@ describe("CATEGORY_ERRORS", () => {
     for (const other of ["ok", "", "DB", "empty_name"]) {
       expect(isCategoryError(other)).toBe(false);
     }
+  });
+});
+
+describe("groupCategories", () => {
+  function gcat(
+    id: number,
+    sort_order: number,
+    zh: string,
+    parentZh: string | null,
+  ) {
+    return {
+      id,
+      sort_order,
+      name: { zh },
+      parent_label: parentZh === null ? null : { zh: parentZh },
+    };
+  }
+
+  it("rows sharing a parent label become one group, in rail order", () => {
+    const rows = [
+      gcat(1, 20, "bowls", "tableware"),
+      gcat(2, 10, "plates", "tableware"),
+      gcat(3, 30, "rice", null),
+    ];
+    const tree = groupCategories(rows, "zh");
+    expect(tree).toHaveLength(2);
+    expect(tree[0]).toMatchObject({ kind: "group", label: "tableware" });
+    const group = tree[0];
+    if (group.kind !== "group") throw new Error("expected group");
+    expect(group.children.map((c) => c.label)).toEqual(["plates", "bowls"]);
+    expect(tree[1]).toMatchObject({ kind: "category" });
+  });
+
+  it("a lone member renders flat, not as a heading over one row", () => {
+    const rows = [gcat(1, 10, "makro", "makro"), gcat(2, 20, "rice", null)];
+    const tree = groupCategories(rows, "zh");
+    expect(tree.every((entry) => entry.kind === "category")).toBe(true);
+  });
+
+  it("a group includes the row named like the group itself", () => {
+    const rows = [
+      gcat(1, 10, "supplies", "supplies"),
+      gcat(2, 20, "napkins", "supplies"),
+    ];
+    const tree = groupCategories(rows, "zh");
+    expect(tree).toHaveLength(1);
+    const group = tree[0];
+    if (group.kind !== "group") throw new Error("expected group");
+    expect(group.children.map((c) => c.label)).toEqual(["supplies", "napkins"]);
+  });
+
+  it("null, empty-object and empty-string parents are all top-level", () => {
+    const rows = [
+      gcat(1, 10, "a", null),
+      { id: 2, sort_order: 20, name: { zh: "b" }, parent_label: {} },
+      { id: 3, sort_order: 30, name: { zh: "c" }, parent_label: { zh: "" } },
+    ];
+    expect(
+      groupCategories(rows, "zh").every((entry) => entry.kind === "category"),
+    ).toBe(true);
+  });
+
+  it("a group sits where its first child would have sat", () => {
+    const rows = [
+      gcat(1, 10, "aaa", null),
+      gcat(2, 20, "ggg", "grp"),
+      gcat(3, 40, "hhh", "grp"),
+      gcat(4, 30, "mmm", null),
+    ];
+    const kinds = groupCategories(rows, "zh").map((entry) =>
+      entry.kind === "group" ? `group:${entry.label}` : entry.category.label,
+    );
+    expect(kinds).toEqual(["aaa", "group:grp", "mmm"]);
+  });
+});
+
+describe("hiddenCategoryIds", () => {
+  it.each([
+    // [visibility rows, allowed ids, hidden ids owed]
+    [[{ id: 1, visibility: "all" }], [], []],
+    [[{ id: 1, visibility: "selected" }], [], [1]],
+    [[{ id: 1, visibility: "selected" }], [1], []],
+    [
+      [
+        { id: 1, visibility: "selected" },
+        { id: 2, visibility: "all" },
+        { id: 3, visibility: "selected" },
+      ],
+      [3],
+      [1],
+    ],
+  ])("case %#", (rows, allowed, owed) => {
+    expect(hiddenCategoryIds(rows, new Set(allowed))).toEqual(owed);
+  });
+});
+
+describe("resolveParentLabel", () => {
+  const existing = [
+    { zh: "餐厅用品", es: "Menaje" },
+    { zh: "冻品" },
+    null,
+    "not-an-object",
+  ];
+
+  it("empty and whitespace-only input clear the parent", () => {
+    expect(resolveParentLabel("", existing)).toBeNull();
+    expect(resolveParentLabel("   ", existing)).toBeNull();
+  });
+
+  it("matching a stored label in EITHER language reuses the stored pair", () => {
+    expect(resolveParentLabel("餐厅用品", existing)).toEqual({
+      zh: "餐厅用品",
+      es: "Menaje",
+    });
+    expect(resolveParentLabel("Menaje", existing)).toEqual({
+      zh: "餐厅用品",
+      es: "Menaje",
+    });
+  });
+
+  it("a stored single-key label comes back single-key, not padded", () => {
+    expect(resolveParentLabel("冻品", existing)).toEqual({ zh: "冻品" });
+  });
+
+  it("unmatched text becomes a new both-key label, trimmed", () => {
+    expect(resolveParentLabel("  海鲜类 ", existing)).toEqual({
+      zh: "海鲜类",
+      es: "海鲜类",
+    });
+  });
+
+  it("non-object rows in the existing list are skipped, not crashed on", () => {
+    expect(resolveParentLabel("x", [null, 42, "y", []])).toEqual({
+      zh: "x",
+      es: "x",
+    });
+  });
+});
+
+describe("parseVisibility", () => {
+  it.each([
+    ["all", "all"],
+    ["selected", "selected"],
+    ["", null],
+    ["ALL", null],
+    [null, null],
+    [undefined, null],
+    [42, null],
+  ])("%j → %j", (value, owed) => {
+    expect(parseVisibility(value)).toBe(owed);
   });
 });

@@ -165,6 +165,144 @@ export function resequence<T extends NamedCategory & { id: number }>(
   return steps(sortCategories(rows, locale));
 }
 
+/** A row that can be grouped: `parent_label` beside the sortable pair. */
+export interface GroupableCategory extends NamedCategory {
+  parent_label: unknown;
+}
+
+/**
+ * One entry of the two-level rail: a plain category, or a group heading with
+ * its children in rail order under it.
+ */
+export type CategoryTreeEntry<T> =
+  | { kind: "category"; category: T & { label: string } }
+  | { kind: "group"; label: string; children: (T & { label: string })[] };
+
+/**
+ * The 一级/二级 view of the flat table (owner, 2026-08-20), derived rather
+ * than stored: `parent_label` — seeded from the freepos tree and edited on
+ * /staff/categorias — is the GROUPING KEY, and rows sharing one become the
+ * children of a heading that carries it. No parent rows exist and none are
+ * invented; the hierarchy is a way of READING the same 61 rows, which is why
+ * this lives beside `sortCategories` and reuses its comparator wholesale.
+ *
+ * The rules, each one pinned by a test:
+ * - a group forms at TWO members or more. A lone row whose parent label is
+ *   itself — most of the freepos tree — or whose label nobody else shares
+ *   renders flat: a heading over one row says nothing the row does not.
+ * - membership is by label equality in THIS locale, the same equality the
+ *   staff page writes (children of 餐厅用品 include the row NAMED 餐厅用品 —
+ *   the freepos shape where a group repeats itself as its own child).
+ * - a row with no parent label (null, `{}`, empty strings) is its own entry.
+ * - groups and flat rows interleave by the rail's own order: a group sits
+ *   where its FIRST child (by `compareCategories`) would have sat, so turning
+ *   a label into a group never teleports its rows down the rail.
+ */
+export function groupCategories<T extends GroupableCategory>(
+  rows: readonly T[],
+  locale: string,
+): CategoryTreeEntry<T>[] {
+  const labeled = sortCategories(rows, locale);
+
+  const buckets = new Map<string, (T & { label: string })[]>();
+  const flat: (T & { label: string })[] = [];
+  for (const row of labeled) {
+    const parent = localizedName(row.parent_label, locale);
+    if (!parent) {
+      flat.push(row);
+      continue;
+    }
+    const bucket = buckets.get(parent);
+    if (bucket) bucket.push(row);
+    else buckets.set(parent, [row]);
+  }
+
+  const entries: { order: T & { label: string }; entry: CategoryTreeEntry<T> }[] =
+    [];
+  for (const row of flat) {
+    entries.push({ order: row, entry: { kind: "category", category: row } });
+  }
+  for (const [label, children] of buckets) {
+    if (children.length === 1) {
+      // Not a group yet — see the rules above.
+      entries.push({
+        order: children[0],
+        entry: { kind: "category", category: children[0] },
+      });
+    } else {
+      entries.push({
+        order: children[0],
+        entry: { kind: "group", label, children },
+      });
+    }
+  }
+
+  return entries
+    .sort((a, b) => compareCategories(a.order, b.order, locale))
+    .map(({ entry }) => entry);
+}
+
+/**
+ * Which categories THIS caller must not see: the 'selected' ones whose
+ * allowlist does not include them. Everything else — 'all' rows, and
+ * 'selected' rows the caller is on — passes.
+ *
+ * Pure and read-only so the two customer surfaces (catalogue and search)
+ * cannot disagree: both compute their hidden set through this one function
+ * from the same two reads (the category list, and the caller's own
+ * `category_companies` rows — RLS hands a restaurant only its own).
+ */
+export function hiddenCategoryIds(
+  categories: readonly { id: number; visibility: string }[],
+  allowedIds: ReadonlySet<number>,
+): number[] {
+  return categories
+    .filter((row) => row.visibility === "selected" && !allowedIds.has(row.id))
+    .map((row) => row.id);
+}
+
+/**
+ * What the 一级分类 field's text means as a `parent_label` value.
+ *
+ * The staff form offers the EXISTING parent labels in a datalist, and typing
+ * one back — in either language — must reuse that label's stored jsonb rather
+ * than mint a lookalike: `groupCategories` groups by label equality per
+ * locale, so a fresh `{zh: "餐厅用品", es: "餐厅用品"}` beside a stored
+ * `{zh: "餐厅用品", es: "Menaje"}` reads as ONE group in Chinese and TWO in
+ * Spanish. Matching is exact on either language key, against the labels that
+ * are already in the table.
+ *
+ * Text that matches nothing is a NEW label, written to both keys so it renders
+ * the same in both languages until a translation exists. Rows do not share the
+ * object — each keeps its own copy — which is exactly why reuse-on-match
+ * matters. Empty text files the row under no group at all.
+ */
+export function resolveParentLabel(
+  input: string,
+  existing: readonly unknown[],
+): CategoryName | null {
+  const wanted = input.trim();
+  if (!wanted) return null;
+  for (const label of existing) {
+    if (!label || typeof label !== "object" || Array.isArray(label)) continue;
+    const record = label as Record<string, unknown>;
+    if (record.zh === wanted || record.es === wanted) {
+      // The stored value verbatim. Narrowed by reading, not by trusting: the
+      // column is unconstrained jsonb, so only the string keys come along.
+      const kept: CategoryName = {};
+      if (typeof record.zh === "string") kept.zh = record.zh;
+      if (typeof record.es === "string") kept.es = record.es;
+      return kept;
+    }
+  }
+  return { zh: wanted, es: wanted };
+}
+
+/** The two words `categories.visibility` accepts, or null for anything else. */
+export function parseVisibility(value: unknown): "all" | "selected" | null {
+  return value === "all" || value === "selected" ? value : null;
+}
+
 /** Which way a ↑/↓ button moves a row. */
 export type MoveDirection = "up" | "down";
 

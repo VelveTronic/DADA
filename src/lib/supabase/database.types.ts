@@ -45,6 +45,7 @@ export type Database = {
           parent_label: Json | null
           sort_order: number
           updated_at: string
+          visibility: string
         }
         Insert: {
           created_at?: string
@@ -55,6 +56,7 @@ export type Database = {
           parent_label?: Json | null
           sort_order?: number
           updated_at?: string
+          visibility?: string
         }
         Update: {
           created_at?: string
@@ -65,8 +67,42 @@ export type Database = {
           parent_label?: Json | null
           sort_order?: number
           updated_at?: string
+          visibility?: string
         }
         Relationships: []
+      }
+      category_companies: {
+        Row: {
+          category_id: number
+          company_id: string
+          created_at: string
+        }
+        Insert: {
+          category_id: number
+          company_id: string
+          created_at?: string
+        }
+        Update: {
+          category_id?: number
+          company_id?: string
+          created_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "category_companies_category_id_fkey"
+            columns: ["category_id"]
+            isOneToOne: false
+            referencedRelation: "categories"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "category_companies_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       companies: {
         Row: {

@@ -9,17 +9,20 @@ import type { CategoryError, CategoryFormState } from "@/lib/categories";
 import {
   CATEGORY_LIMIT,
   makePortalErpCode,
+  MAX_CATEGORY_NAME_LENGTH,
   moveCategory,
   parseActiveFlag,
   parseCategoryId,
   parseMoveDirection,
+  parseVisibility,
+  resolveParentLabel,
   SORT_STEP,
   validateCategoryName,
 } from "@/lib/categories";
 import { createServerSupabase } from "@/lib/supabase/server";
 
 /**
- * 分类管理's four writes — and the only writes in this app that a staff member
+ * 分类管理's five writes — and the only writes in this app that a staff member
  * performs with their OWN credentials.
  *
  * **Why there is no RPC here, and no service-role client.** `public.categories`
@@ -27,10 +30,12 @@ import { createServerSupabase } from "@/lib/supabase/server";
  * session: the three write policies gate on `private.is_staff()`
  * (`supabase/migrations/20260815101406_security_order_integrity.sql:156-164`),
  * the table grant carries `insert, update, delete … to authenticated` (:688) and
- * the identity sequence is usable by the same role (:719). So the DATABASE is
- * the gate on every statement below, under the caller's own JWT, and this
- * feature needed neither a migration nor a new SECURITY DEFINER function — which
- * is why the accepted security-advisor baseline in CLAUDE.md is unchanged by it.
+ * the identity sequence is usable by the same role (:719). `category_companies`
+ * (migration 20260820190000) was cut to the same shape on purpose — staff
+ * policy, per-role grants, no RPC. So the DATABASE is the gate on every
+ * statement below, under the caller's own JWT, and no new SECURITY DEFINER
+ * function exists — which is why the accepted security-advisor baseline in
+ * CLAUDE.md is unchanged by any of it.
  *
  * `assertStaff` (`lib/auth/assert-staff.ts`, shared with the products and orders
  * actions) is not that gate. It is the early, kinder half: a Server Action is
@@ -73,6 +78,9 @@ function revalidateCategoryPaths() {
     revalidatePath(`/${locale}/staff/categorias`);
     revalidatePath(`/${locale}/staff/productos`);
     revalidatePath(`/${locale}/catalogo`);
+    // Search filters by the same visibility the catalogue does (owner,
+    // 2026-08-20), so a grant change has to clear its cached copy too.
+    revalidatePath(`/${locale}/buscar`);
   }
 }
 
@@ -200,7 +208,18 @@ export async function createCategory(
   return { ok: true, code: null, values: null };
 }
 
-/** Rename a category in either language, or in both. */
+/**
+ * Save a category's editable words: its name in either language, and the
+ * 一级分类 it is filed under.
+ *
+ * The parent travels as TEXT in one locale, because that is what the form's
+ * datalist field holds — `resolveParentLabel` turns it back into a jsonb pair,
+ * reusing the stored pair whenever the text matches an existing parent in
+ * either language (the whole point: a lookalike object would split the group
+ * in the OTHER language). That match needs the labels already in the table, so
+ * this action reads them first — the same bounded read every category read in
+ * this file makes.
+ */
 export async function renameCategory(formData: FormData): Promise<void> {
   await assertStaff();
   const locale = safeLocale(formData.get("locale"));
@@ -215,13 +234,37 @@ export async function renameCategory(formData: FormData): Promise<void> {
   );
   if (!checked.ok) return finish(locale, checked.code, view);
 
+  // Same crafted-POST rule as `createCategory`'s `raw`: a file part must not
+  // become the string "[object File]" and land in the column.
+  const parentEntry = formData.get("parent");
+  const parentText = typeof parentEntry === "string" ? parentEntry.trim() : "";
+  // The parent is a name like any other, so it lives under the same length
+  // roof — the rail heading it becomes is drawn in the same 92px gutter.
+  if (parentText.length > MAX_CATEGORY_NAME_LENGTH) {
+    return finish(locale, "BAD_INPUT", view);
+  }
+
   const supabase = await createServerSupabase();
+  const { data: parentRows, error: parentError } = await supabase
+    .from("categories")
+    .select("parent_label")
+    .not("parent_label", "is", null)
+    .limit(CATEGORY_LIMIT);
+  if (parentError) {
+    console.error("renameCategory parent read:", parentError);
+    return finish(locale, "DB_ERROR", view);
+  }
+  const parent = resolveParentLabel(
+    parentText,
+    (parentRows ?? []).map((row) => row.parent_label),
+  );
+
   // `select("id")` is how a write that matched NOTHING is told apart from one
   // that worked: RLS refuses the statement outright for a non-staff caller, but
   // an id that no longer exists updates zero rows and reports no error at all.
   const { data, error } = await supabase
     .from("categories")
-    .update({ name: checked.name })
+    .update({ name: checked.name, parent_label: parent })
     .eq("id", id)
     .select("id");
   if (error) {
@@ -229,6 +272,87 @@ export async function renameCategory(formData: FormData): Promise<void> {
     return finish(locale, "DB_ERROR", view);
   }
   if ((data ?? []).length === 0) return finish(locale, "NOT_FOUND", view);
+
+  return finish(locale, "ok", view);
+}
+
+/**
+ * Set who may see a category: everyone, or an explicit list of companies.
+ *
+ * One press writes both halves — the `visibility` word on the row, and the
+ * whole allowlist, replaced with whatever the checkboxes said. The allowlist
+ * is written even when the word is 'all': the boxes were on the form the staff
+ * member pressed 保存 on, so keeping rows the form no longer shows would make
+ * the NEXT switch to 'selected' resurrect a list nobody could see.
+ *
+ * Replace is delete-then-insert, not a transaction — PostgREST speaks one
+ * statement at a time. A failure between the two leaves the category with
+ * FEWER grants than intended, which fails in the safe direction (a customer
+ * loses sight of a shelf, none gains one), the banner says DB_ERROR, and the
+ * next successful save rewrites the whole list anyway.
+ */
+export async function setCategoryVisibility(formData: FormData): Promise<void> {
+  await assertStaff();
+  const locale = safeLocale(formData.get("locale"));
+  const view = viewState(formData);
+
+  const id = parseCategoryId(formData.get("id"));
+  const visibility = parseVisibility(formData.get("visibility"));
+  if (id === null || visibility === null) {
+    return finish(locale, "BAD_INPUT", view);
+  }
+
+  // Company ids off the checkboxes. Shape-checked here (uuid or refused) so a
+  // crafted POST answers BAD_INPUT instead of a Postgres cast error dressed as
+  // DB_ERROR; the FK and RLS behind it are the real gate.
+  const companyIds: string[] = [];
+  for (const value of formData.getAll("company")) {
+    if (
+      typeof value !== "string" ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+        value,
+      )
+    ) {
+      return finish(locale, "BAD_INPUT", view);
+    }
+    companyIds.push(value);
+  }
+
+  const supabase = await createServerSupabase();
+  const { data, error } = await supabase
+    .from("categories")
+    .update({ visibility })
+    .eq("id", id)
+    .select("id");
+  if (error) {
+    console.error("setCategoryVisibility:", error);
+    return finish(locale, "DB_ERROR", view);
+  }
+  if ((data ?? []).length === 0) return finish(locale, "NOT_FOUND", view);
+
+  const { error: clearError } = await supabase
+    .from("category_companies")
+    .delete()
+    .eq("category_id", id);
+  if (clearError) {
+    console.error("setCategoryVisibility clear:", clearError);
+    return finish(locale, "DB_ERROR", view);
+  }
+
+  if (companyIds.length > 0) {
+    const { error: grantError } = await supabase
+      .from("category_companies")
+      .insert(
+        companyIds.map((companyId) => ({
+          category_id: id,
+          company_id: companyId,
+        })),
+      );
+    if (grantError) {
+      console.error("setCategoryVisibility grants:", grantError);
+      return finish(locale, "DB_ERROR", view);
+    }
+  }
 
   return finish(locale, "ok", view);
 }

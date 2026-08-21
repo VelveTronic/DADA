@@ -5,6 +5,7 @@ import {
   moveCategoryAction,
   renameCategory,
   setCategoryActive,
+  setCategoryVisibility,
 } from "@/app/actions/staff-categories";
 import { ProductThumb } from "@/components/product-thumb";
 import { StaffShell } from "@/components/staff-shell";
@@ -168,16 +169,21 @@ export default async function StaffCategoriesPage({
     raw === "ok" || isCategoryError(raw) ? raw : null;
   const creating = rawNew === "1";
 
-  // ROUND ONE. Neither read needs anything from the guard, so both go out beside
-  // it. ONE perf step covers the whole count scan, loop included: it is one
-  // query shape and one figure on the line, however many windows it took.
-  const [staffUser, categoryResult, scan] = await Promise.all([
+  // ROUND ONE. None of these reads needs anything from the guard, so they go
+  // out beside it. ONE perf step covers the whole count scan, loop included: it
+  // is one query shape and one figure on the line, however many windows it
+  // took. Companies ride here too — the 可见范围 checklist offers the same list
+  // whichever category is open, and the staff RLS branch on `companies_select`
+  // is what lets the SESSION client read it.
+  const [staffUser, categoryResult, scan, companyResult] = await Promise.all([
     finishStaff(pendingStaff, locale),
     perf.step(
       "categories",
       supabase
         .from("categories")
-        .select("id, erp_code, name, parent_label, sort_order, is_active")
+        .select(
+          "id, erp_code, name, parent_label, visibility, sort_order, is_active",
+        )
         // Ordered so the 500 rows this reads are the SAME 500 the move action
         // reads (`staff-categories.ts`, same bound, same order). Not the display
         // order — `sortCategories` below is that — just a stable slice, because
@@ -187,11 +193,23 @@ export default async function StaffCategoriesPage({
         .limit(CATEGORY_LIMIT),
     ),
     perf.step("counts", scanProductCategories(supabase)),
+    perf.step(
+      "companies",
+      supabase
+        .from("companies")
+        .select("id, name")
+        .eq("is_active", true)
+        .order("name"),
+    ),
   ]);
 
   if (categoryResult.error) {
     console.error("staff categories query:", categoryResult.error);
   }
+  if (companyResult.error) {
+    console.error("staff categories companies query:", companyResult.error);
+  }
+  const companies = companyResult.data ?? [];
   if (scan.truncated) {
     // A REAL overrun now, not the row cap: the scan spent its ceiling of
     // MAX_SCAN_WINDOWS windows and the table is longer still, so the counts are
@@ -236,22 +254,40 @@ export default async function StaffCategoriesPage({
   // ROUND TWO, and only for the pane on the right. It cannot join round one: on
   // a bare `/staff/categorias` the category it reads is "the first one in rail
   // order", which is not known until the list above has been read and sorted.
-  const detail = selected
-    ? await perf.step(
-        "categoryProducts",
-        supabase
-          .from("products")
-          .select("id, codart, name, image_url")
-          .eq("category_id", selected.id)
-          .order("codart")
-          .limit(DETAIL_LIMIT),
-      )
-    : null;
+  // The grants read rides the same round — it is about the same selected row —
+  // and under the staff RLS policy it sees the whole allowlist, not one
+  // company's slice of it.
+  const [detail, grantResult] = selected
+    ? await Promise.all([
+        perf.step(
+          "categoryProducts",
+          supabase
+            .from("products")
+            .select("id, codart, name, image_url")
+            .eq("category_id", selected.id)
+            .order("codart")
+            .limit(DETAIL_LIMIT),
+        ),
+        perf.step(
+          "categoryGrants",
+          supabase
+            .from("category_companies")
+            .select("company_id")
+            .eq("category_id", selected.id),
+        ),
+      ])
+    : [null, null];
   perf.end();
   if (detail?.error) {
     console.error("staff categories products query:", detail.error);
   }
+  if (grantResult?.error) {
+    console.error("staff categories grants query:", grantResult.error);
+  }
   const detailProducts = detail?.data ?? [];
+  const grantedCompanyIds = new Set(
+    (grantResult?.data ?? []).map((row) => row.company_id),
+  );
 
   /**
    * The customer's rail draws ACTIVE categories only, so the position a staff
@@ -330,7 +366,20 @@ export default async function StaffCategoriesPage({
 
   const selectedLabel = selected?.label ?? "";
   const selectedSecond = selected ? secondName(selected.name) : null;
-  const groupLabel = selected ? localizedName(selected.parent_label, locale) : "";
+
+  /**
+   * Every 一级分类 already in the table, in THIS locale, for the datalist under
+   * the parent field: filing a category under an existing group is a pick, not
+   * a retype — and picking is what makes `resolveParentLabel` reuse the stored
+   * bilingual pair instead of minting a lookalike.
+   */
+  const parentOptions = [
+    ...new Set(
+      categories
+        .map((row) => localizedName(row.parent_label, locale))
+        .filter((label) => label !== ""),
+    ),
+  ];
 
   return (
     <StaffShell
@@ -463,6 +512,11 @@ export default async function StaffCategoriesPage({
                           {t("hiddenChip")}
                         </span>
                       )}
+                      {category.visibility === "selected" && (
+                        <span className="flex-none rounded-md bg-amber-100 px-1.5 py-0.5 text-[11px] text-amber-800">
+                          {t("visLimitedChip")}
+                        </span>
+                      )}
                       <span className="flex-none font-num text-xs text-muted tabular-nums">
                         {t("productCount", { n: countOf(category.id) })}
                       </span>
@@ -514,14 +568,6 @@ export default async function StaffCategoriesPage({
                         })
                       : t("positionHidden", { n: countOf(selected.id) })}
                   </p>
-                  {groupLabel && (
-                    // `parent_label` is a display grouping the freepos tree
-                    // carried, NOT a hierarchy (there is no parent id), so it is
-                    // shown and never edited here.
-                    <p className="mt-1.5 text-xs text-muted">
-                      {t("groupLabel")}: {groupLabel}
-                    </p>
-                  )}
                 </div>
 
                 <div className="flex flex-col gap-5 px-5 py-4">
@@ -560,6 +606,34 @@ export default async function StaffCategoriesPage({
                         className={`${FIELD_SM} text-ink`}
                       />
                     </label>
+                    {/* The 一级分类, as TEXT with the existing groups offered
+                        under it — a datalist and not a select because a NEW
+                        group is typed into existence the same way an existing
+                        one is joined, and because "no group" is just an empty
+                        field. `resolveParentLabel` in the action is what turns
+                        a picked label back into the stored bilingual pair. */}
+                    <label className="flex flex-col gap-1 text-xs text-muted sm:col-span-2">
+                      {t("parentLabel")}
+                      <input
+                        name="parent"
+                        list="parent-options"
+                        maxLength={MAX_CATEGORY_NAME_LENGTH}
+                        autoComplete="off"
+                        defaultValue={localizedName(
+                          selected.parent_label,
+                          locale,
+                        )}
+                        className={`${FIELD_SM} text-ink`}
+                      />
+                      <span className="text-[11px] text-muted">
+                        {t("parentHint")}
+                      </span>
+                    </label>
+                    <datalist id="parent-options">
+                      {parentOptions.map((label) => (
+                        <option key={label} value={label} />
+                      ))}
+                    </datalist>
                     <div className="sm:col-span-2">
                       <button
                         type="submit"
@@ -600,6 +674,83 @@ export default async function StaffCategoriesPage({
                       {selected.is_active ? t("hideCopy") : t("showCopy")}
                     </p>
                   </div>
+
+                  {/* 可见范围 (owner, 2026-08-20): everyone, or the checked
+                      companies only. KEYED like the rename form and for the
+                      same reason — radios and checkboxes are uncontrolled, so
+                      without the key, clicking the next category would show
+                      THIS one's checklist. The checklist stays visible under
+                      both radios: what it holds is only enforced under 仅所选,
+                      and the copy under the save button says so — a display
+                      rule, not RLS, exactly as the migration documents. */}
+                  <form
+                    key={`vis-${selected.id}`}
+                    action={setCategoryVisibility}
+                    className="flex flex-col gap-3 border-t border-[#F4F0EC] pt-4"
+                  >
+                    <input type="hidden" name="locale" value={locale} />
+                    <input type="hidden" name="id" value={selected.id} />
+                    <input type="hidden" name="cat" value={selected.id} />
+                    {keepCreating}
+                    <p className="text-[13px] font-bold">
+                      {t("visibilityHead")}
+                    </p>
+                    <div className="flex flex-wrap gap-x-5 gap-y-2 text-[13px]">
+                      {(["all", "selected"] as const).map((mode) => (
+                        <label
+                          key={mode}
+                          className="flex items-center gap-1.5"
+                        >
+                          <input
+                            type="radio"
+                            name="visibility"
+                            value={mode}
+                            defaultChecked={selected.visibility === mode}
+                            className="accent-brand"
+                          />
+                          {t(mode === "all" ? "visAll" : "visSelected")}
+                        </label>
+                      ))}
+                    </div>
+                    {companies.length === 0 ? (
+                      <p className="text-xs text-muted">{t("visNoCompanies")}</p>
+                    ) : (
+                      /* One checkbox per active company. The list scrolls
+                         inside its own box past ~6 rows — 36 companies today,
+                         and the form must not push the products card off
+                         screen. Company names are the short codes (C9, R1…) the
+                         owner runs the fleet by, so three columns fit. */
+                      <div className="grid max-h-44 grid-cols-2 gap-x-3 gap-y-1.5 overflow-y-auto rounded-lg border border-[#EDE9E5] bg-field p-3 sm:grid-cols-3">
+                        {companies.map((company) => (
+                          <label
+                            key={company.id}
+                            className="flex min-w-0 items-center gap-1.5 text-[12.5px]"
+                          >
+                            <input
+                              type="checkbox"
+                              name="company"
+                              value={company.id}
+                              defaultChecked={grantedCompanyIds.has(company.id)}
+                              className="accent-brand"
+                            />
+                            <span className="truncate">{company.name}</span>
+                          </label>
+                        ))}
+                      </div>
+                    )}
+                    <div className="flex flex-wrap items-center gap-3">
+                      <button
+                        type="submit"
+                        aria-label={t("visSaveFor", { name: selectedLabel })}
+                        className={BTN_QUIET}
+                      >
+                        {t("visSave")}
+                      </button>
+                      <p className="min-w-0 flex-1 text-xs text-muted">
+                        {t("visCopy")}
+                      </p>
+                    </div>
+                  </form>
                 </div>
               </section>
 
