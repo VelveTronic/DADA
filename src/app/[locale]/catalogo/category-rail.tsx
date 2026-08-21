@@ -76,9 +76,14 @@ export async function CategoryRail({ entries }: { entries: RailEntry[] }) {
           // A group caption. `aria-hidden` would be wrong — the words structure
           // the list for a screen reader exactly as they do visually — but it
           // is presentation, not a control, so it is a div and not a link.
+          //
+          // Dark red and bold (owner, 2026-08-21): the caption has to read as a
+          // HEADING from across the rail, not as one more muted row. brand-ink,
+          // not brand — the darker red is the pair's AA text colour, and on
+          // `#F1EDE9` it still clears 4.5:1 at this size.
           <div
             key={entry.id}
-            className="border-b border-[#E9E4DF] bg-[#F1EDE9] px-3 pt-2.5 pb-1.5 text-[11px] font-semibold tracking-wide text-muted"
+            className="border-b border-[#E9E4DF] bg-[#F1EDE9] px-3 pt-2.5 pb-1.5 text-[12px] font-bold tracking-wide text-brand-ink"
           >
             {entry.label}
           </div>
@@ -98,8 +103,21 @@ export async function CategoryRail({ entries }: { entries: RailEntry[] }) {
           // `RailAutoscroll` finds it by.
           aria-current={entry.active ? "page" : undefined}
           data-rail-active={entry.active ? "" : undefined}
+          // A 二级 row hangs off its heading by a continuous left rule, not by
+          // indent alone (owner, 2026-08-21): with only 4px of extra inset, the
+          // first TOP-LEVEL entry after a group read as one more of its
+          // children — 米面油 looked filed under 五金电器. The rule is binary
+          // where the indent was subtle: it runs down every child and STOPS,
+          // and the row without it is a new 一级 entry. Width math unchanged:
+          // 3px rule + 13px padding = the same 16px inset `pl-4` was, so a
+          // child still shows 64px of text — five 12.5px CJK glyphs (62.5) with
+          // the margin the nav comment above accounts. The active row's own red
+          // bar (absolute, left-0) sits INSIDE the padding box, flush against
+          // this rule and clearly stronger than it.
           className={`relative flex min-h-11 items-center border-b border-[#E9E4DF] py-3 text-[12.5px] leading-tight ${
-            entry.child ? "pr-3 pl-4" : "px-3"
+            entry.child
+              ? "border-l-[3px] border-l-[#D9D2CA] pr-3 pl-[13px]"
+              : "px-3"
           } ${
             entry.active
               ? "bg-surface font-bold text-brand-ink"
