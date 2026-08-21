@@ -1,12 +1,7 @@
 import type { Locale } from "next-intl";
 import { getTranslations, setRequestLocale } from "next-intl/server";
 import Link from "next/link";
-import {
-  setCurrentVariant,
-  setProductAvailability,
-  setProductCategory,
-  setProductWeighed,
-} from "@/app/actions/staff-products";
+import { setProductCategory } from "@/app/actions/staff-products";
 import { ProductThumb } from "@/components/product-thumb";
 import { StaffShell } from "@/components/staff-shell";
 import { ADMIN_CARD, ADMIN_TD, BTN_QUIET, FIELD_SM } from "@/components/ui";
@@ -109,9 +104,6 @@ type StaffProductRow = Pick<
   Database["public"]["Tables"]["products"]["Row"],
   | "id"
   | "codart"
-  | "base_sku"
-  | "variant_suffix"
-  | "is_current_variant"
   | "name"
   | "unit"
   | "units_per_case"
@@ -170,12 +162,15 @@ export default async function StaffProductsPage({
     let query = admin
       .from("products")
       .select(
-        "id, codart, base_sku, variant_suffix, is_current_variant, name, unit, units_per_case, is_weighed, is_available, image_url, category_id, price_1_cents, price_2_cents, price_3_cents, price_4_cents, price_5_cents, price_6_cents",
+        "id, codart, name, unit, units_per_case, is_weighed, is_available, image_url, category_id, price_1_cents, price_2_cents, price_3_cents, price_4_cents, price_5_cents, price_6_cents",
         { count: "exact" },
       );
     if (q) {
+      // `base_sku` left the search with the variant groups (2026-08-21): it is
+      // a copy of `codart` on every row now, so a second ILIKE over it would
+      // scan the same strings twice for the same hits.
       query = query.or(
-        `codart.ilike.%${q}%,base_sku.ilike.%${q}%,name->>zh.ilike.%${q}%,name->>es.ilike.%${q}%`,
+        `codart.ilike.%${q}%,name->>zh.ilike.%${q}%,name->>es.ilike.%${q}%`,
       );
     }
     // The two halves of the 分类 filter. `none` is the one the owner actually
@@ -184,10 +179,11 @@ export default async function StaffProductsPage({
     if (filter?.kind === "none") query = query.is("category_id", null);
     if (filter?.kind === "id") query = query.eq("category_id", filter.id);
     const from = (page - 1) * PAGE_SIZE;
-    return query
-      .order("base_sku")
-      .order("variant_suffix")
-      .range(from, from + PAGE_SIZE - 1);
+    // By SKU, which is the order staff read a catalogue in and — since the
+    // variant dissolution — the only order there is: `base_sku`/`variant_suffix`
+    // are `codart` and "" on every row, so the old two-key sort said the same
+    // thing in three columns.
+    return query.order("codart").range(from, from + PAGE_SIZE - 1);
   };
 
   /**
@@ -298,13 +294,6 @@ export default async function StaffProductsPage({
    * the log line above is what says so.
    */
   const totalProducts = totalResult?.count ?? count ?? 0;
-
-  // Page-local group sizes. base_sku ordering keeps a variant group contiguous,
-  // so the count is exact except for a group split across a page boundary.
-  const groupSizes = new Map<string, number>();
-  for (const p of products) {
-    groupSizes.set(p.base_sku, (groupSizes.get(p.base_sku) ?? 0) + 1);
-  }
 
   /**
    * Every link on this page, carrying the state it is not changing.
@@ -542,8 +531,6 @@ export default async function StaffProductsPage({
             </thead>
             <tbody className="divide-y divide-[#F4F0EC]">
               {products.map((p) => {
-                const groupSize = groupSizes.get(p.base_sku) ?? 1;
-                const inGroup = groupSize > 1 || p.variant_suffix !== "";
                 const name = localizedName(p.name, locale);
                 const filing = filingLabel(p.category_id);
                 return (
@@ -573,14 +560,6 @@ export default async function StaffProductsPage({
                             {p.is_weighed && (
                               <span className="rounded-md bg-amber-100 px-1.5 py-0.5 text-amber-800">
                                 {tCatalog("weighed")}
-                              </span>
-                            )}
-                            {inGroup && (
-                              <span>
-                                {t("variantGroup", {
-                                  base: p.base_sku,
-                                  n: groupSize,
-                                })}
                               </span>
                             )}
                           </div>
@@ -669,20 +648,15 @@ export default async function StaffProductsPage({
                     </td>
 
                     <td className={ADMIN_TD}>
-                      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                        <span
-                          className={
-                            p.is_available ? CHIP_ON_SALE : CHIP_OFF_SALE
-                          }
-                        >
-                          {p.is_available ? t("available") : t("unavailable")}
-                        </span>
-                        {p.is_current_variant && (
-                          <span className="rounded-md bg-blue-100 px-1.5 py-0.5 text-xs text-blue-800">
-                            {t("current")}
-                          </span>
-                        )}
-                      </div>
+                      {/* One chip, not two: the 当前变体 badge beside it went
+                          with the variant groups (2026-08-21). */}
+                      <span
+                        className={
+                          p.is_available ? CHIP_ON_SALE : CHIP_OFF_SALE
+                        }
+                      >
+                        {p.is_available ? t("available") : t("unavailable")}
+                      </span>
                     </td>
 
                     <td
@@ -691,57 +665,18 @@ export default async function StaffProductsPage({
                       {pricedTiers(p)}/6
                     </td>
 
+                    {/* ONE control, where four used to be (owner, 2026-08-21:
+                        「右侧按钮太多」). 停售 and 称重 became checkboxes on the
+                        editor, 设为当前 stopped existing with the variant
+                        groups, and everything the row could not fix at all —
+                        the name, the photo, the SKU — is a click away. */}
                     <td className={`${ADMIN_TD} pr-[18px] text-right`}>
-                      <div className="flex flex-wrap justify-end gap-2">
-                        <form action={setProductAvailability}>
-                          <input type="hidden" name="product_id" value={p.id} />
-                          <input
-                            type="hidden"
-                            name="available"
-                            value={p.is_available ? "0" : "1"}
-                          />
-                          <button type="submit" className={BTN_QUIET}>
-                            {p.is_available
-                              ? t("makeUnavailable")
-                              : t("makeAvailable")}
-                          </button>
-                        </form>
-                        {/* The 称重 switch, beside the 停售 one it is modelled
-                            on. It is the only source `is_weighed` has for an
-                            article the ERP calls UNIDAD — freepos never filled
-                            the column and Wingest can only say KG — and the
-                            badge on the meta line is what it turns on. */}
-                        <form action={setProductWeighed}>
-                          <input type="hidden" name="product_id" value={p.id} />
-                          <input
-                            type="hidden"
-                            name="weighed"
-                            value={p.is_weighed ? "0" : "1"}
-                          />
-                          <button type="submit" className={BTN_QUIET}>
-                            {p.is_weighed
-                              ? t("makeNotWeighed")
-                              : t("makeWeighed")}
-                          </button>
-                        </form>
-                        {!p.is_current_variant && (
-                          <form action={setCurrentVariant}>
-                            <input
-                              type="hidden"
-                              name="product_id"
-                              value={p.id}
-                            />
-                            <input
-                              type="hidden"
-                              name="base_sku"
-                              value={p.base_sku}
-                            />
-                            <button type="submit" className={BTN_QUIET}>
-                              {t("makeCurrent")}
-                            </button>
-                          </form>
-                        )}
-                      </div>
+                      <Link
+                        href={`/${locale}/staff/productos/${p.id}`}
+                        className={BTN_QUIET}
+                      >
+                        {t("edit")}
+                      </Link>
                     </td>
                   </tr>
                 );

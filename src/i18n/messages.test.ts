@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { CATEGORY_ERRORS } from "@/lib/categories";
+import { PRODUCT_EDIT_RESULTS } from "@/lib/product-edit";
 import {
   CUSTOMER_ORDER_TABS,
   LINE_EDIT_RESULTS,
@@ -71,6 +72,26 @@ describe("translations", () => {
         "string",
       );
       expect(esResults[key], `es staff.categories.results.${key}`).toBeTypeOf(
+        "string",
+      );
+    }
+  });
+
+  /**
+   * The product editor answers the same way: `updateProduct` redirects with
+   * `?result=<CODE>` and `/staff/productos/[id]` renders
+   * `staff.productEdit.results.<CODE>`. A code with no message here reaches a
+   * staff member as the raw SCREAMING_SNAKE token after a save they cannot
+   * otherwise tell landed or not.
+   */
+  it("carries a staff.productEdit.results message for every edit outcome", () => {
+    const zhResults: Record<string, string> = zh.staff.productEdit.results;
+    const esResults: Record<string, string> = es.staff.productEdit.results;
+    for (const key of PRODUCT_EDIT_RESULTS) {
+      expect(zhResults[key], `zh staff.productEdit.results.${key}`).toBeTypeOf(
+        "string",
+      );
+      expect(esResults[key], `es staff.productEdit.results.${key}`).toBeTypeOf(
         "string",
       );
     }
