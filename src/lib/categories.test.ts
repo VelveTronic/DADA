@@ -9,7 +9,7 @@ import {
   isCategoryError,
   makePortalErpCode,
   MAX_CATEGORY_NAME_LENGTH,
-  moveCategory,
+  moveCategoryInTree,
   parseActiveFlag,
   parseCategoryId,
   parseMoveDirection,
@@ -148,67 +148,151 @@ describe("resequence", () => {
   });
 });
 
-describe("moveCategory", () => {
+describe("moveCategoryInTree", () => {
+  // A row of the tree the moves operate on. Same shape `groupCategories`
+  // takes: name + parent_label, parents as zh-only objects.
+  function trow(
+    id: number,
+    sort_order: number,
+    zh: string,
+    parentZh: string | null = null,
+  ) {
+    return {
+      id,
+      sort_order,
+      name: { zh },
+      parent_label: parentZh === null ? null : { zh: parentZh },
+    };
+  }
+
+  // The fixture tree, in rail order:
+  //   alone1(1) · [grp: g1(2), g2(3)] · alone2(4) · [tail: t1(5), t2(6)]
   const rows = [
-    cat(1, 10, "Alfa"),
-    cat(2, 20, "Bravo"),
-    cat(3, 30, "Charlie"),
+    trow(1, 10, "alone1"),
+    trow(2, 20, "g1", "grp"),
+    trow(3, 30, "g2", "grp"),
+    trow(4, 40, "alone2"),
+    trow(5, 50, "t1", "tail"),
+    trow(6, 60, "t2", "tail"),
   ];
 
-  it("swaps a middle row with the one above it", () => {
-    expect(moveCategory(rows, 2, "up", "zh")).toEqual([
+  const idsInOrder = (result: ReturnType<typeof moveCategoryInTree>) => {
+    if (!result.ok) throw new Error(`expected ok, got ${result.code}`);
+    // `steps` numbers strictly by position, so sorting by sort_order IS the
+    // flattened display order.
+    return [...result.sorts]
+      .sort((a, b) => a.sort_order - b.sort_order)
+      .map((row) => row.id);
+  };
+
+  it("moves a whole group past the standalone above it", () => {
+    expect(idsInOrder(moveCategoryInTree(rows, { group: "grp" }, "up", "zh")))
+      .toEqual([2, 3, 1, 4, 5, 6]);
+  });
+
+  it("moves a whole group past the whole group below it", () => {
+    const shoulder = [
+      trow(1, 10, "a1", "grp"),
+      trow(2, 20, "a2", "grp"),
+      trow(3, 30, "b1", "tail"),
+      trow(4, 40, "b2", "tail"),
+    ];
+    expect(
+      idsInOrder(moveCategoryInTree(shoulder, { group: "grp" }, "down", "zh")),
+    ).toEqual([3, 4, 1, 2]);
+  });
+
+  it("moves a standalone past a group as ONE step", () => {
+    expect(idsInOrder(moveCategoryInTree(rows, { id: 4 }, "up", "zh"))).toEqual(
+      [1, 4, 2, 3, 5, 6],
+    );
+  });
+
+  it("moves a child within its group only", () => {
+    expect(idsInOrder(moveCategoryInTree(rows, { id: 3 }, "up", "zh"))).toEqual(
+      [1, 3, 2, 4, 5, 6],
+    );
+  });
+
+  it("a child at its group's end answers EDGE, never escapes the group", () => {
+    expect(moveCategoryInTree(rows, { id: 2 }, "up", "zh")).toEqual({
+      ok: false,
+      code: "EDGE",
+    });
+    expect(moveCategoryInTree(rows, { id: 3 }, "down", "zh")).toEqual({
+      ok: false,
+      code: "EDGE",
+    });
+  });
+
+  it("the list's own ends answer EDGE for groups and standalones alike", () => {
+    expect(moveCategoryInTree(rows, { id: 1 }, "up", "zh")).toEqual({
+      ok: false,
+      code: "EDGE",
+    });
+    expect(moveCategoryInTree(rows, { group: "tail" }, "down", "zh")).toEqual({
+      ok: false,
+      code: "EDGE",
+    });
+  });
+
+  it("answers NOT_FOUND for an id or a group label the list does not hold", () => {
+    expect(moveCategoryInTree(rows, { id: 999 }, "up", "zh")).toEqual({
+      ok: false,
+      code: "NOT_FOUND",
+    });
+    expect(moveCategoryInTree(rows, { group: "nope" }, "up", "zh")).toEqual({
+      ok: false,
+      code: "NOT_FOUND",
+    });
+    expect(moveCategoryInTree([], { id: 1 }, "up", "zh")).toEqual({
+      ok: false,
+      code: "NOT_FOUND",
+    });
+  });
+
+  it("flattens to strict steps, children contiguous behind their group", () => {
+    // Scattered legacy numbers: group members interleaved with strangers. One
+    // move normalizes the WHOLE list to the tree order, blocks contiguous.
+    const scattered = [
+      trow(1, 0, "g1", "grp"),
+      trow(2, 5, "alone"),
+      trow(3, 7, "g2", "grp"),
+    ];
+    // Tree: [grp: g1, g2] (at g1's position, first) · alone. Move alone up.
+    const moved = moveCategoryInTree(scattered, { id: 2 }, "up", "zh");
+    if (!moved.ok) throw new Error("expected ok");
+    expect(moved.sorts).toEqual([
       { id: 2, sort_order: 10 },
       { id: 1, sort_order: 20 },
       { id: 3, sort_order: 30 },
     ]);
   });
 
-  it("swaps a middle row with the one below it", () => {
-    expect(moveCategory(rows, 2, "down", "zh")).toEqual([
-      { id: 1, sort_order: 10 },
-      { id: 3, sort_order: 20 },
-      { id: 2, sort_order: 30 },
-    ]);
-  });
-
-  it("changes exactly the two rows that swapped, once the list is sequenced", () => {
-    const moved = moveCategory(rows, 2, "up", "zh") ?? [];
-    const changed = moved.filter(
-      (row) => rows.find((r) => r.id === row.id)?.sort_order !== row.sort_order,
+  it("survives a round trip: a group down, then up, is a plain resequence", () => {
+    const down = moveCategoryInTree(rows, { group: "grp" }, "down", "zh");
+    if (!down.ok) throw new Error("expected ok");
+    const back = moveCategoryInTree(
+      apply(rows, down.sorts),
+      { group: "grp" },
+      "up",
+      "zh",
     );
-    // What the action writes back: two updates, not the whole table.
-    expect(changed.map((row) => row.id).sort()).toEqual([1, 2]);
+    if (!back.ok) throw new Error("expected ok");
+    expect(back.sorts).toEqual(resequence(rows, "zh"));
   });
 
-  it("answers null at both ends and for an id it cannot see", () => {
-    expect(moveCategory(rows, 1, "up", "zh")).toBeNull();
-    expect(moveCategory(rows, 3, "down", "zh")).toBeNull();
-    expect(moveCategory(rows, 999, "up", "zh")).toBeNull();
-    expect(moveCategory([], 1, "up", "zh")).toBeNull();
-  });
-
-  it("answers null for a single-row list in either direction", () => {
-    const one = [cat(7, 0, "Alfa")];
-    expect(moveCategory(one, 7, "up", "zh")).toBeNull();
-    expect(moveCategory(one, 7, "down", "zh")).toBeNull();
-  });
-
-  it("moves a row past a NEIGHBOUR IT IS TIED WITH", () => {
-    // The move that could not work without re-sequencing: three rows sharing one
-    // number, ordered by name alone. Pushing Charlie up has to produce numbers,
-    // because there is no number here to swap.
-    const tied = [cat(1, 0, "Alfa"), cat(2, 0, "Bravo"), cat(3, 0, "Charlie")];
-    expect(moveCategory(tied, 3, "up", "zh")).toEqual([
-      { id: 1, sort_order: 10 },
-      { id: 3, sort_order: 20 },
-      { id: 2, sort_order: 30 },
-    ]);
-  });
-
-  it("survives a round trip: move down, then up, is where it started", () => {
-    const down = moveCategory(rows, 1, "down", "zh") ?? [];
-    const back = moveCategory(apply(rows, down), 1, "up", "zh");
-    expect(back).toEqual(resequence(rows, "zh"));
+  it("a singleton parent is a standalone: its id moves at top level", () => {
+    // One member renders flat (groupCategories' own rule), so its arrows move
+    // it among the top-level entries — past real groups included.
+    const lone = [
+      trow(1, 10, "solo", "solo"),
+      trow(2, 20, "g1", "grp"),
+      trow(3, 30, "g2", "grp"),
+    ];
+    expect(
+      idsInOrder(moveCategoryInTree(lone, { id: 1 }, "down", "zh")),
+    ).toEqual([2, 3, 1]);
   });
 });
 

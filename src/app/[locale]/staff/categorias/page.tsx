@@ -16,6 +16,7 @@ import type { CategoryError } from "@/lib/categories";
 import {
   CATEGORY_ERRORS,
   CATEGORY_LIMIT,
+  groupCategories,
   isCategoryError,
   MAX_CATEGORY_NAME_LENGTH,
   sortCategories,
@@ -148,13 +149,19 @@ export default async function StaffCategoriesPage({
   searchParams,
 }: {
   params: Promise<{ locale: Locale }>;
-  searchParams: Promise<{ cat?: string; result?: string; new?: string }>;
+  searchParams: Promise<{
+    cat?: string;
+    result?: string;
+    new?: string;
+    open?: string;
+  }>;
 }) {
   const { locale } = await params;
   const {
     cat: rawCat,
     result: rawResult,
     new: rawNew,
+    open: rawOpen,
   } = await searchParams;
   setRequestLocale(locale);
   const perf = perfRun(`/${locale}/staff/categorias`);
@@ -251,6 +258,35 @@ export default async function StaffCategoriesPage({
   const selected =
     categories.find((row) => String(row.id) === rawCat) ?? categories[0] ?? null;
 
+  /**
+   * The 一级/二级 TREE — the same derivation the customer's rail and both
+   * product-page selects draw (`groupCategories`), so the list a staff member
+   * reorders here is, entry for entry, the list a restaurant scrolls. The
+   * arrows move entries of THIS tree (owner, 2026-08-21): a 一级 group among
+   * the top-level entries, a 二级 row within its group.
+   */
+  const tree = groupCategories(categoryResult.data ?? [], locale);
+
+  /**
+   * Which 一级 group is expanded — an accordion, one at a time. `?open=`
+   * holds the group's label, or the `-` sentinel for "explicitly none"; with
+   * no parameter at all, the group holding the SELECTED category starts open,
+   * so a deep link to a 二级 row lands with that row visible. The sentinel
+   * exists because a bare absence cannot mean "collapsed" while it also means
+   * "derive from the selection" — collapsing the auto-opened group needs a
+   * word for it.
+   */
+  const selectedGroup = selected
+    ? localizedName(selected.parent_label, locale)
+    : "";
+  const autoOpen = tree.some(
+    (entry) => entry.kind === "group" && entry.label === selectedGroup,
+  )
+    ? selectedGroup
+    : "";
+  const openGroup =
+    rawOpen === undefined ? autoOpen : rawOpen === "-" ? "" : rawOpen;
+
   // ROUND TWO, and only for the pane on the right. It cannot join round one: on
   // a bare `/staff/categorias` the category it reads is "the first one in rail
   // order", which is not known until the list above has been read and sorted.
@@ -324,17 +360,28 @@ export default async function StaffCategoriesPage({
   };
 
   /**
-   * Links inside the page keep the two pieces of view state — which category is
-   * open, and whether the create card is out — and deliberately drop `?result=`:
-   * a banner answers the press that produced it and must not survive a click on
-   * the next row.
+   * Links inside the page keep the three pieces of view state — which category
+   * is selected, whether the create card is out, and which group is expanded —
+   * and deliberately drop `?result=`: a banner answers the press that produced
+   * it and must not survive a click on the next row.
    */
-  const pageHref = (next: { cat?: number | string; create?: boolean }) => {
+  const pageHref = (next: {
+    cat?: number | string;
+    create?: boolean;
+    open?: string;
+  }) => {
     const sp = new URLSearchParams();
     const cat =
       next.cat === undefined ? (selected ? String(selected.id) : "") : String(next.cat);
     if (cat) sp.set("cat", cat);
     if (next.create ?? creating) sp.set("new", "1");
+    // Explicit once it matters: the open label, or `-` when a group is
+    // deliberately closed that the target would otherwise auto-open. A link
+    // that leaves nothing open where nothing would auto-open omits the
+    // parameter and lets the next render derive.
+    const open = next.open === undefined ? openGroup : next.open;
+    if (open) sp.set("open", open);
+    else if (autoOpen) sp.set("open", "-");
     const query = sp.toString();
     return `/${locale}/staff/categorias${query ? `?${query}` : ""}`;
   };
@@ -356,6 +403,14 @@ export default async function StaffCategoriesPage({
     <input type="hidden" name="new" value="1" />
   ) : null;
 
+  /**
+   * The expanded group, echoed the same way. Without it, pressing ↑ inside an
+   * expanded group would collapse the tree on the redirect and the second
+   * press would have nothing to press. `-` (explicitly none) rides too, so a
+   * deliberately closed tree stays closed across a rename.
+   */
+  const keepOpen = <input type="hidden" name="open" value={openGroup || "-"} />;
+
   // A rejected create answers the FORM with a code instead of redirecting, so
   // the form needs the same sentences this page's banner uses. Built from the
   // closed list rather than a handful of literals: a new code gets a message
@@ -366,6 +421,96 @@ export default async function StaffCategoriesPage({
 
   const selectedLabel = selected?.label ?? "";
   const selectedSecond = selected ? secondName(selected.name) : null;
+
+  /**
+   * One category row of the tree — a 二级 line under its group heading
+   * (`child`, drawn indented) or a top-level standalone. The caller says
+   * where the arrows die: children stop at their GROUP's ends, because
+   * crossing the boundary would be a refiling and the 一级分类 field on the
+   * edit form owns that; top-level rows stop at the list's.
+   *
+   * Two forms, not one with two submit buttons: the direction travels as a
+   * hidden field, and a form whose meaning depends on WHICH button was
+   * pressed is a form that means nothing when the browser submits it with
+   * Enter.
+   */
+  const categoryRow = (
+    category: (typeof categories)[number],
+    opts: { child: boolean; upEdge: boolean; downEdge: boolean },
+  ) => {
+    const isSelected = selected?.id === category.id;
+    const second = secondName(category.name);
+    return (
+      <li
+        key={category.id}
+        className={`${ROW} ${
+          isSelected ? "bg-brand-soft text-brand-ink" : "hover:bg-[#FCFBFA]"
+        }`}
+      >
+        {/* The 二级 indent: a spacer, not padding arithmetic — `ROW`'s
+            `px-[18px]` stays untouched and un-fought. */}
+        {opts.child && <span aria-hidden className="w-2.5 flex-none" />}
+        <div className="flex flex-none items-center gap-0.5">
+          {(["up", "down"] as const).map((dir) => (
+            <form key={dir} action={moveCategoryAction}>
+              <input type="hidden" name="locale" value={locale} />
+              <input type="hidden" name="id" value={category.id} />
+              <input type="hidden" name="dir" value={dir} />
+              <input type="hidden" name="cat" value={selected?.id ?? ""} />
+              {keepCreating}
+              {keepOpen}
+              <button
+                type="submit"
+                disabled={dir === "up" ? opts.upEdge : opts.downEdge}
+                // One ↑ per row would tell a screen reader nothing about
+                // which category it moves.
+                aria-label={t(dir === "up" ? "moveUp" : "moveDown", {
+                  name: category.label,
+                })}
+                className={MOVE_BTN}
+              >
+                <span aria-hidden>{dir === "up" ? "↑" : "↓"}</span>
+              </button>
+            </form>
+          ))}
+        </div>
+
+        <Link
+          href={pageHref({ cat: category.id })}
+          aria-current={isSelected ? "page" : undefined}
+          className="flex min-w-0 flex-1 items-center gap-2"
+        >
+          <span className="min-w-0 flex-1">
+            <span
+              className={`block truncate text-[13.5px] ${
+                isSelected ? "font-bold" : ""
+              }`}
+            >
+              {category.label}
+            </span>
+            {second && (
+              <span className="block truncate text-[11px] text-muted">
+                {second}
+              </span>
+            )}
+          </span>
+          {!category.is_active && (
+            <span className="flex-none rounded-md bg-surface-dim px-1.5 py-0.5 text-[11px] text-muted">
+              {t("hiddenChip")}
+            </span>
+          )}
+          {category.visibility === "selected" && (
+            <span className="flex-none rounded-md bg-amber-100 px-1.5 py-0.5 text-[11px] text-amber-800">
+              {t("visLimitedChip")}
+            </span>
+          )}
+          <span className="flex-none font-num text-xs text-muted tabular-nums">
+            {t("productCount", { n: countOf(category.id) })}
+          </span>
+        </Link>
+      </li>
+    );
+  };
 
   /**
    * Every 一级分类 already in the table, in THIS locale, for the datalist under
@@ -434,93 +579,109 @@ export default async function StaffCategoriesPage({
             </p>
           ) : (
             /* Scrolls INSIDE the card at lg, where the detail pane is beside it:
-               61 rows is ~2,900px, and without this the pane on the right would
-               sit at the top of a column the staff member has to scroll back up
-               to. Below lg the two cards are stacked, and the page scrolls. */
-            <ul className="lg:max-h-[calc(100vh-13rem)] lg:overflow-y-auto">
-              {categories.map((category, index) => {
-                const isSelected = selected?.id === category.id;
-                const second = secondName(category.name);
+               even collapsed, the tree can outgrow a screen, and without this
+               the pane on the right would sit at the top of a column the staff
+               member has to scroll back up to. Below lg the two cards are
+               stacked, and the page scrolls.
+
+               `[&>li:first-child]` rather than `first:` on the rows, because
+               only the OUTER list's top rule doubles the card head's — a
+               group's first child keeps its rule, which is what separates it
+               from the heading above it. */
+            <ul className="lg:max-h-[calc(100vh-13rem)] lg:overflow-y-auto [&>li:first-child]:border-t-0">
+              {tree.map((entry, topIndex) => {
+                const upEdge = topIndex === 0;
+                const downEdge = topIndex === tree.length - 1;
+                if (entry.kind === "category") {
+                  return categoryRow(entry.category, {
+                    child: false,
+                    upEdge,
+                    downEdge,
+                  });
+                }
+                const isOpen = openGroup === entry.label;
                 return (
                   <li
-                    key={category.id}
-                    // `first:border-t-0` so the top row's rule does not double up
-                    // with the card head's own.
-                    className={`${ROW} first:border-t-0 ${
-                      isSelected
-                        ? "bg-brand-soft text-brand-ink"
-                        : "hover:bg-[#FCFBFA]"
-                    }`}
+                    key={`group:${entry.label}`}
+                    className="border-t border-[#F4F0EC]"
                   >
-                    {/* Two forms, not one with two submit buttons: the direction
-                        travels as a hidden field, and a form whose meaning
-                        depends on WHICH button was pressed is a form that means
-                        nothing when the browser submits it with Enter. */}
-                    <div className="flex flex-none items-center gap-0.5">
-                      {(["up", "down"] as const).map((dir) => (
-                        <form key={dir} action={moveCategoryAction}>
-                          <input type="hidden" name="locale" value={locale} />
-                          <input type="hidden" name="id" value={category.id} />
-                          <input type="hidden" name="dir" value={dir} />
-                          <input
-                            type="hidden"
-                            name="cat"
-                            value={selected?.id ?? ""}
-                          />
-                          {keepCreating}
-                          <button
-                            type="submit"
-                            disabled={
-                              dir === "up"
-                                ? index === 0
-                                : index === categories.length - 1
-                            }
-                            // One ↑ per row would tell a screen reader nothing
-                            // about which category it moves.
-                            aria-label={t(dir === "up" ? "moveUp" : "moveDown", {
-                              name: category.label,
-                            })}
-                            className={MOVE_BTN}
-                          >
-                            <span aria-hidden>{dir === "up" ? "↑" : "↓"}</span>
-                          </button>
-                        </form>
-                      ))}
-                    </div>
-
-                    <Link
-                      href={pageHref({ cat: category.id })}
-                      aria-current={isSelected ? "page" : undefined}
-                      className="flex min-w-0 flex-1 items-center gap-2"
-                    >
-                      <span className="min-w-0 flex-1">
-                        <span
-                          className={`block truncate text-[13.5px] ${
-                            isSelected ? "font-bold" : ""
-                          }`}
-                        >
-                          {category.label}
-                        </span>
-                        {second && (
-                          <span className="block truncate text-[11px] text-muted">
-                            {second}
-                          </span>
+                    {/* A 一级 heading: its arrows move the WHOLE group among
+                        the top-level entries, and the row itself is the
+                        disclosure — a link, so expanding survives a reload and
+                        can be sent to somebody, exactly like the selected
+                        category and the create card. `bg-field` is the same
+                        wash the table headers sit on: a heading, not a row. */}
+                    <div className="flex items-center gap-3 bg-field px-[18px] py-[13px]">
+                      <div className="flex flex-none items-center gap-0.5">
+                        {(["up", "down"] as const).map((dir) => (
+                          <form key={dir} action={moveCategoryAction}>
+                            <input type="hidden" name="locale" value={locale} />
+                            <input
+                              type="hidden"
+                              name="group"
+                              value={entry.label}
+                            />
+                            <input type="hidden" name="dir" value={dir} />
+                            <input
+                              type="hidden"
+                              name="cat"
+                              value={selected?.id ?? ""}
+                            />
+                            {keepCreating}
+                            {keepOpen}
+                            <button
+                              type="submit"
+                              disabled={dir === "up" ? upEdge : downEdge}
+                              aria-label={t(
+                                dir === "up" ? "moveGroupUp" : "moveGroupDown",
+                                { name: entry.label },
+                              )}
+                              className={MOVE_BTN}
+                            >
+                              <span aria-hidden>
+                                {dir === "up" ? "↑" : "↓"}
+                              </span>
+                            </button>
+                          </form>
+                        ))}
+                      </div>
+                      <Link
+                        href={pageHref({
+                          open: isOpen ? "" : entry.label,
+                        })}
+                        aria-expanded={isOpen}
+                        aria-label={t(
+                          isOpen ? "collapseGroup" : "expandGroup",
+                          { name: entry.label },
                         )}
-                      </span>
-                      {!category.is_active && (
-                        <span className="flex-none rounded-md bg-surface-dim px-1.5 py-0.5 text-[11px] text-muted">
-                          {t("hiddenChip")}
+                        className="flex min-w-0 flex-1 items-center gap-2"
+                      >
+                        <span
+                          aria-hidden
+                          className="w-3 flex-none text-[10px] text-muted"
+                        >
+                          {isOpen ? "▾" : "▸"}
                         </span>
-                      )}
-                      {category.visibility === "selected" && (
-                        <span className="flex-none rounded-md bg-amber-100 px-1.5 py-0.5 text-[11px] text-amber-800">
-                          {t("visLimitedChip")}
+                        <span className="min-w-0 flex-1 truncate text-[13.5px] font-bold">
+                          {entry.label}
                         </span>
-                      )}
-                      <span className="flex-none font-num text-xs text-muted tabular-nums">
-                        {t("productCount", { n: countOf(category.id) })}
-                      </span>
-                    </Link>
+                        <span className="flex-none font-num text-xs text-muted tabular-nums">
+                          {t("groupCount", { n: entry.children.length })}
+                        </span>
+                      </Link>
+                    </div>
+                    {isOpen && (
+                      <ul>
+                        {entry.children.map((category, childIndex) =>
+                          categoryRow(category, {
+                            child: true,
+                            upEdge: childIndex === 0,
+                            downEdge:
+                              childIndex === entry.children.length - 1,
+                          }),
+                        )}
+                      </ul>
+                    )}
                   </li>
                 );
               })}
@@ -586,6 +747,7 @@ export default async function StaffCategoriesPage({
                     <input type="hidden" name="id" value={selected.id} />
                     <input type="hidden" name="cat" value={selected.id} />
                     {keepCreating}
+                    {keepOpen}
                     <label className="flex flex-col gap-1 text-xs text-muted">
                       {t("nameZh")}
                       <input
@@ -656,6 +818,7 @@ export default async function StaffCategoriesPage({
                         value={selected.is_active ? "0" : "1"}
                       />
                       {keepCreating}
+                      {keepOpen}
                       <button
                         type="submit"
                         aria-label={t(
@@ -692,6 +855,7 @@ export default async function StaffCategoriesPage({
                     <input type="hidden" name="id" value={selected.id} />
                     <input type="hidden" name="cat" value={selected.id} />
                     {keepCreating}
+                    {keepOpen}
                     <p className="text-[13px] font-bold">
                       {t("visibilityHead")}
                     </p>

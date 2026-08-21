@@ -151,12 +151,13 @@ function steps(ordered: readonly { id: number }[]): CategorySort[] {
  * Idempotent: run it on a list it has already numbered and every row comes back
  * with the number it already has.
  *
- * EXPORTED with no app call site today — `moveCategory` below reaches `steps`
- * directly, and the move action is the only writer. That is deliberate surface,
- * not a leftover: this is the normalization contract the move loop embeds (a
- * full 10/20/30… over the whole list, not a two-row swap), stated once where it
- * can be named, and `categories.test.ts` asserts it here rather than inferring
- * it from a move. Delete it and the contract survives only inside a loop.
+ * EXPORTED with no app call site today — `moveCategoryInTree` below reaches
+ * `steps` directly (over the FLATTENED tree rather than this flat sort), and
+ * the move action is the only writer. That is deliberate surface, not a
+ * leftover: this is the normalization contract the move loop embeds (a full
+ * 10/20/30… over the whole list, not a two-row swap), stated once where it can
+ * be named, and `categories.test.ts` asserts it here rather than inferring it
+ * from a move.
  */
 export function resequence<T extends NamedCategory & { id: number }>(
   rows: readonly T[],
@@ -307,35 +308,102 @@ export function parseVisibility(value: unknown): "all" | "selected" | null {
 export type MoveDirection = "up" | "down";
 
 /**
- * One category, one place up or down the rail.
- *
- * Answers with the WHOLE re-sequenced list rather than the two rows that swapped
- * — the caller compares it against what it read and writes only what changed,
- * which on a list that has never been re-sequenced is nearly all of it and ever
- * after is exactly two rows.
- *
- * `null` for the two cases that are not moves: a row already at the end it is
- * being pushed towards, and an id that is not in the list at all. They are told
- * apart by the CALLER (which knows whether it saw the id) so this stays a
- * question about arithmetic.
+ * What a tree move points at: one category row by id, or one 一级 group by the
+ * label this locale shows — the same identity `groupCategories` groups by.
  */
-export function moveCategory<T extends NamedCategory & { id: number }>(
+export type TreeMoveTarget = { id: number } | { group: string };
+
+/** A tree move's answer: the numbers to write, or the reason there are none. */
+export type TreeMoveResult =
+  | { ok: true; sorts: CategorySort[] }
+  | { ok: false; code: "EDGE" | "NOT_FOUND" };
+
+/**
+ * One entry, one place up or down the TREE the customer actually scrolls
+ * (owner, 2026-08-21: the flat arrows could not reorder the 一级 groups at
+ * all — a group sits where its first child sits, so moving it meant marching
+ * every child past every child of its neighbour).
+ *
+ * The move happens in the DERIVED tree — `groupCategories`, the same
+ * derivation the rail and both product selects draw — and what comes back is
+ * that tree FLATTENED into `sort_order` numbers: each top-level entry in
+ * order, a group contributing its children as one contiguous block. Three
+ * moves exist and each is one swap:
+ *
+ *  - a group, among the top-level entries (past standalones and other groups
+ *    alike);
+ *  - a standalone category, among the same top-level entries;
+ *  - a child, WITHIN its group only. The top of a group answers ↑ with EDGE —
+ *    arrows never move a row between groups, because that is a REFILING, and
+ *    the 一级分类 field on the edit form is where filing is decided.
+ *
+ * Flatten-then-`steps` re-sequences the WHOLE list every time, which is what
+ * makes the derived tree of the new numbers equal the intended tree: after
+ * one write every group's children are contiguous, the group's position IS
+ * its first child's number, and later moves change only the two blocks that
+ * swapped (the caller writes only changed rows, as ever). On a legacy list —
+ * scattered children, freepos ties — the FIRST move rewrites nearly
+ * everything, once, exactly as the flat `resequence` always did.
+ *
+ * Group identity is the label in the CALLER's locale. Two locales can bucket
+ * the freepos seeds identically, so this is the same word the staff member
+ * pressed the arrow beside.
+ */
+export function moveCategoryInTree<
+  T extends GroupableCategory & { id: number },
+>(
   rows: readonly T[],
-  id: number,
+  target: TreeMoveTarget,
   dir: MoveDirection,
   locale: string,
-): CategorySort[] | null {
-  const ordered = sortCategories(rows, locale);
-  const from = ordered.findIndex((row) => row.id === id);
-  if (from < 0) return null;
+): TreeMoveResult {
+  const entries = groupCategories(rows, locale);
+  const step = dir === "up" ? -1 : 1;
+  const flatten = (list: readonly CategoryTreeEntry<T>[]): CategorySort[] =>
+    steps(
+      list.flatMap((entry) =>
+        entry.kind === "group" ? entry.children : [entry.category],
+      ),
+    );
+  const swapTop = (from: number): TreeMoveResult => {
+    const to = from + step;
+    if (to < 0 || to >= entries.length) return { ok: false, code: "EDGE" };
+    const next = [...entries];
+    next[from] = entries[to];
+    next[to] = entries[from];
+    return { ok: true, sorts: flatten(next) };
+  };
 
-  const to = dir === "up" ? from - 1 : from + 1;
-  if (to < 0 || to >= ordered.length) return null;
+  if ("group" in target) {
+    const from = entries.findIndex(
+      (entry) => entry.kind === "group" && entry.label === target.group,
+    );
+    if (from < 0) return { ok: false, code: "NOT_FOUND" };
+    return swapTop(from);
+  }
 
-  const swapped = [...ordered];
-  swapped[from] = ordered[to];
-  swapped[to] = ordered[from];
-  return steps(swapped);
+  const topIndex = entries.findIndex(
+    (entry) => entry.kind === "category" && entry.category.id === target.id,
+  );
+  if (topIndex >= 0) return swapTop(topIndex);
+
+  for (let index = 0; index < entries.length; index++) {
+    const entry = entries[index];
+    if (entry.kind !== "group") continue;
+    const from = entry.children.findIndex((child) => child.id === target.id);
+    if (from < 0) continue;
+    const to = from + step;
+    if (to < 0 || to >= entry.children.length) {
+      return { ok: false, code: "EDGE" };
+    }
+    const children = [...entry.children];
+    children[from] = entry.children[to];
+    children[to] = entry.children[from];
+    const next = [...entries];
+    next[index] = { ...entry, children };
+    return { ok: true, sorts: flatten(next) };
+  }
+  return { ok: false, code: "NOT_FOUND" };
 }
 
 /**

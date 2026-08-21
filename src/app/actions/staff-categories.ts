@@ -10,7 +10,7 @@ import {
   CATEGORY_LIMIT,
   makePortalErpCode,
   MAX_CATEGORY_NAME_LENGTH,
-  moveCategory,
+  moveCategoryInTree,
   parseActiveFlag,
   parseCategoryId,
   parseMoveDirection,
@@ -98,16 +98,30 @@ interface ViewState {
   cat: string;
   /** Whether `?new=1` was on the URL that drew the form. */
   creating: boolean;
+  /**
+   * Which 一级 group the tree had expanded — the group's label, the page's
+   * own `-` sentinel for "explicitly none", or "" when the form carried
+   * nothing. Without it, pressing ↑ inside an expanded group would collapse
+   * the tree on the redirect and the second press would have nothing to
+   * press.
+   */
+  open: string;
 }
 
 function viewState(formData: FormData): ViewState {
   const id = parseCategoryId(formData.get("cat"));
+  const openEntry = formData.get("open");
+  const open = typeof openEntry === "string" ? openEntry : "";
   return {
     cat: id === null ? "" : String(id),
     // The literal "1" and nothing else — the one value `pageHref` writes and
     // the page reads. Anything else simply closes the card, which is the safe
     // reading of a field a crafted POST controls.
     creating: formData.get("new") === "1",
+    // Only ever COMPARED against group labels (never rendered raw), so the
+    // one guard it needs is a length roof: a label past the name cap matches
+    // nothing anyway.
+    open: open.length > MAX_CATEGORY_NAME_LENGTH ? "" : open,
   };
 }
 
@@ -130,6 +144,7 @@ function finish(
   const params = new URLSearchParams({ result });
   if (view.cat) params.set("cat", view.cat);
   if (view.creating) params.set("new", "1");
+  if (view.open) params.set("open", view.open);
   redirect(`/${locale}/staff/categorias?${params}`);
 }
 
@@ -394,15 +409,18 @@ export async function setCategoryActive(formData: FormData): Promise<void> {
 }
 
 /**
- * Move one category up or down the rail.
+ * Move one entry of the category TREE: a 一级 group among the top-level
+ * entries, a standalone category among the same, or a 二级 row within its
+ * group (owner, 2026-08-21 — the flat arrows could not reorder groups).
  *
- * Reads the WHOLE list first because the move is a swap in an order that is only
- * partly written down: most of the 61 seeded rows share a `sort_order`, so which
- * row is "the one above" is a question about names as well as numbers, and only
- * the full list can answer it. `moveCategory` in `lib/categories.ts` does that
- * arithmetic and hands back the numbers the whole list should carry;
- * `is_active` is not read because hidden rows sit in the SAME sequence — they
- * simply are not drawn on the customer's rail.
+ * The form sends ONE of two targets: `group` (the 一级 label, for a group
+ * heading's arrows) or `id` (for every category row — `moveCategoryInTree`
+ * itself answers whether that id is a top-level standalone or a child, so the
+ * form does not have to know which the grouping made it). Reads the WHOLE
+ * list first because a tree move re-derives the whole tree: which entry is
+ * "the one above" is a question `groupCategories` answers, and only the full
+ * list can feed it. `is_active` is not read because hidden rows sit in the
+ * SAME sequence — they simply are not drawn on the customer's rail.
  *
  * **Written one statement per changed row, on purpose.** `upsert` cannot be used
  * here: `categories.id` is `generated always as identity`
@@ -410,9 +428,9 @@ export async function setCategoryActive(formData: FormData): Promise<void> {
  * value for, and the generated types say so too (`id?: never` on Insert/Update)
  * — an upsert would have to send whole rows, name and erp_code included, to
  * change one integer. The loop is bounded by the number of categories, 61 today;
- * the FIRST move on a list that has never been sequenced rewrites nearly all of
- * them and every move after that writes exactly two, because `resequence` is
- * idempotent.
+ * the FIRST move on a list whose children were never contiguous rewrites nearly
+ * all of them, and every move after that writes only the blocks that swapped —
+ * two rows for a child move, the two adjacent blocks for a group move.
  *
  * **Written TAIL FIRST, and that is the whole reason for the `.reverse()`.**
  * `sort_order` carries no unique index, so no intermediate state is illegal and
@@ -432,9 +450,9 @@ export async function setCategoryActive(formData: FormData): Promise<void> {
  * list reads exactly as it did before the press; once the head is short enough
  * that it no longer holds both, the list reads exactly as it would have if every
  * write had landed. There is no third order. In steady state (every row already
- * numbered, so `changed` is just the two rows that swapped) a failure after the
- * first write leaves the pair sharing one number, the comparator settles that by
- * name, and the move simply did not take.
+ * numbered, so `changed` is only the swapped blocks) a failure mid-loop leaves
+ * some rows sharing numbers, the comparator settles those by name, and the move
+ * simply did not fully take — the next successful one renumbers everything.
  *
  * The DB_ERROR paths revalidate like every other, which is deliberate: a write
  * loop that stopped halfway still changed rows, and leaving the pre-press order
@@ -460,20 +478,35 @@ export async function moveCategoryAction(formData: FormData): Promise<void> {
   const locale = safeLocale(formData.get("locale"));
   const view = viewState(formData);
 
-  const id = parseCategoryId(formData.get("id"));
   const dir = parseMoveDirection(formData.get("dir"));
-  if (id === null || dir === null) return finish(locale, "BAD_INPUT", view);
+  // `group` wins when both arrive (no page form sends both): a group label is
+  // TEXT, checked only for being a plausible name — `moveCategoryInTree`
+  // answers an unknown label with NOT_FOUND, which is also what a crafted
+  // value deserves.
+  const groupEntry = formData.get("group");
+  const group =
+    typeof groupEntry === "string" &&
+    groupEntry !== "" &&
+    groupEntry.length <= MAX_CATEGORY_NAME_LENGTH
+      ? groupEntry
+      : null;
+  const id = group === null ? parseCategoryId(formData.get("id")) : null;
+  const target = group !== null ? { group } : id !== null ? { id } : null;
+  if (target === null || dir === null) {
+    return finish(locale, "BAD_INPUT", view);
+  }
 
   const supabase = await createServerSupabase();
   const { data: rows, error } = await supabase
     .from("categories")
-    .select("id, name, sort_order")
+    .select("id, name, parent_label, sort_order")
     // The whole table, which is 61 rows and has been since the freepos seed.
     // `CATEGORY_LIMIT` is the SAME bound the page draws under, imported rather
     // than repeated, and `.order("id")` is what makes sharing it mean anything:
     // two unordered `limit` reads may return two different subsets of a table
     // past the bound, and a row the page drew but this read missed would answer
-    // its own ↑ with NOT_FOUND. Not the display order — `moveCategory` sorts.
+    // its own ↑ with NOT_FOUND. Not the display order — the tree derivation
+    // inside `moveCategoryInTree` sorts.
     .order("id")
     .limit(CATEGORY_LIMIT);
   if (error) {
@@ -482,18 +515,15 @@ export async function moveCategoryAction(formData: FormData): Promise<void> {
   }
 
   const categories = rows ?? [];
-  // The two null cases of `moveCategory`, told apart here where the list is
-  // known: a row at the end it was pushed towards is EDGE (the buttons are
-  // disabled there, so this is a stale page), an id that is not in the list at
-  // all is NOT_FOUND.
-  if (!categories.some((row) => row.id === id)) {
-    return finish(locale, "NOT_FOUND", view);
-  }
-  const next = moveCategory(categories, id, dir, locale);
-  if (next === null) return finish(locale, "EDGE", view);
+  const moved = moveCategoryInTree(categories, target, dir, locale);
+  // EDGE is a stale page (the buttons are disabled at the ends); NOT_FOUND is
+  // a row or group the list no longer holds. Both are refresh-and-look codes.
+  if (!moved.ok) return finish(locale, moved.code, view);
 
   const before = new Map(categories.map((row) => [row.id, row.sort_order]));
-  const changed = next.filter((row) => before.get(row.id) !== row.sort_order);
+  const changed = moved.sorts.filter(
+    (row) => before.get(row.id) !== row.sort_order,
+  );
 
   // Bottom of the list upwards — see the note above. `changed` comes back in
   // rail order, so this copy is reversed rather than iterated backwards by
