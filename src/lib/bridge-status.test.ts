@@ -251,6 +251,46 @@ describe("deriveBridgeBusinessHealth — completed run contents", () => {
     expect(bridgeStateKey(view)).toBe("businessFailed");
   });
 
+  it("does NOT escalate on a lot counter, because the next run would erase it", () => {
+    // The lot counters count LINES this run wrote, and `bridge_status` keeps
+    // one last-writer-wins row per job while the orders job runs every minute:
+    // a red raised here at 10:00:30 is zeroed by the 10:01 idle run. Every
+    // condition this card escalates on is a BACKLOG that survives an empty run
+    // by being recomputed. The durable record of a lot decision is the WARN in
+    // `bridge.log` (LOT_NO_STOCK / LOT_EXPIRED_WRITTEN / LOT_EXPIRED_BLOCKED)
+    // and the census script, not this widget.
+    for (const counts of [
+      { lotMissing: 0, lotExpired: 1, lotBlocked: 0 },
+      { lotMissing: 3, lotExpired: 0, lotBlocked: 0 },
+      { lotMissing: 0, lotExpired: 0, lotBlocked: 2 },
+    ]) {
+      const view = deriveBridgeStatus(
+        "orders",
+        row("orders", MINUTE, true, {
+          claimed: 1,
+          injected: 1,
+          recovered: 0,
+          failed: 0,
+          requeued: 0,
+          terminal: 0,
+          markFailed: 0,
+          failureMarkFailed: 0,
+          manualRequired: 0,
+          retryPending: 0,
+          processingPending: 0,
+          backlogCountError: 0,
+          ...counts,
+        }),
+        NOW,
+      );
+
+      // Healthy, and the counters still RENDER on the card as the run's facts —
+      // exactly like `injected`, which is read the same way.
+      expect(view).toMatchObject({ outcome: "ok", businessHealth: "healthy" });
+      expect(view.counts.map((count) => count.key)).toContain("lotExpired");
+    }
+  });
+
   it("keeps the next empty run amber while a retry backlog still exists", () => {
     const view = deriveBridgeStatus(
       "orders",

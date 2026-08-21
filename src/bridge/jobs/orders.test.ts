@@ -36,6 +36,8 @@ const cfg: BridgeConfig = {
   can: "B",
   eje: 26,
   alm: "00001",
+  lotAllowExpired: false,
+  lotExpiredMaxDays: 0,
   serfac: 1,
   claimLimit: 20,
   leaseSeconds: 300,
@@ -70,6 +72,7 @@ function injected(numped: number, overrides: Partial<InjectResult> = {}): Inject
     recovered: false,
     lineCount: 2,
     excludedCodarts: [],
+    lotFlags: [],
     ...overrides,
   };
 }
@@ -236,6 +239,9 @@ describe("ordersCounts", () => {
       retryPending: 3,
       processingPending: 4,
       backlogCountError: 1,
+      lotMissing: 2,
+      lotExpired: 0,
+      lotBlocked: 3,
     });
     expect(Object.keys(counts)).toEqual([
       "claimed",
@@ -250,8 +256,13 @@ describe("ordersCounts", () => {
       "retryPending",
       "processingPending",
       "backlogCountError",
+      // Appended after the existing twelve: staff read this card by position,
+      // so a new counter goes on the end and never in the middle.
+      "lotMissing",
+      "lotExpired",
+      "lotBlocked",
     ]);
-    expect(counts).toMatchObject({ claimed: 5, failed: 1 });
+    expect(counts).toMatchObject({ claimed: 5, failed: 1, lotMissing: 2, lotBlocked: 3 });
   });
 
   it("starts at zero", () => {
@@ -268,6 +279,9 @@ describe("ordersCounts", () => {
       retryPending: 0,
       processingPending: 0,
       backlogCountError: 0,
+      lotMissing: 0,
+      lotExpired: 0,
+      lotBlocked: 0,
     });
   });
 });
@@ -467,6 +481,9 @@ describe("runOrders", () => {
         retryPending: 3,
         processingPending: 1,
         backlogCountError: 0,
+        lotMissing: 0,
+        lotExpired: 0,
+        lotBlocked: 0,
       },
     });
   });
@@ -498,6 +515,9 @@ describe("runOrders", () => {
         retryPending: null,
         processingPending: 4,
         backlogCountError: 2,
+        lotMissing: 0,
+        lotExpired: 0,
+        lotBlocked: 0,
       },
     });
     expect(h.backlogQueries).toHaveLength(3);
@@ -869,5 +889,172 @@ describe("runOrders", () => {
 
     const line = h.lines.find((l) => l.message === "injected");
     expect(line?.fields.excluded).toBe("9-001,9-002");
+  });
+
+  it("says nothing about lots on a clean order", async () => {
+    // `formatFields` drops nulls, so the INFO line of an order whose every
+    // line got an in-date covering lot is byte-identical to the one this job
+    // printed before the ladder existed — and no WARN is raised at all.
+    const h = harness({ orders: [order(1)] });
+    const result = await runOrders(h.deps);
+
+    const line = h.lines.find((l) => l.message === "injected");
+    expect(line?.fields.lotMissing).toBeNull();
+    expect(line?.fields.lotExpired).toBeNull();
+    expect(line?.fields.lotBlocked).toBeNull();
+    expect(line?.fields.lotShort).toBeNull();
+    expect(h.lines.some((l) => l.level === "WARN")).toBe(false);
+    expect(result.counts).toMatchObject({
+      lotMissing: 0,
+      lotExpired: 0,
+      lotBlocked: 0,
+    });
+  });
+
+  it("counts and names the lines a human has to look at, one WARN per kind", async () => {
+    const h = harness({
+      orders: [order(1)],
+      inject: () =>
+        Promise.resolve(
+          injected(501, {
+            lotFlags: [
+              // No stock in any lot at any date: this line WILL be refused at
+              // conversion, and the owner learns it now instead of at 6am.
+              {
+                codart: "100-003",
+                codlot: "",
+                tier: "none",
+                outcome: "no_stock",
+                feccad: null,
+                dispo: null,
+                diasCad: null,
+                qtyBase: 24,
+              },
+              {
+                codart: "100-005",
+                codlot: "",
+                tier: "none",
+                outcome: "no_stock",
+                feccad: null,
+                dispo: null,
+                diasCad: null,
+                qtyBase: 6,
+              },
+              // The expired rescue, refused by the default policy.
+              {
+                codart: "100-002A",
+                codlot: "",
+                tier: "expired_covering",
+                outcome: "expired_refused",
+                feccad: null,
+                dispo: 18,
+                diasCad: 144,
+                qtyBase: 24,
+              },
+              // In date but short: logged, never tallied — at job level it is a
+              // number nobody can act on.
+              {
+                codart: "1-006",
+                codlot: "4360401703",
+                tier: "fresh_partial",
+                outcome: "lot_used",
+                feccad: "2027-08-10",
+                dispo: 2,
+                diasCad: null,
+                qtyBase: 24,
+              },
+            ],
+          }),
+        ),
+    });
+    const result = await runOrders(h.deps);
+
+    expect(result.counts).toMatchObject({
+      lotMissing: 2,
+      lotExpired: 0,
+      lotBlocked: 1,
+    });
+    const line = h.lines.find((l) => l.message === "injected");
+    expect(line?.fields).toMatchObject({
+      lotMissing: 2,
+      lotBlocked: 1,
+      lotShort: 1,
+    });
+    expect(line?.fields.lotExpired).toBeNull();
+
+    const warns = h.lines.filter((l) => l.level === "WARN");
+    expect(warns.map((l) => l.fields.code)).toEqual([
+      "LOT_NO_STOCK",
+      "LOT_EXPIRED_BLOCKED",
+    ]);
+    expect(warns[0].fields.codarts).toBe("100-003,100-005");
+    expect(warns[0].fields.numped).toBe(501);
+    expect(warns[1].fields.lots).toBe("100-002A:expired_refused:144d:18");
+  });
+
+  it("warns loudly, and separately, when an expired lot was actually written", async () => {
+    const h = harness({
+      orders: [order(1)],
+      inject: () =>
+        Promise.resolve(
+          injected(501, {
+            lotFlags: [
+              {
+                codart: "100-002A",
+                codlot: "037",
+                tier: "expired_covering",
+                outcome: "expired_used",
+                feccad: "2026-03-30",
+                dispo: 18,
+                diasCad: 144,
+                qtyBase: 24,
+              },
+            ],
+          }),
+        ),
+    });
+    const result = await runOrders(h.deps);
+
+    expect(result.counts).toMatchObject({ lotExpired: 1, lotBlocked: 0 });
+    const warn = h.lines.find((l) => l.level === "WARN");
+    expect(warn?.fields.code).toBe("LOT_EXPIRED_WRITTEN");
+    // The lot, its real date and its staleness: everything the person checking
+    // the pedido in Wingest needs before pressing Albarán.
+    expect(warn?.fields.lots).toBe("100-002A:037:2026-03-30:144d");
+  });
+
+  it("sums the lot counters across orders and reports none for a recovery", async () => {
+    const flag = {
+      codart: "100-003",
+      codlot: "",
+      tier: "none" as const,
+      outcome: "no_stock" as const,
+      feccad: null,
+      dispo: null,
+      diasCad: null,
+      qtyBase: 24,
+    };
+    const h = harness({
+      orders: [order(1), order(2), order(3)],
+      inject: (claimed) =>
+        Promise.resolve(
+          claimed.order_number === 3
+            ? // Recovery wrote nothing and picked no lot, by the same contract
+              // `lineCount` follows.
+              injected(503, { recovered: true, lineCount: 0 })
+            : injected(500 + claimed.order_number, { lotFlags: [flag] }),
+        ),
+    });
+    const result = await runOrders(h.deps);
+
+    expect(result.counts).toMatchObject({
+      claimed: 3,
+      injected: 2,
+      recovered: 1,
+      lotMissing: 2,
+    });
+    expect(
+      h.lines.filter((l) => l.fields.code === "LOT_NO_STOCK"),
+    ).toHaveLength(2);
   });
 });

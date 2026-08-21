@@ -556,7 +556,10 @@
           "manualRequired": "Pendientes de intervención",
           "retryPending": "Reintentos pendientes",
           "processingPending": "Pendientes en proceso",
-          "backlogCountError": "Recuentos no disponibles"
+          "backlogCountError": "Recuentos no disponibles",
+          "lotMissing": "Líneas sin lote",
+          "lotExpired": "Líneas con lote caducado",
+          "lotBlocked": "Líneas con lote caducado descartado"
         },
         "albaran-sync": {
           "injected": "Pendientes de albarán",

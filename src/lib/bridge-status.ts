@@ -146,6 +146,9 @@ const COUNT_LABEL_KEYS = {
     "retryPending",
     "processingPending",
     "backlogCountError",
+    "lotMissing",
+    "lotExpired",
+    "lotBlocked",
   ],
   "albaran-sync": ["injected", "matched", "marked", "failed"],
   "price-sync": [
@@ -279,6 +282,31 @@ export function deriveBridgeBusinessHealth(
   const processingPending = countValue(counts, "processingPending");
   const backlogCountError = countValue(counts, "backlogCountError");
 
+  /*
+   * `lotMissing`, `lotExpired` and `lotBlocked` are deliberately NOT read here,
+   * and that is a correction rather than an omission (2026-08-21 review).
+   *
+   * Every condition this function escalates on is a BACKLOG: `manualRequired`,
+   * `retryPending` and `processingPending` are recomputed from the portal on
+   * every run precisely so they survive the next empty one, which is what lets
+   * a red mean "something is still wrong right now". The lot counters are the
+   * opposite shape — they count LINES this run wrote — and `bridge_status`
+   * keeps one last-writer-wins row per job while the orders job runs every
+   * minute. A red raised by an expired lot at 10:00:30 would therefore be
+   * overwritten with zeros by the 10:01 idle run, roughly sixty seconds later,
+   * and nobody would ever see it. A signal that reliably disappears before it
+   * is read is worse than no signal: it would make the card look clean on the
+   * exact morning it should not.
+   *
+   * So the durable record of a lot decision lives where it can survive:
+   * `bridge.log` on the ERP server carries one WARN per affected order naming
+   * the SKUs, the lot, its real date and how stale it is (`orders.ts`,
+   * LOT_NO_STOCK / LOT_EXPIRED_WRITTEN / LOT_EXPIRED_BLOCKED), and
+   * `scripts/wingest/lot-pick-census.ts` answers the aggregate question against
+   * the ERP on demand. The three counters still ride the heartbeat and still
+   * render on the card, as the last run's facts — exactly like `injected` and
+   * `claimed`, which are read the same way and are just as ephemeral.
+   */
   if (
     terminal > 0 ||
     markFailed > 0 ||

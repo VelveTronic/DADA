@@ -556,7 +556,10 @@
           "manualRequired": "待人工处理",
           "retryPending": "等待重试",
           "processingPending": "处理中待确认",
-          "backlogCountError": "积压统计失败"
+          "backlogCountError": "积压统计失败",
+          "lotMissing": "无批号行",
+          "lotExpired": "含过期批号行",
+          "lotBlocked": "过期批号未采用行"
         },
         "albaran-sync": {
           "injected": "待出单",

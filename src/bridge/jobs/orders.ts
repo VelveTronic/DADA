@@ -23,7 +23,7 @@ import {
   isCanonicalUuid,
   type BridgeConfig,
 } from "../config";
-import { InjectError, type InjectResult } from "../injector";
+import { InjectError, type InjectResult, type LotFlag } from "../injector";
 import { redactSecrets, type LogFields, type Logger } from "../log";
 import { PayloadError, type ClaimedOrder } from "../payload";
 import type { BridgeSupabase } from "../supabase";
@@ -88,6 +88,10 @@ export class EjeYearMismatchError extends Error {
  * failed`. `markFailed` is the odd one out: it counts a subset of the orders
  * already counted in `injected` or `recovered`, because a mark can only fail on
  * an order whose pedido exists.
+ *
+ * The three lot counters at the end participate in NEITHER partition: they
+ * count LINES rather than orders, and one order can contribute to more than one
+ * of them. Do not try to make them add up to anything.
  */
 export interface OrdersTally {
   /** Orders `bridge_claim_confirmed` leased to this run. */
@@ -114,6 +118,12 @@ export interface OrdersTally {
   processingPending: number | null;
   /** Backlog counts that threw, were withheld, or returned an invalid total. */
   backlogCountError: number;
+  /** LINES: lot-controlled, with no sellable stock in any lot, at any date. */
+  lotMissing: number;
+  /** LINES: an EXPIRED lot was written onto the pedido. */
+  lotExpired: number;
+  /** LINES: an expired lot existed and policy refused it. */
+  lotBlocked: number;
 }
 
 export function emptyOrdersTally(): OrdersTally {
@@ -130,6 +140,9 @@ export function emptyOrdersTally(): OrdersTally {
     retryPending: 0,
     processingPending: 0,
     backlogCountError: 0,
+    lotMissing: 0,
+    lotExpired: 0,
+    lotBlocked: 0,
   };
 }
 
@@ -148,6 +161,11 @@ export function ordersCounts(tally: OrdersTally): JobCounts {
     retryPending: tally.retryPending,
     processingPending: tally.processingPending,
     backlogCountError: tally.backlogCountError,
+    // Appended, never interleaved: the card's existing order is what staff read
+    // by position.
+    lotMissing: tally.lotMissing,
+    lotExpired: tally.lotExpired,
+    lotBlocked: tally.lotBlocked,
   };
 }
 
@@ -464,6 +482,34 @@ export async function runOrders(deps: OrdersDeps): Promise<JobResult> {
       } else {
         tally.injected++;
       }
+
+      // The lot ladder's report, sorted into the three things a human can act
+      // on plus `lotShort` — a line that got an in-date lot holding less than
+      // it asked for. `lotShort` is logged and NOT tallied: at job level it is
+      // a number nobody can do anything with, and it is today's shipped
+      // behaviour rather than a new condition.
+      let lotShort = 0;
+      const missingCodarts: string[] = [];
+      const expiredFlags: LotFlag[] = [];
+      const blockedFlags: LotFlag[] = [];
+      for (const flag of result.lotFlags) {
+        if (flag.outcome === "no_stock") {
+          tally.lotMissing++;
+          missingCodarts.push(flag.codart);
+        } else if (flag.outcome === "expired_used") {
+          tally.lotExpired++;
+          expiredFlags.push(flag);
+        } else if (
+          flag.outcome === "expired_refused" ||
+          flag.outcome === "expired_too_old"
+        ) {
+          tally.lotBlocked++;
+          blockedFlags.push(flag);
+        } else {
+          lotShort++;
+        }
+      }
+
       log.info(result.recovered ? "recovered existing pedido" : "injected", {
         ...orderFields(order),
         can: result.can,
@@ -475,7 +521,56 @@ export async function runOrders(deps: OrdersDeps): Promise<JobResult> {
         excluded: result.excludedCodarts.length
           ? result.excludedCodarts.join(",")
           : null,
+        // `formatFields` drops nulls, so a clean order's line is byte-identical
+        // to the one this job printed before the ladder existed.
+        lotMissing: missingCodarts.length || null,
+        lotExpired: expiredFlags.length || null,
+        lotBlocked: blockedFlags.length || null,
+        lotShort: lotShort || null,
       });
+
+      // At most three WARNs per order, each only when it has something to say.
+      // WARN and not ERROR deliberately: ERROR in this bridge means "the
+      // program could not do its job", and in all three cases it did exactly
+      // what it was told. Escalation belongs on the heartbeat, not in an
+      // inflated log level.
+      if (missingCodarts.length > 0) {
+        // The will-not-convert list, delivered at injection time instead of
+        // days later behind a modal somebody meets at 6am.
+        log.warn(
+          "pedido lines with no lot — conversion to albarán will be refused",
+          {
+            ...orderFields(order),
+            code: "LOT_NO_STOCK",
+            numped: result.numped,
+            codarts: missingCodarts.join(","),
+          },
+        );
+      }
+      if (expiredFlags.length > 0) {
+        log.warn(
+          "pedido carries EXPIRED lots — check it in Wingest BEFORE converting",
+          {
+            ...orderFields(order),
+            code: "LOT_EXPIRED_WRITTEN",
+            numped: result.numped,
+            lots: expiredFlags
+              .map((f) => `${f.codart}:${f.codlot}:${f.feccad}:${f.diasCad}d`)
+              .join(","),
+          },
+        );
+      }
+      if (blockedFlags.length > 0) {
+        // The stolot cleanup worklist, and the evidence the flag decision needs.
+        log.warn("expired stock refused — line went out with no lot", {
+          ...orderFields(order),
+          code: "LOT_EXPIRED_BLOCKED",
+          numped: result.numped,
+          lots: blockedFlags
+            .map((f) => `${f.codart}:${f.outcome}:${f.diasCad}d:${f.dispo}`)
+            .join(","),
+        });
+      }
 
       try {
         const marked = await api.markInjected(

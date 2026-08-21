@@ -95,6 +95,15 @@ BRIDGE_ALLOW_HISTORICAL_EJE=false
 # BRIDGE_HISTORICAL_ORDER_ID=00000000-0000-4000-8000-000000000000
 BRIDGE_ALM=00001
 BRIDGE_SERFAC=1
+# 批次阶梯（2026-08-21）。默认 false / 0 = 只用**未过期**批次；当一个商品所有
+# 未过期批次都没有可用量时，行照常注入但不带批号（转 Albarán 会被拒，这是
+# 正确行为——货确实没有）。过期批次每次都会被查出来并计入 lotBlocked，只是
+# 不写入，所以这两项保持默认也能量出"开了能救多少行"。
+# 要放开时两项必须同时写：ALLOW=true 且 MAX_DAYS 在 1–180 之间，只写一个会
+# 在启动时报错。MAX_DAYS 是你**亲自授权的过期天数上限**：180 的上限能覆盖
+# 144 天的 100-002A，而 1458 天的 10-121 在任何合法设置下都取不到。
+BRIDGE_LOT_ALLOW_EXPIRED=false
+BRIDGE_LOT_EXPIRED_MAX_DAYS=0
 # 一轮最多认领多少张订单（1–200）
 CLAIM_LIMIT=20
 # 认领租约秒数（30–3600）：进程崩溃或失败状态未写回时，过期后才允许重新认领

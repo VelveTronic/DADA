@@ -104,6 +104,8 @@ const cfg: BridgeConfig = {
   allowHistoricalEje: false,
   historicalOrderId: null,
   alm: "00001",
+  lotAllowExpired: false,
+  lotExpiredMaxDays: 0,
   serfac: 1,
   claimLimit: 20,
   leaseSeconds: 300,

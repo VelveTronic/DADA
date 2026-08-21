@@ -48,6 +48,29 @@ export interface BridgeConfig {
   historicalOrderId: string | null;
   /** Warehouse code used for lot picking and the line's CODALM. */
   alm: string;
+  /**
+   * Whether the lot ladder may WRITE an expired lot onto a pedido line.
+   *
+   * Default false, and that default is a food-safety decision rather than
+   * caution: an expired pick puts a past FECCAD on paperwork a picker acts on,
+   * and every control this portal can build fires in the office BEFORE the
+   * conversion — there is none at the shelf, where staff read the lot code off
+   * the document and pull that pallet. The expired candidate is still selected
+   * and counted (`lotBlocked` on the orders heartbeat), so the owner decides
+   * this from measured numbers instead of from an argument.
+   */
+  lotAllowExpired: boolean;
+  /**
+   * How many days past FECCAD an expired pick may be. 0 while the flag is off.
+   *
+   * Bounded 1..180 when it is on, and the bound is anchored on two real lots
+   * rather than chosen for roundness: 100-002A's lot 037 (FECCAD 2026-03-30,
+   * 144 days stale on 2026-08-21) is the stale-bookkeeping case worth
+   * rescuing, and a 90-day cap would exclude it; 10-121's lot C26 (2022-08-24,
+   * ~1,458 days, still carrying CANT=80) is the case no configuration may
+   * reach, and it is unreachable at every legal setting here.
+   */
+  lotExpiredMaxDays: number;
   serfac: number;
   claimLimit: number;
   leaseSeconds: number;
@@ -59,6 +82,8 @@ const DEFAULTS = {
   BRIDGE_EJE: 26,
   BRIDGE_ALLOW_HISTORICAL_EJE: false,
   BRIDGE_ALM: "00001",
+  BRIDGE_LOT_ALLOW_EXPIRED: false,
+  BRIDGE_LOT_EXPIRED_MAX_DAYS: 0,
   BRIDGE_SERFAC: 1,
   CLAIM_LIMIT: 20,
   LEASE_SECONDS: 300,
@@ -71,6 +96,16 @@ const DEFAULTS = {
  */
 const CLAIM_LIMIT_RANGE = { min: 1, max: 200 } as const;
 const LEASE_SECONDS_RANGE = { min: 30, max: 3600 } as const;
+
+/**
+ * The clamp is the load-bearing half of the expired-lot pair. A fat-fingered
+ * 3650 in `bridge.env` must fail at startup with
+ * BAD_BRIDGE_LOT_EXPIRED_MAX_DAYS rather than quietly authorise four-year-old
+ * stock; 180 is the ceiling because it admits the 144-day case this feature
+ * exists for and excludes the 1,458-day one it must never reach (see
+ * `lotExpiredMaxDays`).
+ */
+const LOT_EXPIRED_MAX_DAYS_RANGE = { min: 0, max: 180 } as const;
 
 /** char(30) in `pedclica`; `portalRef` also asserts the built value fits. */
 export const NUMPEDCLI_MAX_LENGTH = 30;
@@ -311,6 +346,36 @@ export function loadBridgeConfig(
     );
   }
 
+  // The expired-lot pair, coupled exactly as the historical-ejercicio pair
+  // above is, and for the same reason: a dangerous switch takes two deliberate
+  // acts. Turning this one on forces the operator to write down, in a file, how
+  // many days of expiry he is personally authorising — which is the difference
+  // between a setting and a decision.
+  const lotAllowExpired = optionalBoolean(
+    env,
+    "BRIDGE_LOT_ALLOW_EXPIRED",
+    DEFAULTS.BRIDGE_LOT_ALLOW_EXPIRED,
+  );
+  const lotExpiredMaxDays = optionalInteger(
+    env,
+    "BRIDGE_LOT_EXPIRED_MAX_DAYS",
+    DEFAULTS.BRIDGE_LOT_EXPIRED_MAX_DAYS,
+    LOT_EXPIRED_MAX_DAYS_RANGE.min,
+    LOT_EXPIRED_MAX_DAYS_RANGE.max,
+  );
+  if (lotAllowExpired && lotExpiredMaxDays === 0) {
+    throw new BridgeConfigError(
+      "MISSING_BRIDGE_LOT_EXPIRED_MAX_DAYS",
+      `BRIDGE_LOT_EXPIRED_MAX_DAYS must be 1..${LOT_EXPIRED_MAX_DAYS_RANGE.max} when BRIDGE_LOT_ALLOW_EXPIRED=true`,
+    );
+  }
+  if (!lotAllowExpired && lotExpiredMaxDays !== 0) {
+    throw new BridgeConfigError(
+      "UNEXPECTED_BRIDGE_LOT_EXPIRED_MAX_DAYS",
+      "BRIDGE_LOT_EXPIRED_MAX_DAYS requires BRIDGE_LOT_ALLOW_EXPIRED=true",
+    );
+  }
+
   return {
     supabaseUrl,
     supabaseServiceRoleKey: requireValue(env, "SUPABASE_SERVICE_ROLE_KEY"),
@@ -327,6 +392,8 @@ export function loadBridgeConfig(
     allowHistoricalEje,
     historicalOrderId,
     alm: optionalText(env, "BRIDGE_ALM", DEFAULTS.BRIDGE_ALM, 5),
+    lotAllowExpired,
+    lotExpiredMaxDays,
     serfac: optionalInteger(env, "BRIDGE_SERFAC", DEFAULTS.BRIDGE_SERFAC, 0, 999),
     claimLimit: optionalInteger(
       env,
@@ -386,6 +453,8 @@ const KNOWN_KEYS = [
   "BRIDGE_ALLOW_HISTORICAL_EJE",
   "BRIDGE_HISTORICAL_ORDER_ID",
   "BRIDGE_ALM",
+  "BRIDGE_LOT_ALLOW_EXPIRED",
+  "BRIDGE_LOT_EXPIRED_MAX_DAYS",
   "BRIDGE_SERFAC",
   "CLAIM_LIMIT",
   "LEASE_SECONDS",
@@ -449,6 +518,12 @@ export function describeConfig(
     allowHistoricalEje: cfg.allowHistoricalEje === true,
     historicalOrderId: cfg.historicalOrderId,
     alm: cfg.alm,
+    // Neither is a secret and both MUST print on the startup line: an operator
+    // asking "why did it pick an expired lot" has to see the flag state in the
+    // same log file, and an auditor has to be able to prove the door was shut
+    // on a given day.
+    lotAllowExpired: cfg.lotAllowExpired === true,
+    lotExpiredMaxDays: cfg.lotExpiredMaxDays,
     serfac: cfg.serfac,
     claimLimit: cfg.claimLimit,
     leaseSeconds: cfg.leaseSeconds,

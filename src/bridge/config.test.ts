@@ -197,6 +197,62 @@ describe("loadBridgeConfig", () => {
     }
   });
 
+  it("keeps the expired-lot door shut by default", () => {
+    // The shipped state: the ladder still SELECTS the expired candidate and
+    // counts it (`lotBlocked`), and refuses to write it.
+    const shipped = loadBridgeConfig(MINIMAL);
+    expect(shipped.lotAllowExpired).toBe(false);
+    expect(shipped.lotExpiredMaxDays).toBe(0);
+  });
+
+  it("requires the expired switch and a day window together", () => {
+    // Two deliberate acts, exactly as the historical-year pair above: turning
+    // it on forces the operator to write down how many days he is authorising.
+    expect(() =>
+      loadBridgeConfig({ ...MINIMAL, BRIDGE_LOT_ALLOW_EXPIRED: "true" }),
+    ).toThrow(/BRIDGE_LOT_EXPIRED_MAX_DAYS/);
+    expect(() =>
+      loadBridgeConfig({ ...MINIMAL, BRIDGE_LOT_EXPIRED_MAX_DAYS: "30" }),
+    ).toThrow(/BRIDGE_LOT_EXPIRED_MAX_DAYS/);
+    const open = loadBridgeConfig({
+      ...MINIMAL,
+      BRIDGE_LOT_ALLOW_EXPIRED: "true",
+      BRIDGE_LOT_EXPIRED_MAX_DAYS: "30",
+    });
+    expect(open.lotAllowExpired).toBe(true);
+    expect(open.lotExpiredMaxDays).toBe(30);
+  });
+
+  it("clamps the expiry window at 180 days, so no setting reaches lot C26", () => {
+    // 10-121's lot C26 is 1,458 days past date and still carries CANT=80. A
+    // fat-fingered 3650 has to fail at startup rather than authorise it.
+    for (const invalid of ["181", "1460", "3650", "-1", "30d"]) {
+      expect(() =>
+        loadBridgeConfig({
+          ...MINIMAL,
+          BRIDGE_LOT_ALLOW_EXPIRED: "true",
+          BRIDGE_LOT_EXPIRED_MAX_DAYS: invalid,
+        }),
+      ).toThrow(/BRIDGE_LOT_EXPIRED_MAX_DAYS/);
+    }
+    // 144 days is 100-002A's lot 037, the case the window exists for.
+    expect(
+      loadBridgeConfig({
+        ...MINIMAL,
+        BRIDGE_LOT_ALLOW_EXPIRED: "true",
+        BRIDGE_LOT_EXPIRED_MAX_DAYS: "180",
+      }).lotExpiredMaxDays,
+    ).toBe(180);
+  });
+
+  it("accepts only literal true/false for the expired-lot switch", () => {
+    for (const invalid of ["1", "yes", "TRUE", "False"]) {
+      expect(() =>
+        loadBridgeConfig({ ...MINIMAL, BRIDGE_LOT_ALLOW_EXPIRED: invalid }),
+      ).toThrow(/BRIDGE_LOT_ALLOW_EXPIRED/);
+    }
+  });
+
   it("rejects an ERP user wider than susuario.CODUSU", () => {
     expect(() => loadBridgeConfig({ ...MINIMAL, BRIDGE_ERP_USER: "TOOLONG" })).toThrow(
       /BRIDGE_ERP_USER/,
@@ -251,5 +307,24 @@ describe("secret hygiene", () => {
     expect(described).not.toContain("correct horse battery staple");
     expect(described).toContain("wg_test");
     expect(described).toContain("localhost,50352");
+  });
+
+  it("prints the expired-lot policy on the startup line", () => {
+    // Not a secret, and it has to be visible: an operator asking "why did it
+    // pick an expired lot" needs the flag state in the same log file, and an
+    // auditor needs to be able to prove the door was shut on a given day.
+    expect(describeConfig(cfg)).toMatchObject({
+      lotAllowExpired: false,
+      lotExpiredMaxDays: 0,
+    });
+    const open = loadBridgeConfig({
+      ...MINIMAL,
+      BRIDGE_LOT_ALLOW_EXPIRED: "true",
+      BRIDGE_LOT_EXPIRED_MAX_DAYS: "30",
+    });
+    expect(describeConfig(open)).toMatchObject({
+      lotAllowExpired: true,
+      lotExpiredMaxDays: 30,
+    });
   });
 });

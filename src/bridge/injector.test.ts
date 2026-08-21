@@ -9,8 +9,10 @@ import {
   ERP_PEDIDO_RECOVERY_MISMATCH,
   ERP_ROLLBACK_FAILED,
   LOT_AVAILABLE_SQL,
-  LOT_COVERING_SQL,
-  LOT_FALLBACK_SQL,
+  LOT_FRESH_SQL,
+  LOT_ORDER_SQL,
+  LOT_PICK_SQL,
+  LOT_TIER_SQL,
   MADRID_TODAY_SQL,
   NO_EXPIRY_DATE,
   PEDCLICA_COLUMNS,
@@ -29,6 +31,7 @@ import {
   dedupCheck,
   isoDateFromSql,
   lineSubtotalCents,
+  lotFlagsFor,
   numlinFor,
   pickLot,
   preflightOrder,
@@ -138,16 +141,32 @@ const LOT_RESERVATION_SQL =
   " AND l.CODART=s.CODART COLLATE DATABASE_DEFAULT" +
   " AND l.CODLOT=s.CODLOT COLLATE DATABASE_DEFAULT), 0))";
 
-const LOT_HEAD_SQL =
-  "SELECT TOP 1 RTRIM(s.CODLOT) AS LOT, s.FECCAD FROM stolot s" +
-  " WHERE s.CODALM=@alm AND RTRIM(s.CODART)=@codart" +
-  " AND (s.FECCAD>GETDATE() OR s.FECCAD<'19010101') AND s.VENDIBLE=1 AND ";
+const EXPECTED_LOT_FRESH_SQL = "(s.FECCAD>GETDATE() OR s.FECCAD<'19010101')";
 
-const EXPECTED_LOT_COVERING_SQL =
-  `${LOT_HEAD_SQL}${LOT_RESERVATION_SQL}>=@qty ORDER BY s.FECCAD ASC`;
+const EXPECTED_LOT_TIER_SQL =
+  "CASE WHEN f.FRESCO=1 AND a.DISPO>=@qty THEN 1 WHEN f.FRESCO=1 THEN 2" +
+  " WHEN a.DISPO>=@qty THEN 3 ELSE 4 END";
 
-const EXPECTED_LOT_FALLBACK_SQL =
-  `${LOT_HEAD_SQL}${LOT_RESERVATION_SQL}>0 ORDER BY ${LOT_RESERVATION_SQL} DESC`;
+const EXPECTED_LOT_ORDER_SQL =
+  "ORDER BY t.TIER ASC, CASE WHEN t.TIER=1 THEN s.FECCAD END ASC," +
+  " CASE WHEN t.TIER>=3 THEN s.FECCAD END DESC, a.DISPO DESC, RTRIM(s.CODLOT) ASC";
+
+/**
+ * The 2026-08-21 ladder, in one statement where v3.2 had two queries and this
+ * port briefly had two of its own. Spelled out here for the same reason the
+ * pair above was: a change to the statement has to be made in front of a
+ * reviewer and cannot pass as a refactor.
+ */
+const EXPECTED_LOT_PICK_SQL =
+  "SELECT TOP 1 t.TIER, RTRIM(s.CODLOT) AS LOT, s.FECCAD, a.DISPO," +
+  " DATEDIFF(day,s.FECCAD,GETDATE()) AS DIASCAD" +
+  " FROM stolot s" +
+  ` CROSS APPLY (VALUES (${LOT_RESERVATION_SQL})) AS a(DISPO)` +
+  ` CROSS APPLY (VALUES (CASE WHEN ${EXPECTED_LOT_FRESH_SQL} THEN 1 ELSE 0 END)) AS f(FRESCO)` +
+  ` CROSS APPLY (VALUES (${EXPECTED_LOT_TIER_SQL})) AS t(TIER)` +
+  " WHERE s.CODALM=@alm AND RTRIM(s.CODART)=@codart AND s.VENDIBLE=1" +
+  " AND s.FECCAD IS NOT NULL AND a.DISPO>0 " +
+  EXPECTED_LOT_ORDER_SQL;
 
 /** Plan 04 delta 1: the only header expressions allowed to differ from v3.2. */
 const DELTA_1_HEADER: Record<string, string> = {
@@ -176,6 +195,10 @@ const cfg: BridgeConfig = {
   allowHistoricalEje: false,
   historicalOrderId: null,
   alm: "00001",
+  // The shipped defaults: the expired rungs are computed and counted, never
+  // written. The gate tests below override this pair explicitly.
+  lotAllowExpired: false,
+  lotExpiredMaxDays: 0,
   serfac: 1,
   claimLimit: 20,
   leaseSeconds: 300,
@@ -204,6 +227,11 @@ function preparedLine(overrides: Partial<PreparedLine> = {}): PreparedLine {
     unidad: "UNIDAD",
     codlot: "VCY111B",
     feccad: new Date(Date.UTC(2027, 4, 1)),
+    // The ideal pick, so `lotFlagsFor` says nothing about a default line.
+    lotTier: "fresh_covering",
+    lotOutcome: "lot_used",
+    lotDispo: 80,
+    lotDiasCad: null,
     ...overrides,
   };
 }
@@ -264,6 +292,7 @@ function preparedOrder(overrides: Partial<PreparedOrder> = {}): PreparedOrder {
     totcosEuros: 61.73,
     lines,
     excludedCodarts: [],
+    lotFlags: [],
     ...overrides,
   };
 }
@@ -640,43 +669,51 @@ describe("pedclili on a weighed line", () => {
   });
 });
 
-describe("pickLot vs the v3.2 reference — the 2026-08-16 availability deviation", () => {
-  /** Both queries run when the covering one finds nothing; both are recorded. */
-  async function bothQueries(): Promise<RecordedCall[]> {
-    const { parent, calls } = fakeParent([[], []]);
-    await pickLot(parent, cfg, "4-007", 5);
-    expect(calls).toHaveLength(2);
+describe("pickLot — the 2026-08-16 availability deviation and the 2026-08-21 ladder", () => {
+  /** One statement now, on every path: the ladder ranks in SQL. */
+  async function onePick(
+    overrides: Partial<BridgeConfig> = {},
+  ): Promise<RecordedCall[]> {
+    const { parent, calls } = fakeParent([[]]);
+    await pickLot(parent, { ...cfg, ...overrides }, "4-007", 5, true);
+    expect(calls).toHaveLength(1);
     return calls;
   }
 
+  /** One ranked row, as the ladder returns it. */
+  function lotRow(overrides: Record<string, unknown> = {}) {
+    return {
+      TIER: 1,
+      LOT: "VCY111B",
+      FECCAD: new Date(Date.UTC(2027, 4, 1)),
+      DISPO: 80,
+      DIASCAD: -300,
+      ...overrides,
+    };
+  }
+
   it("no longer filters or orders on raw CANT, as v3.2 did", async () => {
-    const calls = await bothQueries();
+    const calls = await onePick();
     expect(calls[0].text).not.toBe(V32_LOT_COVERING_SQL);
-    expect(calls[1].text).not.toBe(V32_LOT_FALLBACK_SQL);
+    expect(calls[0].text).not.toBe(V32_LOT_FALLBACK_SQL);
     // The raw-quantity predicates themselves, in every spelling v3.2 used.
-    for (const call of calls) {
-      expect(call.text).not.toMatch(/CANT>=@qty|CANT>0|ORDER BY CANT/);
-    }
+    expect(calls[0].text).not.toMatch(/CANT>=@qty|CANT>0|ORDER BY CANT/);
   });
 
-  it("subtracts what open pedidos still hold, in BOTH queries", async () => {
-    const calls = await bothQueries();
-    for (const call of calls) {
-      expect(call.text).toContain(LOT_AVAILABLE_SQL);
-      // The reservation itself: outstanding = CANPED-CANSER on OPEN pedidos,
-      // each quantity NULL-safe so one NULL column cannot void the whole sum.
-      expect(call.text).toContain(
-        "SELECT SUM(ISNULL(l.CANPED,0) - ISNULL(l.CANSER,0)) FROM pedclili l",
-      );
-      expect(call.text).toContain("c.ESTPED='Abierto'");
-    }
+  it("subtracts what open pedidos still hold", async () => {
+    const calls = await onePick();
+    expect(calls[0].text).toContain(LOT_AVAILABLE_SQL);
+    // The reservation itself: outstanding = CANPED-CANSER on OPEN pedidos,
+    // each quantity NULL-safe so one NULL column cannot void the whole sum.
+    expect(calls[0].text).toContain(
+      "SELECT SUM(ISNULL(l.CANPED,0) - ISNULL(l.CANSER,0)) FROM pedclili l",
+    );
+    expect(calls[0].text).toContain("c.ESTPED='Abierto'");
     // Byte for byte, against the text pinned at the top of this file — not
     // merely against the constants the module happens to export today.
     expect(LOT_AVAILABLE_SQL).toBe(LOT_RESERVATION_SQL);
-    expect(LOT_COVERING_SQL).toBe(EXPECTED_LOT_COVERING_SQL);
-    expect(LOT_FALLBACK_SQL).toBe(EXPECTED_LOT_FALLBACK_SQL);
-    expect(calls[0].text).toBe(EXPECTED_LOT_COVERING_SQL);
-    expect(calls[1].text).toBe(EXPECTED_LOT_FALLBACK_SQL);
+    expect(LOT_PICK_SQL).toBe(EXPECTED_LOT_PICK_SQL);
+    expect(calls[0].text).toBe(EXPECTED_LOT_PICK_SQL);
   });
 
   it("wraps the reservation in ISNULL, so a lot nobody booked is not NULL", () => {
@@ -730,87 +767,270 @@ describe("pickLot vs the v3.2 reference — the 2026-08-16 availability deviatio
     expect(reservation).not.toMatch(/ESTPED\s*=\s*'Abierto'\s+COLLATE/);
   });
 
+  it("names the reservation once, so the collation labels appear exactly three times", () => {
+    // CROSS APPLY (VALUES ...) names the availability expression once instead of
+    // pasting it into the CASE, the WHERE and the ORDER BY — which is also what
+    // keeps this count at three. A FOURTH label means somebody added a new
+    // cross-table string comparison without thinking about the 2026-08-16 trap.
+    expect(LOT_PICK_SQL.match(/COLLATE DATABASE_DEFAULT/g)).toHaveLength(3);
+    expect(LOT_PICK_SQL).toContain("CROSS APPLY (VALUES");
+  });
+
   it("does not scope the reservation to an ejercicio", async () => {
     // An open pedido from an earlier EJE still holds its stock and Wingest still
     // counts it. The one EJE comparison allowed is the line↔header correlation
     // (`pedclili`'s key is CAN/EJE/NUMPED/NUMLIN) — never `cfg.eje`.
-    const calls = await bothQueries();
-    for (const call of calls) {
-      expect(call.text).not.toContain("@eje");
-      // De-duplicated: the fallback names the availability expression twice,
-      // once to filter on and once to sort by.
-      const comparisons = call.text.match(/[\w.]*EJE\s*=\s*[\w.@']+/gi) ?? [];
-      expect([...new Set(comparisons)]).toEqual(["c.EJE=l.EJE"]);
-      expect(Object.keys(call.params).sort()).toEqual(["alm", "codart", "qty"]);
-    }
+    const calls = await onePick();
+    expect(calls[0].text).not.toContain("@eje");
+    const comparisons = calls[0].text.match(/[\w.]*EJE\s*=\s*[\w.@']+/gi) ?? [];
+    expect([...new Set(comparisons)]).toEqual(["c.EJE=l.EJE"]);
+    expect(Object.keys(calls[0].params).sort()).toEqual(["alm", "codart", "qty"]);
   });
 
   it("counts only reservations on the same almacén, article and lot", async () => {
-    const calls = await bothQueries();
-    for (const call of calls) {
-      expect(call.text).toContain("l.CODALM=s.CODALM");
-      expect(call.text).toContain("l.CODART=s.CODART");
-      expect(call.text).toContain("l.CODLOT=s.CODLOT");
-      // The lot row itself stays scoped to the configured almacén, as before.
-      expect(call.text).toContain("s.CODALM=@alm AND RTRIM(s.CODART)=@codart");
-    }
+    const calls = await onePick();
+    expect(calls[0].text).toContain("l.CODALM=s.CODALM");
+    expect(calls[0].text).toContain("l.CODART=s.CODART");
+    expect(calls[0].text).toContain("l.CODLOT=s.CODLOT");
+    // The lot row itself stays scoped to the configured almacén, as before.
+    expect(calls[0].text).toContain("s.CODALM=@alm AND RTRIM(s.CODART)=@codart");
   });
 
-  it("keeps v3.2's sellable and not-expired predicates untouched", async () => {
-    const calls = await bothQueries();
-    for (const call of calls) {
-      expect(call.text).toContain("(s.FECCAD>GETDATE() OR s.FECCAD<'19010101')");
-      expect(call.text).toContain("s.VENDIBLE=1");
-    }
+  it("keeps v3.2's sellable and freshness predicates untouched", async () => {
+    const calls = await onePick();
+    expect(LOT_FRESH_SQL).toBe(EXPECTED_LOT_FRESH_SQL);
+    expect(calls[0].text).toContain(EXPECTED_LOT_FRESH_SQL);
+    expect(calls[0].text).toContain("s.VENDIBLE=1");
   });
 
-  it("orders the covering pick FIFO and the fallback by real availability", async () => {
-    const calls = await bothQueries();
-    expect(calls[0].text.endsWith("ORDER BY s.FECCAD ASC")).toBe(true);
-    expect(calls[0].text).toContain(`${LOT_AVAILABLE_SQL}>=@qty`);
-    // The fallback's sort key is availability, not the quantity on the shelf: a
-    // lot whose stock is entirely promised must not win the tie-break.
-    expect(calls[1].text.endsWith(`ORDER BY ${LOT_AVAILABLE_SQL} DESC`)).toBe(true);
-    expect(calls[1].text).toContain(`${LOT_AVAILABLE_SQL}>0`);
+  it("excludes a lot whose FECCAD is NULL, as both v3.2 queries already did", () => {
+    // v3.2's predicate evaluates to NULL for a NULL FECCAD, so such a row never
+    // reached either query. Without this filter the CASE would fall through to
+    // the expired arms and reclassify "expiry unknown" as "expired", pushing a
+    // dateless lot into the gated tiers. NULL is not expiry.
+    expect(LOT_PICK_SQL).toContain("AND s.FECCAD IS NOT NULL");
   });
 
-  it("asks the fallback only when nothing covers the line alone", async () => {
-    const { parent, calls } = fakeParent([
-      [{ LOT: "VCY111B", FECCAD: new Date(Date.UTC(2027, 4, 1)) }],
-    ]);
-    const lot = await pickLot(parent, cfg, "4-007", 5);
-    expect(calls).toHaveLength(1);
-    expect(lot).toEqual({ codlot: "VCY111B", feccad: new Date(Date.UTC(2027, 4, 1)) });
+  it("ranks freshness above coverage, so a fresh short lot beats an expired covering one", () => {
+    expect(LOT_TIER_SQL).toBe(EXPECTED_LOT_TIER_SQL);
+    expect(LOT_ORDER_SQL).toBe(EXPECTED_LOT_ORDER_SQL);
   });
 
-  it("falls back to the lot with the most left when none covers the line", async () => {
-    const { parent, calls } = fakeParent([
+  it("inverts FIFO inside the expired tiers — least expired first, never lot C26 first", () => {
+    // Tier 1 keeps v3.2's FIFO. Tiers 3-4 reverse it on purpose: among lots
+    // already past their date, take the LEAST expired. FIFO there would reach
+    // for 10-121's lot C26 (CANT=80, expired 2022-08-24) before anything else.
+    expect(LOT_ORDER_SQL).toContain("CASE WHEN t.TIER=1 THEN s.FECCAD END ASC");
+    expect(LOT_ORDER_SQL).toContain("CASE WHEN t.TIER>=3 THEN s.FECCAD END DESC");
+    // Tier 2 has neither key and falls through to availability, which is what
+    // the retired LOT_FALLBACK_SQL sorted by.
+    expect(LOT_ORDER_SQL).toContain("a.DISPO DESC");
+  });
+
+  it("costs exactly one round trip on every path", async () => {
+    for (const recordset of [
+      [lotRow()],
+      [lotRow({ TIER: 3, DIASCAD: 144 })],
+      [lotRow({ TIER: 4, DIASCAD: 1458 })],
       [],
-      [{ LOT: "L2", FECCAD: new Date(Date.UTC(2026, 11, 31)) }],
+    ]) {
+      const { parent, calls } = fakeParent([recordset]);
+      await pickLot(parent, cfg, "4-007", 5, true);
+      expect(calls).toHaveLength(1);
+    }
+  });
+
+  it("maps every TIER the ladder can return", async () => {
+    const expected: Array<[number, string]> = [
+      [1, "fresh_covering"],
+      [2, "fresh_partial"],
+      [3, "expired_covering"],
+      [4, "expired_partial"],
+    ];
+    for (const [code, tier] of expected) {
+      const { parent } = fakeParent([[lotRow({ TIER: code, DIASCAD: 144 })]]);
+      const lot = await pickLot(parent, cfg, "4-007", 5, true);
+      expect(lot.tier).toBe(tier);
+    }
+  });
+
+  it("uses a fresh lot outright, covering or short", async () => {
+    for (const code of [1, 2]) {
+      const { parent } = fakeParent([[lotRow({ TIER: code })]]);
+      expect(await pickLot(parent, cfg, "4-007", 5, true)).toEqual({
+        codlot: "VCY111B",
+        feccad: new Date(Date.UTC(2027, 4, 1)),
+        tier: code === 1 ? "fresh_covering" : "fresh_partial",
+        outcome: "lot_used",
+        dispo: 80,
+        // Days-past-expiry is meaningless on an in-date row and is not reported.
+        diasCad: null,
+      });
+    }
+  });
+
+  it("refuses an expired lot while BRIDGE_LOT_ALLOW_EXPIRED is off — but reports it", async () => {
+    // The refusal is the shipped default AND the measurement: the row is still
+    // selected, so `lotBlocked` can tell the owner how many lines the rescue
+    // would have saved before he decides whether to open the door.
+    const { parent, calls } = fakeParent([[lotRow({ TIER: 3, DIASCAD: 144 })]]);
+    expect(await pickLot(parent, cfg, "4-007", 5, true)).toEqual({
+      codlot: "",
+      feccad: NO_EXPIRY_DATE,
+      tier: "expired_covering",
+      outcome: "expired_refused",
+      dispo: 80,
+      diasCad: 144,
+    });
+    expect(calls).toHaveLength(1);
+  });
+
+  it("uses an expired lot only inside the configured day window", async () => {
+    const open = { lotAllowExpired: true, lotExpiredMaxDays: 180 };
+    // 100-002A's lot 037: 144 days stale on 2026-08-21, the case the window exists for.
+    const { parent } = fakeParent([[lotRow({ TIER: 3, DIASCAD: 144 })]]);
+    expect(await pickLot(parent, { ...cfg, ...open }, "4-007", 5, true)).toEqual({
+      codlot: "VCY111B",
+      feccad: new Date(Date.UTC(2027, 4, 1)),
+      tier: "expired_covering",
+      outcome: "expired_used",
+      dispo: 80,
+      diasCad: 144,
+    });
+    // 10-121's lot C26: 1,458 days stale, unreachable at every legal setting.
+    const old = fakeParent([[lotRow({ TIER: 4, DIASCAD: 1458 })]]);
+    const refused = await pickLot(old.parent, { ...cfg, ...open }, "4-007", 5, true);
+    expect(refused.outcome).toBe("expired_too_old");
+    expect(refused.codlot).toBe("");
+    // An unreadable DIASCAD is refused too: unknown staleness is not "fresh".
+    const unknown = fakeParent([[lotRow({ TIER: 3, DIASCAD: null })]]);
+    expect(
+      (await pickLot(unknown.parent, { ...cfg, ...open }, "4-007", 5, true)).outcome,
+    ).toBe("expired_too_old");
+  });
+
+  it("passes an expired FECCAD through UNCHANGED — never sanitised to 1900-01-01", async () => {
+    // Sanitising it would erase the only trace of the decision visible inside
+    // Wingest and would contradict the stolot row the same document points at.
+    const expired = new Date(Date.UTC(2026, 2, 30));
+    const { parent } = fakeParent([
+      [lotRow({ TIER: 3, FECCAD: expired, DIASCAD: 144 })],
     ]);
-    const lot = await pickLot(parent, cfg, "4-007", 5);
-    expect(calls).toHaveLength(2);
-    expect(lot.codlot).toBe("L2");
+    const lot = await pickLot(
+      parent,
+      { ...cfg, lotAllowExpired: true, lotExpiredMaxDays: 180 },
+      "4-007",
+      5,
+      true,
+    );
+    expect(lot.feccad).toEqual(expired);
+  });
+
+  it("never asks stolot about an article the ERP does not lot-control", async () => {
+    // F-003 is CONLOT=false and its hand-written albaranes ship with an EMPTY
+    // CODLOT every day: here an empty lot is the CORRECT value, not a fallback.
+    const { parent, calls } = fakeParent([]);
+    expect(await pickLot(parent, cfg, "F-003", 24, false)).toEqual({
+      codlot: "",
+      feccad: NO_EXPIRY_DATE,
+      tier: "none",
+      outcome: "not_lot_controlled",
+      dispo: null,
+      diasCad: null,
+    });
+    expect(calls).toHaveLength(0);
   });
 
   it("keeps v3.2's answer when no lot is available at all", async () => {
-    const { parent } = fakeParent([[], []]);
-    expect(await pickLot(parent, cfg, "4-007", 5)).toEqual({
+    const { parent } = fakeParent([[]]);
+    expect(await pickLot(parent, cfg, "4-007", 5, true)).toEqual({
       codlot: "",
       feccad: NO_EXPIRY_DATE,
+      tier: "none",
+      outcome: "no_stock",
+      dispo: null,
+      diasCad: null,
     });
   });
 
+  it("treats an unmappable TIER as no stock, never as an expired lot", async () => {
+    // A malformed recordset must not drop through to the expiry gate, where a
+    // permissive config would write whatever lot code came back.
+    const { parent } = fakeParent([[lotRow({ TIER: 9 })]]);
+    const lot = await pickLot(parent, cfg, "4-007", 5, true);
+    expect(lot.outcome).toBe("no_stock");
+    expect(lot.codlot).toBe("");
+  });
+
   it("never puts a value into the SQL text", async () => {
-    const calls = await bothQueries();
-    for (const call of calls) {
-      for (const value of ["00001", "4-007", "5"]) {
-        expect(call.text).not.toContain(value);
-      }
-      expect(call.params.alm.value).toBe("00001");
-      expect(call.params.codart.value).toBe("4-007");
-      expect(call.params.qty.value).toBe(5);
+    const calls = await onePick();
+    for (const value of ["00001", "4-007", "5"]) {
+      expect(calls[0].text).not.toContain(value);
     }
+    expect(calls[0].params.alm.value).toBe("00001");
+    expect(calls[0].params.codart.value).toBe("4-007");
+    expect(calls[0].params.qty.value).toBe(5);
+  });
+});
+
+describe("lotFlagsFor", () => {
+  it("reports only the lines a human should look at", () => {
+    // The channel has to stay quiet enough to be believed: a clean fresh line
+    // and a correctly-lotless one say nothing, and 953 of 2,302 live articles
+    // are the second kind.
+    const flags = lotFlagsFor([
+      preparedLine({ codart: "1-006" }),
+      preparedLine({
+        codart: "F-003",
+        codlot: "",
+        feccad: NO_EXPIRY_DATE,
+        lotTier: "none",
+        lotOutcome: "not_lot_controlled",
+        lotDispo: null,
+      }),
+      preparedLine({
+        codart: "100-003",
+        codlot: "",
+        feccad: NO_EXPIRY_DATE,
+        lotTier: "none",
+        lotOutcome: "no_stock",
+        lotDispo: null,
+      }),
+      preparedLine({
+        codart: "100-002A",
+        codlot: "",
+        feccad: NO_EXPIRY_DATE,
+        lotTier: "expired_covering",
+        lotOutcome: "expired_refused",
+        lotDispo: 18,
+        lotDiasCad: 144,
+      }),
+    ]);
+    expect(flags.map((flag) => [flag.codart, flag.outcome])).toEqual([
+      ["100-003", "no_stock"],
+      ["100-002A", "expired_refused"],
+    ]);
+    // No lot was written, so there is no date to report — null, not 1900-01-01,
+    // which would read as a real "no expiry" lot.
+    expect(flags.every((flag) => flag.feccad === null)).toBe(true);
+  });
+
+  it("reports a fresh but SHORT line, and dates the lot it wrote", () => {
+    // `lot_used` and no regression, but Wingest may still refuse it at
+    // conversion, so it belongs on the per-order line.
+    const [flag] = lotFlagsFor([
+      preparedLine({ lotTier: "fresh_partial", lotDispo: 2 }),
+    ]);
+    expect(flag.outcome).toBe("lot_used");
+    expect(flag.tier).toBe("fresh_partial");
+    expect(flag.codlot).toBe("VCY111B");
+    expect(flag.feccad).toBe("2027-05-01");
+    expect(flag.dispo).toBe(2);
+    expect(flag.qtyBase).toBe(5);
+  });
+
+  it("says nothing at all about a clean order", () => {
+    expect(lotFlagsFor([preparedLine(), preparedLine()])).toEqual([]);
   });
 });
 
@@ -1721,8 +1941,8 @@ describe("prepareOrder", () => {
       [{ TARCLI: 1, TIPIVACLI: "N", regiva: "", FORPAG: "", PRIPAG: 1, NUMPAG: 1, CALENV: "", CAL2: "", CODPOSENV: "", TIPPOR: "" }],
       [{ T: "G", POSMAT: 1 }],
       [{ C: "N", A: "G", TPCIVA: 10 }],
-      [{ DES: "ARROZ", PRECOS: 1, T: "G", UNILOT: 1, UNI: "UNIDAD" }],
-      [{ LOT: "L1", FECCAD: new Date(Date.UTC(2028, 0, 1)) }],
+      [{ DES: "ARROZ", PRECOS: 1, T: "G", UNILOT: 1, UNI: "UNIDAD", CONLOT: true }],
+      [{ TIER: 1, LOT: "L1", FECCAD: new Date(Date.UTC(2028, 0, 1)), DISPO: 80, DIASCAD: -300 }],
     ]);
     const historicalCfg: BridgeConfig = {
       ...cfg,
@@ -1754,8 +1974,8 @@ describe("prepareOrder", () => {
       ],
       [{ T: "G", POSMAT: 1 }], // tipivaar
       [{ C: "N", A: "G", TPCIVA: 10 }], // iva
-      [{ DES: "ARROZ", PRECOS: 12.3456, T: "G", UNILOT: 1, UNI: "UNIDAD" }], // articulo
-      [{ LOT: "VCY111B", FECCAD: new Date(Date.UTC(2027, 4, 1)) }], // stolot
+      [{ DES: "ARROZ", PRECOS: 12.3456, T: "G", UNILOT: 1, UNI: "UNIDAD", CONLOT: true }], // articulo
+      [{ TIER: 1, LOT: "VCY111B", FECCAD: new Date(Date.UTC(2027, 4, 1)), DISPO: 80, DIASCAD: -300 }], // stolot
     ]);
 
     const prepared = await prepareOrder(parent, cfg, claimedOrder());
@@ -1788,7 +2008,7 @@ describe("prepareOrder", () => {
       [{ TARCLI: 1, TIPIVACLI: "N", regiva: "", FORPAG: "", PRIPAG: 0, NUMPAG: 0, CALENV: "", CAL2: "", CODPOSENV: "", TIPPOR: "" }],
       [{ T: "G", POSMAT: 1 }],
       [{ C: "N", A: "G", TPCIVA: 10 }],
-      [{ DES: "ARROZ", PRECOS: 1, T: "G", UNILOT: 0, UNI: "KG" }],
+      [{ DES: "ARROZ", PRECOS: 1, T: "G", UNILOT: 0, UNI: "KG", CONLOT: true }],
       [],
     ]);
     const prepared = await prepareOrder(
@@ -1819,7 +2039,7 @@ describe("prepareOrder", () => {
       [{ TARCLI: 1, TIPIVACLI: "N", regiva: "", FORPAG: "", PRIPAG: 0, NUMPAG: 0, CALENV: "", CAL2: "", CODPOSENV: "", TIPPOR: "" }],
       [{ T: "G", POSMAT: 1 }],
       [{ C: "N", A: "G", TPCIVA: 10 }],
-      [{ DES: "ARROZ", PRECOS: 1, T: "G", UNILOT: 0, UNI: "KG" }],
+      [{ DES: "ARROZ", PRECOS: 1, T: "G", UNILOT: 0, UNI: "KG", CONLOT: true }],
       [],
     ]);
     const prepared = await prepareOrder(
@@ -1830,14 +2050,91 @@ describe("prepareOrder", () => {
     expect(prepared.fecent.toISOString()).toBe("2026-08-16T00:00:00.000Z");
   });
 
+  it("never asks stolot about a CONLOT=false article, and stamps no lot on it", async () => {
+    // F-003 and the other 952 articles the ERP does not lot-control: their
+    // hand-written albaranes ship with an EMPTY CODLOT every day, so this is
+    // the correct value rather than a fallback — and the query saved is why
+    // the ladder costs FEWER round trips than the pair it replaced.
+    const { parent, calls } = fakeParent([
+      [{ "": new Date(Date.UTC(2026, 7, 16)) }],
+      [{ TARCLI: 1, TIPIVACLI: "N", regiva: "", FORPAG: "", PRIPAG: 1, NUMPAG: 1, CALENV: "", CAL2: "", CODPOSENV: "", TIPPOR: "" }],
+      [{ T: "G", POSMAT: 1 }],
+      [{ C: "N", A: "G", TPCIVA: 10 }],
+      [{ DES: "NARANJA", PRECOS: 1, T: "G", UNILOT: 1, UNI: "UNIDAD", CONLOT: false }],
+    ]);
+
+    const prepared = await prepareOrder(parent, cfg, claimedOrder());
+
+    expect(calls.some((call) => call.text.includes("FROM stolot"))).toBe(false);
+    expect(prepared.lines[0]).toMatchObject({
+      codlot: "",
+      lotTier: "none",
+      lotOutcome: "not_lot_controlled",
+    });
+    expect(prepared.lines[0].feccad).toEqual(NO_EXPIRY_DATE);
+    // And the reporting stays silent: a correctly lotless line is not news.
+    expect(prepared.lotFlags).toEqual([]);
+  });
+
+  it("treats an unset CONLOT bit as lot-controlled and still asks stolot", async () => {
+    // Being wrong this way costs one query and an empty CODLOT; being wrong the
+    // other way puts a traceability hole on a lot-controlled food line.
+    for (const conlot of [null, undefined, 1, true]) {
+      const { parent, calls } = fakeParent([
+        [{ "": new Date(Date.UTC(2026, 7, 16)) }],
+        [{ TARCLI: 1, TIPIVACLI: "N", regiva: "", FORPAG: "", PRIPAG: 1, NUMPAG: 1, CALENV: "", CAL2: "", CODPOSENV: "", TIPPOR: "" }],
+        [{ T: "G", POSMAT: 1 }],
+        [{ C: "N", A: "G", TPCIVA: 10 }],
+        [{ DES: "ARROZ", PRECOS: 1, T: "G", UNILOT: 1, UNI: "UNIDAD", CONLOT: conlot }],
+        [{ TIER: 1, LOT: "L1", FECCAD: new Date(Date.UTC(2028, 0, 1)), DISPO: 80, DIASCAD: -300 }],
+      ]);
+      const prepared = await prepareOrder(parent, cfg, claimedOrder());
+      expect(calls.some((call) => call.text.includes("FROM stolot"))).toBe(true);
+      expect(prepared.lines[0].codlot).toBe("L1");
+    }
+    // Only the two spellings of an explicit false skip the pick.
+    for (const conlot of [false, 0]) {
+      const { parent, calls } = fakeParent([
+        [{ "": new Date(Date.UTC(2026, 7, 16)) }],
+        [{ TARCLI: 1, TIPIVACLI: "N", regiva: "", FORPAG: "", PRIPAG: 1, NUMPAG: 1, CALENV: "", CAL2: "", CODPOSENV: "", TIPPOR: "" }],
+        [{ T: "G", POSMAT: 1 }],
+        [{ C: "N", A: "G", TPCIVA: 10 }],
+        [{ DES: "NARANJA", PRECOS: 1, T: "G", UNILOT: 1, UNI: "UNIDAD", CONLOT: conlot }],
+      ]);
+      const prepared = await prepareOrder(parent, cfg, claimedOrder());
+      expect(calls.some((call) => call.text.includes("FROM stolot"))).toBe(false);
+      expect(prepared.lines[0].codlot).toBe("");
+    }
+  });
+
+  it("reads CONLOT off articulo without disturbing the columns it already read", async () => {
+    const { parent, calls } = fakeParent([
+      [{ "": new Date(Date.UTC(2026, 7, 16)) }],
+      [{ TARCLI: 1, TIPIVACLI: "N", regiva: "", FORPAG: "", PRIPAG: 1, NUMPAG: 1, CALENV: "", CAL2: "", CODPOSENV: "", TIPPOR: "" }],
+      [{ T: "G", POSMAT: 1 }],
+      [{ C: "N", A: "G", TPCIVA: 10 }],
+      [{ DES: "ARROZ", PRECOS: 1, T: "G", UNILOT: 1, UNI: "UNIDAD", CONLOT: true }],
+      [{ TIER: 1, LOT: "L1", FECCAD: new Date(Date.UTC(2028, 0, 1)), DISPO: 80, DIASCAD: -300 }],
+    ]);
+    await prepareOrder(parent, cfg, claimedOrder());
+
+    // ONE column added to a statement that already ran per line — no second
+    // round trip buys the whole CONLOT gate.
+    const article = calls.find((call) => call.text.includes("FROM articulo"));
+    expect(article?.text).toBe(
+      "SELECT RTRIM(DES) AS DES, PREMEDCOS AS PRECOS, RTRIM(TIPIVAART) AS T," +
+        " UNILOT, RTRIM(UNIDAD) AS UNI, CONLOT FROM articulo WHERE CODART=@codart",
+    );
+  });
+
   it("multiplies cajas into base units, and asks stolot for those", async () => {
     const { parent, calls } = fakeParent([
       [{ "": new Date(Date.UTC(2026, 7, 16)) }],
       [{ TARCLI: 1, TIPIVACLI: "N", regiva: "", FORPAG: "", PRIPAG: 1, NUMPAG: 1, CALENV: "", CAL2: "", CODPOSENV: "", TIPPOR: "" }],
       [{ T: "G", POSMAT: 1 }],
       [{ C: "N", A: "G", TPCIVA: 10 }],
-      [{ DES: "CERVEZA 33CL", PRECOS: 0.5, T: "G", UNILOT: 24, UNI: "CAJA" }],
-      [{ LOT: "L48", FECCAD: new Date(Date.UTC(2027, 4, 1)) }],
+      [{ DES: "CERVEZA 33CL", PRECOS: 0.5, T: "G", UNILOT: 24, UNI: "CAJA", CONLOT: true }],
+      [{ TIER: 1, LOT: "L48", FECCAD: new Date(Date.UTC(2027, 4, 1)), DISPO: 80, DIASCAD: -300 }],
     ]);
 
     // 2 cajas of 1-001: 24 bottles at 0.96 €, portal total 46.08 €.
@@ -1882,8 +2179,8 @@ describe("prepareOrder", () => {
       [{ TARCLI: 1, TIPIVACLI: "N", regiva: "", FORPAG: "", PRIPAG: 1, NUMPAG: 1, CALENV: "", CAL2: "", CODPOSENV: "", TIPPOR: "" }],
       [{ T: "G", POSMAT: 1 }],
       [{ C: "N", A: "G", TPCIVA: 10 }],
-      [{ DES: "CERVEZA 33CL", PRECOS: 0.5, T: "G", UNILOT: 24, UNI: "CAJA" }],
-      [{ LOT: "L48", FECCAD: new Date(Date.UTC(2027, 4, 1)) }],
+      [{ DES: "CERVEZA 33CL", PRECOS: 0.5, T: "G", UNILOT: 24, UNI: "CAJA", CONLOT: true }],
+      [{ TIER: 1, LOT: "L48", FECCAD: new Date(Date.UTC(2027, 4, 1)), DISPO: 80, DIASCAD: -300 }],
     ]);
 
     // An in-flight payload from before the claim RPC learned to send the factor.
@@ -1932,8 +2229,8 @@ describe("prepareOrder", () => {
       [{ TARCLI: 1, TIPIVACLI: "N", regiva: "", FORPAG: "", PRIPAG: 1, NUMPAG: 1, CALENV: "", CAL2: "", CODPOSENV: "", TIPPOR: "" }],
       [{ T: "G", POSMAT: 1 }],
       [{ C: "N", A: "G", TPCIVA: 10 }],
-      [{ DES: "ARROZ", PRECOS: 1, T: "G", UNILOT: 1, UNI: "UNIDAD" }],
-      [{ LOT: "L1", FECCAD: new Date(Date.UTC(2027, 0, 1)) }],
+      [{ DES: "ARROZ", PRECOS: 1, T: "G", UNILOT: 1, UNI: "UNIDAD", CONLOT: true }],
+      [{ TIER: 1, LOT: "L1", FECCAD: new Date(Date.UTC(2027, 0, 1)), DISPO: 80, DIASCAD: -300 }],
     ]);
     const order = claimedOrder({
       subtotal_cents: 19_995,

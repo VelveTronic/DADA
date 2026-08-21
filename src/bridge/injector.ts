@@ -849,6 +849,18 @@ export interface PreparedLine {
   unidad: string;
   codlot: string;
   feccad: Date;
+  /**
+   * The four fields below are READ-ONLY REPORTING. `buildLineParams` never
+   * touches them, so `PEDCLILI_COLUMNS`, the parameter key set and the SUBTOT
+   * invariant are untouched by the lot ladder; they exist so `orders.ts` can
+   * tell a human what the ERP offered and what this bridge did about it.
+   */
+  /** What the ERP offered for this line, before policy. */
+  lotTier: LotTier;
+  /** What the bridge did with it. */
+  lotOutcome: LotOutcome;
+  lotDispo: number | null;
+  lotDiasCad: number | null;
 }
 
 export interface LineInput {
@@ -1109,6 +1121,7 @@ interface ArticleRow {
   T: unknown;
   UNILOT: unknown;
   UNI: unknown;
+  CONLOT: unknown;
 }
 
 /**
@@ -1122,11 +1135,18 @@ interface ArticleRow {
 export async function loadArticle(
   parent: SqlParent,
   codart: string,
-): Promise<{ des: string; precos: number; tipivaart: string; unilot: number; unidad: string }> {
+): Promise<{
+  des: string;
+  precos: number;
+  tipivaart: string;
+  unilot: number;
+  unidad: string;
+  conlot: boolean;
+}> {
   const result = await runQuery<ArticleRow>(
     parent,
     "SELECT RTRIM(DES) AS DES, PREMEDCOS AS PRECOS, RTRIM(TIPIVAART) AS T," +
-      " UNILOT, RTRIM(UNIDAD) AS UNI FROM articulo WHERE CODART=@codart",
+      " UNILOT, RTRIM(UNIDAD) AS UNI, CONLOT FROM articulo WHERE CODART=@codart",
     { codart: P.text(codart) },
   );
   const row = result.recordset?.[0];
@@ -1146,6 +1166,11 @@ export async function loadArticle(
     tipivaart: toText(row.T),
     unilot: toNumber(row.UNILOT) ?? 0,
     unidad: toText(row.UNI),
+    // tedious hands a `bit` back as a boolean, but this file already distrusts
+    // driver typing (see `toNumber`'s bigint-as-string note), and only an
+    // EXPLICIT false skips the lot pick — see `pickLot` on why an unset bit
+    // stays on the lot-controlled side.
+    conlot: !(row.CONLOT === false || row.CONLOT === 0),
   };
 }
 
@@ -1217,8 +1242,8 @@ export const LOT_AVAILABLE_SQL =
   " AND l.CODLOT=s.CODLOT COLLATE DATABASE_DEFAULT), 0))";
 
 /**
- * The half both lot queries share: this almacén, this article, sellable, not
- * expired.
+ * v3.2's freshness predicate, unchanged and now NAMED because the ladder tests
+ * it rather than filtering on it.
  *
  * `FECCAD>GETDATE()` stays on the server clock deliberately: it asks "has this
  * lot expired *now*", which is a moment and not a business day, and the hours of
@@ -1226,64 +1251,268 @@ export const LOT_AVAILABLE_SQL =
  * expiring within those same hours. `FECCAD<'19010101'` is the ERP's way of
  * spelling "no expiry".
  */
-const LOT_SELECT_SQL =
-  "SELECT TOP 1 RTRIM(s.CODLOT) AS LOT, s.FECCAD FROM stolot s" +
-  " WHERE s.CODALM=@alm AND RTRIM(s.CODART)=@codart" +
-  " AND (s.FECCAD>GETDATE() OR s.FECCAD<'19010101') AND s.VENDIBLE=1 AND ";
-
-/** FIFO: the soonest-expiring lot with enough left to cover the line by itself. */
-export const LOT_COVERING_SQL = `${LOT_SELECT_SQL}${LOT_AVAILABLE_SQL}>=@qty ORDER BY s.FECCAD ASC`;
+export const LOT_FRESH_SQL = "(s.FECCAD>GETDATE() OR s.FECCAD<'19010101')";
 
 /**
- * Nothing covers the line alone: the lot with the most REAL availability left.
+ * The four rungs, as one CASE. Freshness OUTRANKS coverage: tier 2 (in date,
+ * short of the line) beats tier 3 (out of date, covers the line) on purpose.
  *
- * Ordering by `CANT` here would hand back the lot with the most stock on the
- * shelf even when all of it is already promised — precisely the pick that stops
- * a conversion.
+ * That ordering is a decision and not an oversight, and it is not free.
+ * Wingest's conversion check is a hard `Disponible >= line quantity`, so a
+ * tier-2 pick is a GUARANTEED refusal while a tier-3 pick would have passed
+ * the arithmetic. MEASURED, on wgdemo at qty=24 on 2026-08-21: 10 of the 1,289
+ * lot-controlled articles hold BOTH a fresh short lot and an expired covering
+ * one, and on exactly those ten this ordering costs a conversion that
+ * coverage-first would have won. (The tier census cannot show this — it only
+ * ever observes the winning row — so it was counted separately.)
+ *
+ * It is still the right trade, for two reasons:
+ *
+ *  - The failure modes are not symmetric. A refused conversion is a phone call
+ *    and is fixable the next morning; expired food delivered to a restaurant is
+ *    not fixable once the van has left. Ten refusals is a price worth paying to
+ *    keep that decision in a human's hands.
+ *  - Where the expired lot really is fine, the owner has a switch that says so
+ *    in his own words — `BRIDGE_LOT_ALLOW_EXPIRED` with a day window he writes
+ *    down. Ranking expired stock above fresh stock inside the code would take
+ *    that decision away from him and hide it in a sort order.
+ *
+ * What this ordering must NOT be defended with: "tier 2 is transient because
+ * the zombie open pedidos will be cleaned up". That was measured too, and it
+ * is false — clearing all ~9,664 units of phantom reservation leaves tier-1
+ * coverage at 714 articles, exactly where it is with them.
+ *
+ * Freshness-first is also what makes ONE query correct. Because every fresh
+ * row outranks every expired row, `TOP 1` returns an expired row only when no fresh
+ * candidate exists — so `pickLot` can refuse it in TypeScript without
+ * discarding a fresh option the query had already thrown away. Under
+ * coverage-first that refusal would need `TOP N` or a second round trip.
  */
-export const LOT_FALLBACK_SQL =
-  `${LOT_SELECT_SQL}${LOT_AVAILABLE_SQL}>0 ORDER BY ${LOT_AVAILABLE_SQL} DESC`;
+export const LOT_TIER_SQL =
+  "CASE WHEN f.FRESCO=1 AND a.DISPO>=@qty THEN 1 WHEN f.FRESCO=1 THEN 2" +
+  " WHEN a.DISPO>=@qty THEN 3 ELSE 4 END";
 
 /**
- * Lot pick: the soonest-expiring sellable lot whose REAL availability covers the
- * line on its own, else the sellable lot with the most availability left, else
- * no lot at all (empty CODLOT, 1900-01-01, exactly as v3.2 did).
+ * `t.TIER` is the primary key, so each CASE term below varies within exactly
+ * one pair of tiers and is NULL for every row of the others — the NULL sort
+ * direction can never mix rows across a tier boundary.
+ *
+ * Tier 1: `FECCAD ASC`, which is the retired LOT_COVERING_SQL's FIFO, unchanged.
+ * Tier 2: both CASE keys are NULL, so it falls straight through to `DISPO DESC`
+ *         — the retired LOT_FALLBACK_SQL's ordering, unchanged.
+ * Tiers 3-4: `FECCAD` **DESC**, and the inversion is deliberate. Among lots
+ *         already past their date, take the LEAST expired. FIFO here would mean
+ *         "reach for the oldest stock in the warehouse first", which is exactly
+ *         how 10-121's lot C26 (CANT=80, expired 2022-08-24) would get picked.
+ *
+ * `a.DISPO DESC` and `RTRIM(s.CODLOT) ASC` are the tie-breaks, and they DO
+ * change picks the retired pair made — measured, not assumed. Replaying both
+ * old queries and this ladder over all 1,289 lot-controlled articles at qty=24
+ * (2026-08-21, wgdemo) gives 44 articles a different lot: 41 of them are lots
+ * sharing one FECCAD, where v3.2's bare `ORDER BY s.FECCAD ASC` let the engine
+ * return whichever it reached first, and 3 are the tier-2 case, where two lots
+ * hold identical availability. In 34 of the 44 the new answer carries MORE
+ * availability and in none of them less, which is the direction that converts:
+ * 103-020's two lots both expire 2027-11-09 and hold 100 and 240, and the pick
+ * moved to the 240. The lot code is the last key so a re-run of the same order
+ * answers the same way instead of depending on the engine's mood — the recovery
+ * path compares pedidos rather than lots, but a stable answer is what makes a
+ * re-run diffable by a human.
+ */
+export const LOT_ORDER_SQL =
+  "ORDER BY t.TIER ASC, CASE WHEN t.TIER=1 THEN s.FECCAD END ASC," +
+  " CASE WHEN t.TIER>=3 THEN s.FECCAD END DESC, a.DISPO DESC, RTRIM(s.CODLOT) ASC";
+
+/**
+ * One statement, four rungs, one round trip — replacing the covering/fallback
+ * pair v3.2 left behind. A future fifth rung is one more CASE arm, never
+ * another query.
+ *
+ * `CROSS APPLY (VALUES ...)` NAMES the availability expression once instead of
+ * pasting a correlated subquery into the CASE, the WHERE and the ORDER BY.
+ * APPLY is correlated by definition and evaluated left to right, so `f` may see
+ * `s`, `t` may see `f` and `a`, and `a.DISPO`/`t.TIER` are real derived-table
+ * columns — legal in WHERE and ORDER BY without relying on alias leniency.
+ * (`LOT_AVAILABLE_SQL` is already parenthesised, hence the doubled parens after
+ * VALUES; keeping that constant byte-identical is worth two characters.)
+ *
+ * **Collation.** This adds NO new cross-table string comparison.
+ * `LOT_AVAILABLE_SQL` is reused verbatim and carries its three
+ * `COLLATE DATABASE_DEFAULT` labels on the `s` side — the three that failed to
+ * COMPILE on 2026-08-16 (order 1006, PREFLIGHT_FAILED, Modern_Spanish_CS_AS vs
+ * _CI_AS). Everything added here compares a datetime to `GETDATE()` or a
+ * literal, a numeric to `@qty`, or a column to a PARAMETER (which takes the
+ * column's collation). A fourth label appearing in this string means somebody
+ * added a cross-table comparison without thinking about that trap, and the test
+ * pins the count at three.
+ *
+ * `s.FECCAD IS NOT NULL` is not padding — it PRESERVES today's behaviour. The
+ * freshness predicate evaluates to NULL for a NULL FECCAD, so such a row is
+ * already excluded from both of v3.2's queries. Without this filter the CASE
+ * would fall through to the expired arms and reclassify "expiry unknown" as
+ * "expired", pushing a dateless lot into the gated tiers. NULL is not expiry.
+ *
+ * `DIASCAD` is meaningless on a `FRESCO=1` row (it is negative, or ~46,000 days
+ * for the 1900-01-01 sentinel). `pickLot` reads it on tiers 3 and 4 only.
+ */
+export const LOT_PICK_SQL =
+  "SELECT TOP 1 t.TIER, RTRIM(s.CODLOT) AS LOT, s.FECCAD, a.DISPO," +
+  " DATEDIFF(day,s.FECCAD,GETDATE()) AS DIASCAD" +
+  " FROM stolot s" +
+  ` CROSS APPLY (VALUES (${LOT_AVAILABLE_SQL})) AS a(DISPO)` +
+  ` CROSS APPLY (VALUES (CASE WHEN ${LOT_FRESH_SQL} THEN 1 ELSE 0 END)) AS f(FRESCO)` +
+  ` CROSS APPLY (VALUES (${LOT_TIER_SQL})) AS t(TIER)` +
+  " WHERE s.CODALM=@alm AND RTRIM(s.CODART)=@codart AND s.VENDIBLE=1" +
+  " AND s.FECCAD IS NOT NULL AND a.DISPO>0 " +
+  LOT_ORDER_SQL;
+
+/** What the ERP offered for a line, before this bridge's own policy. */
+export type LotTier =
+  | "fresh_covering"
+  | "fresh_partial"
+  | "expired_covering"
+  | "expired_partial"
+  /** The ranked query returned no row, or none was asked for. */
+  | "none";
+
+/** What the bridge DID with the offer. `tier` is the ERP fact; this is ours. */
+export type LotOutcome =
+  /** `articulo.CONLOT=false` — an empty lot is the CORRECT value here. */
+  | "not_lot_controlled"
+  /** A tier 1 or 2 lot was written onto the line. */
+  | "lot_used"
+  /** A tier 3/4 lot was written: the flag is on and the lot is inside the window. */
+  | "expired_used"
+  /** A tier 3/4 lot existed and `BRIDGE_LOT_ALLOW_EXPIRED=false` refused it. */
+  | "expired_refused"
+  /** A tier 3/4 lot existed and was older than `BRIDGE_LOT_EXPIRED_MAX_DAYS`. */
+  | "expired_too_old"
+  /** Lot-controlled, and nothing sellable in any lot at any date. */
+  | "no_stock";
+
+export interface LotPick {
+  /** `pedclili.CODLOT`. "" whenever no lot is written, for any of four reasons. */
+  codlot: string;
+  /**
+   * `pedclili.FECCAD` — the lot's TRUE date, PAST DATES INCLUDED.
+   *
+   * Never sanitised to `NO_EXPIRY_DATE` on an expired pick. Doing that would
+   * erase the only trace of the decision visible inside Wingest, leaving staff
+   * a lot code and no reason to doubt it, and it would write a value that
+   * contradicts the `stolot` row the same document points at. If this bridge
+   * ever ships an expired lot, the date rides along in the open.
+   */
+  feccad: Date;
+  tier: LotTier;
+  outcome: LotOutcome;
+  /** Real availability of the offered lot; null when there was no row. */
+  dispo: number | null;
+  /** Days past FECCAD, on an expired offer only; null otherwise. */
+  diasCad: number | null;
+}
+
+/** One non-ideal line, as it travels out to the logger and the job tally. */
+export interface LotFlag {
+  codart: string;
+  codlot: string;
+  tier: LotTier;
+  outcome: LotOutcome;
+  /** YYYY-MM-DD of the lot actually written, or null when none was. */
+  feccad: string | null;
+  dispo: number | null;
+  diasCad: number | null;
+  qtyBase: number;
+}
+
+const LOT_TIER_BY_CODE: Readonly<Record<number, LotTier>> = {
+  1: "fresh_covering",
+  2: "fresh_partial",
+  3: "expired_covering",
+  4: "expired_partial",
+};
+
+/**
+ * Lot pick: the soonest-expiring sellable lot whose REAL availability covers
+ * the line on its own, else the in-date lot with the most availability left,
+ * else — only where the ERP flag permits and the lot is inside the configured
+ * day window — the LEAST expired lot that still holds stock, else no lot at all
+ * (empty CODLOT, 1900-01-01, exactly as v3.2 did).
  *
  * "Availability" is `LOT_AVAILABLE_SQL` — `CANT` minus what open pedidos still
  * hold — and not `CANT`; see that constant for the 2026-08-16 evidence and for
  * why this is a deliberate departure from the v3.2 reference.
+ *
+ * `conlot` is `articulo.CONLOT` and is REQUIRED, not defaulted. 953 of the
+ * 2,302 live articles are `CONLOT=false`, native albaranes for F-003 ship with
+ * an EMPTY CODLOT every day, and for those an empty lot is the CORRECT value
+ * rather than a fallback. The 9 `CONLOT=false` articles that do carry stray
+ * `stolot` rows are skipped too, deliberately: the ERP's own per-article flag is
+ * the authority and the hand-written albaranes are the observable proof.
+ * Anything other than an explicit false is treated as lot-controlled — an unset
+ * bit is unchecked data, and being wrong that way costs one query and an empty
+ * CODLOT (a truly lotless article has no `stolot` rows anyway), while being
+ * wrong the other way puts a traceability hole on a lot-controlled food line.
  */
 export async function pickLot(
   parent: SqlParent,
   cfg: BridgeConfig,
   codart: string,
   qty: number,
-): Promise<{ codlot: string; feccad: Date }> {
-  const params = {
+  conlot: boolean,
+): Promise<LotPick> {
+  const noLot = (
+    tier: LotTier,
+    outcome: LotOutcome,
+    dispo: number | null,
+    diasCad: number | null,
+  ): LotPick => ({ codlot: "", feccad: NO_EXPIRY_DATE, tier, outcome, dispo, diasCad });
+
+  if (!conlot) return noLot("none", "not_lot_controlled", null, null);
+
+  const result = await runQuery<{
+    TIER: unknown;
+    LOT: unknown;
+    FECCAD: unknown;
+    DISPO: unknown;
+    DIASCAD: unknown;
+  }>(parent, LOT_PICK_SQL, {
     alm: P.text(cfg.alm),
     codart: P.text(codart),
     qty: P.float(qty),
-  };
-  const covering = await runQuery<{ LOT: unknown; FECCAD: unknown }>(
-    parent,
-    LOT_COVERING_SQL,
-    params,
-  );
-  let row = covering.recordset?.[0];
-  if (!row) {
-    const fallback = await runQuery<{ LOT: unknown; FECCAD: unknown }>(
-      parent,
-      LOT_FALLBACK_SQL,
-      params,
-    );
-    row = fallback.recordset?.[0];
+  });
+
+  const row = result.recordset?.[0];
+  if (!row) return noLot("none", "no_stock", null, null);
+
+  const tier = LOT_TIER_BY_CODE[toNumber(row.TIER) ?? 0];
+  // An unmappable TIER means a malformed recordset, never an expired lot: fall
+  // to the no-stock answer rather than letting it drop through to the gate.
+  if (tier === undefined) return noLot("none", "no_stock", null, null);
+
+  const dispo = toNumber(row.DISPO);
+  const rawFeccad = row.FECCAD;
+  const feccad =
+    rawFeccad instanceof Date && !Number.isNaN(rawFeccad.getTime())
+      ? rawFeccad
+      : NO_EXPIRY_DATE;
+  const codlot = toText(row.LOT);
+
+  if (tier === "fresh_covering" || tier === "fresh_partial") {
+    return { codlot, feccad, tier, outcome: "lot_used", dispo, diasCad: null };
   }
-  if (!row) return { codlot: "", feccad: NO_EXPIRY_DATE };
-  const feccad = row.FECCAD;
-  return {
-    codlot: toText(row.LOT),
-    feccad: feccad instanceof Date && !Number.isNaN(feccad.getTime()) ? feccad : NO_EXPIRY_DATE,
-  };
+
+  // Expired. The policy is applied HERE and not in the WHERE clause, so the
+  // refused row is still observed and counted: `lotBlocked` on the heartbeat is
+  // what lets the owner decide about the flag from measured numbers instead of
+  // from a guess. Because every fresh row outranks every expired one
+  // (`LOT_TIER_SQL`), a tier-3 or tier-4 row means there was no fresh candidate
+  // at all — refusing it here therefore discards nothing.
+  const diasCad = toNumber(row.DIASCAD);
+  if (!cfg.lotAllowExpired) return noLot(tier, "expired_refused", dispo, diasCad);
+  if (diasCad === null || diasCad > cfg.lotExpiredMaxDays) {
+    return noLot(tier, "expired_too_old", dispo, diasCad);
+  }
+  return { codlot, feccad, tier, outcome: "expired_used", dispo, diasCad };
 }
 
 export interface ReservedCounters {
@@ -1562,6 +1791,11 @@ export interface InjectResult extends ErpPedidoIdentity {
   lineCount: number;
   /** codarts left off the pedido because `is_erp_excluded` (delta 4). */
   excludedCodarts: string[];
+  /**
+   * Non-ideal lot picks THIS run made. Empty on the recovery path by the same
+   * contract as `lineCount`: the pedido was already there and no lot was picked.
+   */
+  lotFlags: LotFlag[];
 }
 
 /** Everything the write phase needs, resolved and arithmetic already done. */
@@ -1576,6 +1810,41 @@ export interface PreparedOrder {
   totcosEuros: number;
   lines: PreparedLine[];
   excludedCodarts: string[];
+  /** The lines a human should look at — see `lotFlagsFor`. Empty on a clean order. */
+  lotFlags: LotFlag[];
+}
+
+/**
+ * The lines worth telling a human about, in payload order. Empty on a clean
+ * order, which is the whole point: a flag per line would be 953 articles' worth
+ * of noise from correctly-lotless rows and would train staff to ignore the
+ * channel.
+ *
+ * A `fresh_partial` line IS included even though its outcome is `lot_used`: it
+ * is today's shipped behaviour and no regression, but Wingest may still refuse
+ * it at conversion, so it belongs on the per-order log line. `orders.ts`
+ * deliberately keeps it OFF the heartbeat — at job level it is a number nobody
+ * can act on.
+ */
+export function lotFlagsFor(lines: readonly PreparedLine[]): LotFlag[] {
+  const flags: LotFlag[] = [];
+  for (const line of lines) {
+    if (line.lotOutcome === "not_lot_controlled") continue;
+    if (line.lotOutcome === "lot_used" && line.lotTier === "fresh_covering") {
+      continue;
+    }
+    flags.push({
+      codart: line.codart,
+      codlot: line.codlot,
+      tier: line.lotTier,
+      outcome: line.lotOutcome,
+      feccad: line.codlot === "" ? null : isoDateFromSql(line.feccad),
+      dispo: line.lotDispo,
+      diasCad: line.lotDiasCad,
+      qtyBase: line.qtyBase,
+    });
+  }
+  return flags;
 }
 
 export function orderContext(order: ClaimedOrder, ref: string): {
@@ -1661,6 +1930,11 @@ function recoveryExpectationFromPrepared(
  * transaction; what this bridge races itself on is those writes and the
  * counters, and a lot pick made a moment before them is a snapshot either way:
  * Wingest re-checks availability at conversion, which is the check that counts.
+ *
+ * That is also the limit of what the lot ladder promises. It maximises the odds
+ * a line converts; it cannot guarantee any line. A tier-1 pick can still be
+ * refused if another pedido lands on that lot meanwhile, and a tier-2 pick can
+ * convert perfectly well once the zombie open pedidos are cleaned up.
  */
 export async function prepareOrder(
   parent: SqlParent,
@@ -1702,7 +1976,7 @@ export async function prepareOrder(
     // `stolot` for BOTTLES, not for cases — two cajas of 24 need 48 available,
     // and asking for 2 would happily pick a lot with 3 bottles left on it.
     const qtyBase = baseUnitsForLine(line.qty, line.unitsPerCase);
-    const lot = await pickLot(parent, cfg, line.codart, qtyBase);
+    const lot = await pickLot(parent, cfg, line.codart, qtyBase, article.conlot);
     // The three operands, not the product: `qtyBase` is already a double and the
     // cent has to be decided on exact integers. See `lineSubtotalCents`.
     const lineTotalCents = lineSubtotalCents(
@@ -1727,6 +2001,10 @@ export async function prepareOrder(
       unidad: article.unidad,
       codlot: lot.codlot,
       feccad: lot.feccad,
+      lotTier: lot.tier,
+      lotOutcome: lot.outcome,
+      lotDispo: lot.dispo,
+      lotDiasCad: lot.diasCad,
     });
   }
 
@@ -1737,6 +2015,7 @@ export async function prepareOrder(
     fecent,
     customer,
     taxes: computeTaxes(lines, customer.tipivacli, taxTables),
+    lotFlags: lotFlagsFor(lines),
     // TOTCOS stays in float euros because its input does: PREMEDCOS is a
     // moving-average cost the ERP keeps to more than two decimals. It counts
     // `qtyBase` because PREMEDCOS is a cost per BASE unit, like every other
@@ -1880,6 +2159,7 @@ export async function injectOrder(
       recovered: true,
       lineCount: 0,
       excludedCodarts: preflight.excludedCodarts,
+      lotFlags: [],
     };
   }
   const { prepared } = preflight;
@@ -1911,6 +2191,7 @@ export async function injectOrder(
     recovered: result.recovered,
     lineCount: result.recovered ? 0 : prepared.lines.length,
     excludedCodarts: prepared.excludedCodarts,
+    lotFlags: result.recovered ? [] : prepared.lotFlags,
   };
 }
 
