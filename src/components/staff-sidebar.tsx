@@ -112,10 +112,25 @@ type SidebarProps = Identity & {
  * "size-6"`, so editing that to suit the admin would resize the storefront's
  * four with it.
  */
+/**
+ * The states themselves, reworked on the owner's review (2026-08-20): the
+ * shipped active row — brand-soft fill, bold red text — read as an alarm
+ * rather than a location, and hovering ANY row turned it the same red, so the
+ * accent was everywhere and marked nothing. The restrained grammar now:
+ *
+ * - resting rows sit back in `ink-soft`;
+ * - hover/focus is a NEUTRAL wash (`black/[.045]`) that darkens the text —
+ *   surfaces respond, the accent does not spend itself on a pointer pass;
+ * - the ACTIVE row is a white glass pill — `bg-white/70` with a small blur
+ *   over the sidebar's warm wash, a hairline ring and a 1px shadow for the
+ *   lift — with the text at plain ink weight (the owner: no bold) and the
+ *   accent reduced to the one place it reads as a marker, the ICON
+ *   (`[&_svg]:text-brand-ink` reaches the glyph through `currentColor`).
+ */
 const ROW_BASE =
-  "flex items-center gap-2.5 rounded-lg px-3 text-[13.5px] transition-colors hover:bg-brand-soft hover:text-brand-ink focus-visible:bg-brand-soft focus-visible:text-brand-ink focus-visible:outline-none [&_svg]:size-[18px]";
-const ROW = `${ROW_BASE} text-ink`;
-const ROW_ACTIVE = `${ROW_BASE} bg-brand-soft font-bold text-brand-ink`;
+  "flex items-center gap-2.5 rounded-lg px-3 text-[13.5px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/35 [&_svg]:size-[18px]";
+const ROW = `${ROW_BASE} text-ink-soft hover:bg-black/[.045] hover:text-ink focus-visible:bg-black/[.045] focus-visible:text-ink`;
+const ROW_ACTIVE = `${ROW_BASE} bg-white/70 text-ink shadow-[0_1px_2px_rgba(28,25,23,.06)] ring-1 ring-black/[.05] backdrop-blur-sm [&_svg]:text-brand-ink`;
 
 /**
  * Sized by CSS in its own square; the width/height pair is only the intrinsic
@@ -297,7 +312,14 @@ function SidebarBody({
             them. A three-day-old submitted order under a "today" heading would
             be a number that means something else than the word above it. The
             genuinely today-scoped figures are the dashboard's KPI strip. */}
-        <section aria-label={t("shell.backlog")} className={wide}>
+        <section
+          aria-label={t("shell.backlog")}
+          // The figures sit in their own quiet glass inset — the same
+          // white-over-wash the active pill wears, one shade fainter, so the
+          // backlog reads as a panel of the sidebar rather than three loose
+          // lines floating under the nav.
+          className={`rounded-xl bg-white/45 py-2.5 ring-1 ring-black/[.04] ${wide}`}
+        >
           {/* A `<p>` and not an `<h2>`: the section's `aria-label` already names
               this landmark with these exact words, and a heading repeating them
               is the region announced twice. It is also 11px of micro-copy rather
@@ -426,7 +448,13 @@ function SidebarBody({
  */
 export function StaffSidebar(props: SidebarProps) {
   return (
-    <aside className="sticky top-0 hidden h-screen w-16 shrink-0 flex-col self-start border-r border-[#EDE9E5] bg-field sm:flex lg:w-60">
+    // `bg-field/85 backdrop-blur-xl` — the 毛玻璃 the owner asked for, worn
+    // lightly: over the flat beige body the blur mostly reads as depth at the
+    // hairline, and the 85% wash keeps every AA figure computed against
+    // `bg-field` effectively true. Safe against the containing-block hazard
+    // the drawer comment documents, because this aside contains no `fixed`
+    // descendant — the drawer is `StaffTopBar`'s sibling, not ours.
+    <aside className="sticky top-0 hidden h-screen w-16 shrink-0 flex-col self-start border-r border-[#EDE9E5] bg-field/85 backdrop-blur-xl sm:flex lg:w-60">
       <SidebarBody {...props} collapsible />
     </aside>
   );
