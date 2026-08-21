@@ -3,7 +3,9 @@ import { getTranslations, setRequestLocale } from "next-intl/server";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { AppShell } from "@/components/app-shell";
+import { CatalogViewSwitcher } from "@/components/catalog-view-switcher";
 import { SearchIcon } from "@/components/icons";
+import { ProductGrid } from "@/components/product-grid";
 import { ProductRow } from "@/components/product-row";
 import { beginCompanyUser, finishCompanyUser } from "@/lib/auth/guards";
 import { sortCategories } from "@/lib/categories";
@@ -221,6 +223,40 @@ export default async function CatalogPage({
   // empty, so the empty state can offer the way back out of it.
   const filtered = activeCategory !== null || tab === "favoritos";
 
+  const emptyState = (
+    <div className="flex flex-col items-center gap-3 px-6 py-12 text-center">
+      <span className="flex size-12 items-center justify-center rounded-full bg-border text-muted">
+        <SearchIcon />
+      </span>
+      <p className="text-muted">{t("noResults")}</p>
+      {filtered && (
+        <Link
+          href={href({ tab: "all", cat: "", page: 1 })}
+          className="inline-flex h-11 items-center rounded-lg px-3 text-sm text-brand-ink underline underline-offset-4 transition-colors hover:bg-brand-soft"
+        >
+          {t("clearFilters")}
+        </Link>
+      )}
+    </div>
+  );
+
+  const productList = (
+    <ul>
+      {products.map((p) => (
+        <ProductRow
+          key={p.id as string}
+          product={p}
+          locale={locale}
+          showPrices={showPrices}
+        />
+      ))}
+    </ul>
+  );
+
+  const productGrid = (
+    <ProductGrid products={products} locale={locale} showPrices={showPrices} />
+  );
+
   return (
     <AppShell
       locale={locale}
@@ -280,55 +316,17 @@ export default async function CatalogPage({
           className="min-w-0 flex-1 overflow-y-auto bg-surface"
         >
           {/* Sticky inside the pane, not the page: it names the filter the rail
-              set and counts what came back, and it has to keep saying so forty
-              rows down. The count is the query's own exact count, so it is the
-              size of the whole result, not of this page of it. */}
-          <div className="sticky top-0 z-10 flex items-baseline justify-between bg-surface px-4 py-3">
-            <h1 className="text-sm font-bold">{paneLabel}</h1>
-            <span className="font-num text-xs text-faint tabular-nums">
-              {t("paneCount", { n: count ?? 0 })}
-            </span>
-          </div>
-
-          {products.length === 0 ? (
-            // The empty state says what happened AND offers the way out of it: a
-            // category with nothing in it, or a restaurant that has starred
-            // nothing yet, used to be a grey sentence with no control on it —
-            // the customer's only move was to find the filter they set and undo
-            // it by hand. The link is only there when something IS filtering; on
-            // a truly empty catalogue it would be a link to the same empty page.
-            <div className="flex flex-col items-center gap-3 px-6 py-12 text-center">
-              <span className="flex size-12 items-center justify-center rounded-full bg-border text-muted">
-                <SearchIcon />
-              </span>
-              <p className="text-muted">{t("noResults")}</p>
-              {filtered && (
-                <Link
-                  href={href({ tab: "all", cat: "", page: 1 })}
-                  // Same shape as the pager below — the two quiet navigations in
-                  // this pane, both 44px.
-                  className="inline-flex h-11 items-center rounded-lg px-3 text-sm text-brand-ink underline underline-offset-4 transition-colors hover:bg-brand-soft"
-                >
-                  {t("clearFilters")}
-                </Link>
-              )}
-            </div>
-          ) : (
-            <ul>
-              {/* The row itself lives in `components/product-row.tsx`: it is
-                  where the layout that this page's customers press lives, it
-                  carries its own dividers and insets now that there is no card
-                  under it, and `/buscar` draws the same one. */}
-              {products.map((p) => (
-                <ProductRow
-                  key={p.id as string}
-                  product={p}
-                  locale={locale}
-                  showPrices={showPrices}
-                />
-              ))}
-            </ul>
-          )}
+              set, counts what came back, and lets the customer choose between
+              the original one-product-per-row view and the photo-led grid. */}
+          <CatalogViewSwitcher
+            paneLabel={paneLabel}
+            count={t("paneCount", { n: count ?? 0 })}
+            viewModeLabel={t("viewMode")}
+            listLabel={t("listView")}
+            gridLabel={t("gridView")}
+            list={products.length === 0 ? emptyState : productList}
+            grid={products.length === 0 ? emptyState : productGrid}
+          />
 
           {totalPages > 1 && (
             // NAMED: this page carries three `<nav>` landmarks (the rail, the

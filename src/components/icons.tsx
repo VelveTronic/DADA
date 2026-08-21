@@ -51,6 +51,30 @@ export function SearchIcon() {
   );
 }
 
+/** The catalogue's single-column presentation. */
+export function ListViewIcon() {
+  return (
+    <svg {...ICON_PROPS}>
+      <path d="M5 6.5h14M5 12h14M5 17.5h14" />
+      <circle cx="3.5" cy="6.5" r=".5" fill="currentColor" stroke="none" />
+      <circle cx="3.5" cy="12" r=".5" fill="currentColor" stroke="none" />
+      <circle cx="3.5" cy="17.5" r=".5" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
+/** The catalogue's two-column presentation. */
+export function GridViewIcon() {
+  return (
+    <svg {...ICON_PROPS}>
+      <rect x="4.5" y="4.5" width="6.5" height="6.5" rx="1.5" />
+      <rect x="13" y="4.5" width="6.5" height="6.5" rx="1.5" />
+      <rect x="4.5" y="13" width="6.5" height="6.5" rx="1.5" />
+      <rect x="13" y="13" width="6.5" height="6.5" rx="1.5" />
+    </svg>
+  );
+}
+
 /** 购物车 — a basket, which is what a restaurant fills here. */
 export function CartIcon() {
   return (
