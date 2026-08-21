@@ -35,7 +35,14 @@ export async function ProductGrid({
             key={id}
             className={`min-w-0 ${product.is_available ? "" : "opacity-45"}`}
           >
-            <div className="relative aspect-square overflow-hidden rounded-lg border border-border bg-border">
+            {/* `isolate` keeps the stepper's `z-10` INSIDE this card: without
+                it the card is `relative` but not a stacking context, so the
+                overlay competed with the pane's sticky header (also z-10) in
+                the page context and — being later in the DOM — painted on top
+                of it while scrolling (owner, 2026-08-21). Isolated, the whole
+                card flattens to one layer under the header, and the z-10 keeps
+                meaning what it meant: above the photo. */}
+            <div className="relative isolate aspect-square overflow-hidden rounded-lg border border-border bg-border">
               {product.image_url ? (
                 <Image
                   src={product.image_url}

@@ -100,3 +100,22 @@ body {
   font-family: var(--font-inter), "PingFang SC", "Hiragino Sans GB",
     "Microsoft YaHei", "Noto Sans SC", sans-serif;
 }
+
+/* iOS Safari auto-zooms the WHOLE PAGE when a focused field's computed
+   font-size is under 16px, and it does not zoom back out when the field is
+   done — the owner hit exactly that on the login screen (2026-08-21): type a
+   password, land on the catalogue still magnified. The only real fix is
+   prevention, so on touch screens every text-entry control is floored at
+   16px. `1em` keeps a field that inherits something LARGER; checkboxes and
+   radios are exempt because they render no text and the floor would resize
+   the box itself. Deliberately unlayered: Tailwind 4 puts utilities in a
+   cascade layer, and an unlayered rule outranks every `text-sm` on a field
+   without an `!important` arms race. Desktop pointers are untouched — the
+   staff tables keep their 12.5px fields where the bug cannot happen. */
+@media (hover: none) and (pointer: coarse) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]),
+  textarea,
+  select {
+    font-size: max(16px, 1em);
+  }
+}
