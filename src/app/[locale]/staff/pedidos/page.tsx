@@ -10,7 +10,7 @@ import { OrderStatusBadge } from "@/components/order-status-badge";
 import { StaffShell } from "@/components/staff-shell";
 import { ADMIN_CARD, FIELD_SM } from "@/components/ui";
 import { beginStaff, finishStaff } from "@/lib/auth/guards";
-import { localizedName, unitLabel } from "@/lib/catalog/display";
+import { localizedName, sanitizeSearch, unitLabel } from "@/lib/catalog/display";
 import { formatEuros } from "@/lib/money";
 import { formatMadridTime } from "@/lib/bridge-status";
 import type { OrderBridgeFailure, QueueTab } from "@/lib/orders";
@@ -139,6 +139,19 @@ type QueueItem = Pick<
   | "is_weighed"
 > & { products: { is_weighed: boolean } | null };
 
+/**
+ * The three sortable columns, `?orden=` value → orders column. A whitelist
+ * OBJECT rather than passing the parameter through: `.order()` takes a column
+ * name, and a user-editable string reaching it would be an open sort oracle.
+ * `fecha` is the default and matches what the queue always did (newest first).
+ */
+const QUEUE_SORTS = {
+  num: "order_number",
+  fecha: "created_at",
+  importe: "subtotal_cents",
+} as const;
+type QueueSort = keyof typeof QUEUE_SORTS;
+
 export default async function StaffOrdersPage({
   params,
   searchParams,
@@ -148,6 +161,9 @@ export default async function StaffOrdersPage({
     estado?: string;
     rpcResult?: string;
     lineResult?: string;
+    q?: string;
+    orden?: string;
+    dir?: string;
   }>;
 }) {
   const { locale } = await params;
@@ -155,14 +171,17 @@ export default async function StaffOrdersPage({
     estado: rawEstado,
     rpcResult: rawResult,
     lineResult: rawLineResult,
+    q: rawQ,
+    orden: rawOrden,
+    dir: rawDir,
   } = await searchParams;
   setRequestLocale(locale);
   const perf = perfRun(`/${locale}/staff/pedidos`);
   const { supabase, pendingStaff } = await beginStaff(locale);
   const t = await getTranslations("staff");
-  // The order vocabulary is the customer's, the money labels are the cart's:
-  // reused rather than duplicated into the staff namespace.
-  const tOrders = await getTranslations("orders");
+  // The money labels are the cart's: reused rather than duplicated into the
+  // staff namespace. (The order-number/date words left with the table rework —
+  // the column headers name those cells now.)
   const tCart = await getTranslations("cart");
   // …and the 称重 badge is the catalogue's, for the same reason.
   const tCatalog = await getTranslations("catalog");
@@ -182,13 +201,43 @@ export default async function StaffOrdersPage({
       ? rawLineResult
       : null;
 
+  // The owner's third-pass additions (2026-08-20): find and sort. All three
+  // parameters are user-editable and all three are validated the tab's way —
+  // before use, against a whitelist or a sanitizer, never after.
+  const q = sanitizeSearch(rawQ ?? "");
+  const sort: QueueSort =
+    rawOrden === "num" || rawOrden === "importe" ? rawOrden : "fecha";
+  const dir: "asc" | "desc" = rawDir === "asc" ? "asc" : "desc";
+  // All digits = an order number; anything else searches the restaurant. The
+  // length cap keeps a 30-digit paste from overflowing the int the eq targets.
+  const numericQ = /^\d{1,9}$/.test(q) ? Number(q) : null;
+
   let query = supabase
     .from("orders")
-    .select(`${PUBLIC_ORDER_COLUMNS}, companies:company_id(name, codcli)`)
-    .order("created_at", { ascending: false })
+    // The `!inner` embed exists ONLY on a name search: PostgREST can filter a
+    // parent by an embedded column just when the join is inner. It is not the
+    // default because `!inner` also silently DROPS any order whose company row
+    // vanished — impossible today (`company_id` is `not null references`), but
+    // the plain embed answers such a row with `companies: null` instead of
+    // hiding it, and a queue must not hide orders to be robust against a
+    // hypothetical.
+    .select(
+      q && numericQ === null
+        ? `${PUBLIC_ORDER_COLUMNS}, companies:company_id!inner(name, codcli)`
+        : `${PUBLIC_ORDER_COLUMNS}, companies:company_id(name, codcli)`,
+    )
+    .order(QUEUE_SORTS[sort], { ascending: dir === "asc" })
     .limit(PAGE_SIZE);
+  // The tiebreak keeps 金额-sorted rows stable between visits: two orders of
+  // the same subtotal keep their relative place instead of swapping on each
+  // render. Redundant when the primary IS the number, so skipped there.
+  if (sort !== "num") {
+    query = query.order("order_number", { ascending: dir === "asc" });
+  }
   // `all` is the absence of a filter, which is why it is not a status.
   if (tab !== "all") query = query.eq("status", tab);
+  if (numericQ !== null) query = query.eq("order_number", numericQ);
+  else if (q) query = query.ilike("companies.name", `%${q}%`);
 
   /**
    * One chip's count. `head: true` so not a single row comes back, only the
@@ -387,9 +436,37 @@ export default async function StaffOrdersPage({
   }
 
   // A tab switch drops `?rpcResult`: the banner belongs to the click that
-  // produced it, not to the next view the staff member opens.
-  const tabHref = (target: QueueTab) =>
-    `/${locale}/staff/pedidos${target === "submitted" ? "" : `?estado=${target}`}`;
+  // produced it, not to the next view the staff member opens. The search and
+  // the sort SURVIVE both kinds of navigation — a staff member narrowing to
+  // one restaurant expects the narrowing to hold while they check its tabs —
+  // which is why every link on this screen is built by the one helper.
+  const queueHref = (over: {
+    estado?: QueueTab;
+    q?: string;
+    orden?: QueueSort;
+    dir?: "asc" | "desc";
+  }) => {
+    const sp = new URLSearchParams();
+    const estado = over.estado ?? tab;
+    const qq = over.q ?? q;
+    const orden = over.orden ?? sort;
+    const dd = over.dir ?? dir;
+    if (estado !== "submitted") sp.set("estado", estado);
+    if (qq) sp.set("q", qq);
+    if (orden !== "fecha") sp.set("orden", orden);
+    if (dd !== "desc") sp.set("dir", dd);
+    const s = sp.toString();
+    return `/${locale}/staff/pedidos${s ? `?${s}` : ""}`;
+  };
+  const tabHref = (target: QueueTab) => queueHref({ estado: target });
+  // A header click: first press sorts this column newest/biggest first, the
+  // second flips it — and pressing a DIFFERENT header starts that column at
+  // descending again rather than inheriting the old direction.
+  const sortHref = (target: QueueSort) =>
+    queueHref({
+      orden: target,
+      dir: sort === target && dir === "desc" ? "asc" : "desc",
+    });
 
   const tabLabel: Record<QueueTab, string> = {
     submitted: t("tabSubmitted"),
@@ -488,18 +565,120 @@ export default async function StaffOrdersPage({
         })}
       </nav>
 
+      {/* Find, above the table it narrows (owner, third pass): all digits is
+          an order number, anything else matches the restaurant. A GET form —
+          the queue is server-first, and the URL carrying the search is what
+          lets the tabs and the sort survive it (`queueHref`). The hidden
+          fields are the rest of the current view: a form submits ONLY its own
+          fields, so without them pressing 搜索 would silently reset the tab
+          and the sort. */}
+      <form method="get" className="mt-4 flex flex-wrap items-center gap-2">
+        {tab !== "submitted" && (
+          <input type="hidden" name="estado" value={tab} />
+        )}
+        {sort !== "fecha" && <input type="hidden" name="orden" value={sort} />}
+        {dir !== "desc" && <input type="hidden" name="dir" value={dir} />}
+        <input
+          name="q"
+          defaultValue={q}
+          aria-label={t("searchQueue")}
+          placeholder={t("searchQueue")}
+          className={`h-9 w-72 max-w-full ${FIELD_SM}`}
+        />
+        <button
+          type="submit"
+          className={`h-9 rounded-lg border border-border-strong bg-surface px-3.5 text-[12.5px] text-ink-soft transition-colors hover:border-brand hover:text-brand-ink`}
+        >
+          {t("searchGo")}
+        </button>
+        {q && (
+          <Link
+            href={queueHref({ q: "" })}
+            className="text-[12.5px] text-brand-ink underline underline-offset-4"
+          >
+            {t("searchClear")}
+          </Link>
+        )}
+      </form>
+
       {orders.length === 0 ? (
         <p className={`${ADMIN_CARD} mt-[18px] p-10 text-center text-muted`}>
-          {t("noOrders")}
+          {q ? t("noSearchResults") : t("noOrders")}
         </p>
       ) : (
-        /* `ADMIN_CARD` is on this wrapper rather than on the `<ul>` because the
-           footer below the list sits INSIDE the same card and a `<ul>` may hold
-           nothing but `<li>`. The products table card is built the same way
-           (`productos/page.tsx:505`). `overflow-hidden` is what keeps the row
-           hover and the dividers inside the 12px radius. */
+        /* `ADMIN_CARD` on the outer wrapper, the mockup's own table inside —
+           the owner's third pass turned the card list into a real `<table>`:
+           a `<thead>` names the columns (three of them sort), cells align by
+           column instead of by fixed guess-width tracks, and the footer sits
+           in a `<tfoot>` of the same table. `overflow-x-auto` on its own
+           wrapper: the drawer-width fallback is a sideways scroll INSIDE the
+           card, never a page that scrolls sideways. */
         <div className={`${ADMIN_CARD} mt-[18px] overflow-hidden`}>
-          <ul className="divide-y divide-[#F4F0EC]">
+          <div className="overflow-x-auto">
+            <table className="w-full text-[13px]">
+              <thead>
+                <tr className="text-left text-[11.5px] text-ink-soft">
+                  <th
+                    className="py-2.5 pl-[18px] pr-3 font-medium whitespace-nowrap"
+                    aria-sort={
+                      sort === "num"
+                        ? dir === "asc"
+                          ? "ascending"
+                          : "descending"
+                        : undefined
+                    }
+                  >
+                    <Link
+                      href={sortHref("num")}
+                      className="transition-colors hover:text-brand-ink"
+                    >
+                      {t("colNumber")}
+                      {sort === "num" && (dir === "desc" ? " ▼" : " ▲")}
+                    </Link>
+                  </th>
+                  <th
+                    className="px-3 py-2.5 font-medium whitespace-nowrap"
+                    aria-sort={
+                      sort === "fecha"
+                        ? dir === "asc"
+                          ? "ascending"
+                          : "descending"
+                        : undefined
+                    }
+                  >
+                    <Link
+                      href={sortHref("fecha")}
+                      className="transition-colors hover:text-brand-ink"
+                    >
+                      {t("colDate")}
+                      {sort === "fecha" && (dir === "desc" ? " ▼" : " ▲")}
+                    </Link>
+                  </th>
+                  <th className="px-3 py-2.5 font-medium">{t("colClient")}</th>
+                  <th className="px-3 py-2.5 font-medium">{t("lines")}</th>
+                  <th className="px-3 py-2.5 font-medium">{t("print.link")}</th>
+                  <th className="px-3 py-2.5 font-medium">{t("colStatus")}</th>
+                  <th
+                    className="py-2.5 pl-3 pr-[18px] text-right font-medium whitespace-nowrap"
+                    aria-sort={
+                      sort === "importe"
+                        ? dir === "asc"
+                          ? "ascending"
+                          : "descending"
+                        : undefined
+                    }
+                  >
+                    <Link
+                      href={sortHref("importe")}
+                      className="transition-colors hover:text-brand-ink"
+                    >
+                      {t("colAmount")}
+                      {sort === "importe" && (dir === "desc" ? " ▼" : " ▲")}
+                    </Link>
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
             {orders.map((order) => {
               const lines = linesByOrder.get(order.id) ?? [];
               const bridgeFailure = failuresByOrder.get(order.id);
@@ -661,76 +840,24 @@ export default async function StaffOrdersPage({
                     })}
                   </ul>
                 ) : null;
-              return (
-                // The queue is read by scanning down it, so the row answers the
-                // pointer the way an admin table does. The tint reaches the
-                // full width of the card on its own: the card has no padding
-                // and every row carries the mockup's 18px.
-                //
-                // ONE LINE of card until somebody opens it — the owner's
-                // compaction call (2026-08-20). Everything the row says sits
-                // on a single `items-center` line: number · date · restaurant
-                // and meta on the left, then 明细 · 打印 · status · money as
-                // one control cluster on the right (`queue-row.tsx`). The
-                // stacked two-column header this replaces measured ~80px;
-                // this one is a 24px line in `py-2.5`, and it wraps — on a
-                // 390px drawer the cluster drops under the name rather than
-                // clipping it.
-                <li
-                  key={order.id}
-                  className="px-[18px] py-2.5 transition-colors hover:bg-[#FCFBFA]"
-                >
-                  <QueueRow
-                    lines={linesFold}
-                    toggleLabel={t("orderLines", { n: lines.length })}
-                    toggleAria={t("orderLinesFor", { n: order.order_number })}
-                    printHref={`/${locale}/staff/pedidos/${order.id}/imprimir`}
-                    printLabel={t("print.link")}
-                    printAria={t("print.linkFor", { n: order.order_number })}
-                    badge={<OrderStatusBadge status={order.status} />}
-                    price={
-                      // Money keeps the row's biggest type and its
-                      // `tabular-nums` — the figure a staff member checks
-                      // against the albarán, digit under digit down the queue.
-                      <p className="font-semibold tabular-nums">
-                        <span className="sr-only">{tCart("subtotal")}: </span>
-                        {formatEuros(order.subtotal_cents, locale)}
-                      </p>
-                    }
-                  >
-                    {/* Two SHALLOW stacks, the owner's arrangement
-                        (2026-08-20 round two): date under the number, the ERP
-                        identifiers under the restaurant. `font-num` is for the
-                        DIGITS: Archivo carries no CJK, so 「订单」 falls back
-                        to the system sans and the number takes the numeral
-                        face. The date is absolute and clockless — the number
-                        above it already ranks two orders of one day, and 全部
-                        reaches back over orders of any age, where a bare 08-11
-                        without a year is the one thing here that could be read
-                        wrong. Labelled for a screen reader only; in this
-                        position nothing else could be meant. */}
-                    <div className="w-24 shrink-0">
-                      <p className="font-num text-[12.5px] font-semibold">
-                        {tOrders("orderNumber", { n: order.order_number })}
-                      </p>
-                      <p className="mt-0.5 text-[11px] text-muted">
-                        <span className="sr-only">{tOrders("placedAt")}: </span>
-                        {formatOrderDate(order.created_at, locale)}
-                      </p>
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-[13.5px] font-semibold">
-                        {order.companies?.name ?? "—"}
-                      </p>
-                      {meta.length > 0 && (
-                        <p className="mt-0.5 truncate text-[11.5px] text-muted">
-                          {meta.join(" · ")}
-                        </p>
-                      )}
-                    </div>
-                  </QueueRow>
-
-                  {order.customer_note && (
+              /**
+               * Everything that used to render UNDER the card row, now the
+               * content of the fold `<tr>`: the lines, the customer's note,
+               * the failure box and the action forms. `null` when the order
+               * has none of them — which is also the no-toggle case, so a row
+               * with nothing to open never grows a dead button. The action
+               * forms moving in here is deliberate: on 待确认 the staff member
+               * opens the fold to CHECK THE LINES before confirming anyway,
+               * and the one row the table shows stays one row tall.
+               */
+              const fold =
+                linesFold !== null ||
+                order.customer_note ||
+                order.status === "bridge_failed" ||
+                cancellable ? (
+                  <div>
+                    {linesFold}
+                    {order.customer_note && (
                     <p className="mt-2 text-[12.5px]">
                       {t("customerNote")}: {order.customer_note}
                     </p>
@@ -864,36 +991,92 @@ export default async function StaffOrdersPage({
                       </button>
                     </form>
                   )}
-                </li>
+                  </div>
+                ) : null;
+
+              return (
+                <QueueRow
+                  key={order.id}
+                  number={
+                    <span className="font-num text-[12.5px] font-semibold">
+                      {order.order_number}
+                    </span>
+                  }
+                  date={formatOrderDate(order.created_at, locale)}
+                  client={
+                    <>
+                      <p className="truncate text-[13.5px] font-semibold">
+                        {order.companies?.name ?? "—"}
+                      </p>
+                      {meta.length > 0 && (
+                        <p className="mt-0.5 truncate text-[11.5px] text-muted">
+                          {meta.join(" · ")}
+                        </p>
+                      )}
+                    </>
+                  }
+                  toggleLabel={t("lines")}
+                  toggleAria={t("orderLinesFor", { n: order.order_number })}
+                  printHref={`/${locale}/staff/pedidos/${order.id}/imprimir`}
+                  printLabel={t("print.link")}
+                  printAria={t("print.linkFor", { n: order.order_number })}
+                  badge={<OrderStatusBadge status={order.status} />}
+                  price={
+                    <>
+                      <span className="sr-only">{tCart("subtotal")}: </span>
+                      {formatEuros(order.subtotal_cents, locale)}
+                    </>
+                  }
+                  fold={fold}
+                />
               );
             })}
-          </ul>
+              </tbody>
 
-          {/* The truth this page has never told. It reads the newest
-              `PAGE_SIZE` = 50 orders of the selected view, so a tab holding 214
-              of them has always looked, from here, like a tab holding 50. The
-              chip's count is the size of the view; this says how much of it is
-              on screen, and only when that count actually arrived — computed
-              from `orders.length` instead it would print 共 50 单 for those 214,
-              which is the very lie the figure is here to remove. The mockup's
-              numbered pager (‹ 1 2 … ›,
-              `docs/design/dada-staff-admin.dc.html:242-248`) is not built: the plan's
-              A4 OUT list has it — "numbered pager (the 50-cap is now HONEST in
-              the footer; real pagination is an owner-priority follow-up)"
-              (`docs/superpowers/plans/2026-08-19-14-staff-admin-redesign.md`,
-              Task A4, :94) — so until it lands the honest sentence is the whole
-              of the fix. */}
-          {activeCount !== null && (
-            <p className="border-t border-[#F4F0EC] px-[18px] py-3.5 text-xs text-muted">
-              <span>{t("queueTotal", { n: activeCount })}</span>
-              {activeCount > PAGE_SIZE && (
-                <>
-                  {" · "}
-                  <span>{t("queueShowing", { m: PAGE_SIZE })}</span>
-                </>
+              {/* The truth this page has never told. It reads the newest
+                  `PAGE_SIZE` = 50 orders of the selected view, so a tab holding
+                  214 of them has always looked, from here, like a tab holding
+                  50. The chip's count is the size of the view; this says how
+                  much of it is on screen, and only when that count actually
+                  arrived. Under a SEARCH the chip count no longer describes
+                  what is on screen at all, so the footer switches to the one
+                  honest figure it has — how many rows the search returned,
+                  which the 50-cap can still truncate and the cap sentence
+                  still covers. A numbered pager stays a recorded follow-up. */}
+              {(q || activeCount !== null) && (
+                <tfoot>
+                  <tr className="border-t border-[#F4F0EC]">
+                    <td
+                      colSpan={7}
+                      className="px-[18px] py-3.5 text-xs text-muted"
+                    >
+                      {q ? (
+                        <>
+                          <span>{t("searchCount", { n: orders.length })}</span>
+                          {orders.length >= PAGE_SIZE && (
+                            <>
+                              {" · "}
+                              <span>{t("queueShowing", { m: PAGE_SIZE })}</span>
+                            </>
+                          )}
+                        </>
+                      ) : activeCount !== null ? (
+                        <>
+                          <span>{t("queueTotal", { n: activeCount })}</span>
+                          {activeCount > PAGE_SIZE && (
+                            <>
+                              {" · "}
+                              <span>{t("queueShowing", { m: PAGE_SIZE })}</span>
+                            </>
+                          )}
+                        </>
+                      ) : null}
+                    </td>
+                  </tr>
+                </tfoot>
               )}
-            </p>
-          )}
+            </table>
+          </div>
         </div>
       )}
     </StaffShell>

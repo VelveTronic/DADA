@@ -1,44 +1,33 @@
 import type { Metadata, Viewport } from "next";
 import { NextIntlClientProvider, hasLocale } from "next-intl";
 import { getTranslations, setRequestLocale } from "next-intl/server";
-import { Archivo, Noto_Sans } from "next/font/google";
+import { Inter } from "next/font/google";
 import { notFound } from "next/navigation";
 import { routing } from "@/i18n/routing";
 import "../globals.css";
 
 /**
- * The portal's TWO webfonts, and neither is a CJK face: shipping a Chinese
+ * The portal's ONE webfont, and it is not a CJK face: shipping a Chinese
  * webfont would cost megabytes on the 4G a restaurant orders from, so the
  * Chinese glyphs stay on the faces the customer's phone already has.
  *
- * - **Archivo** draws the NUMERALS — quantities, counts, money, order numbers —
- *   through the `font-num` utility that `--font-num` in `globals.css` generates.
- * - **Noto Sans** leads the BODY stack (`globals.css`) for the Latin range only:
- *   product names here are half Spanish, and before it the Latin glyphs came
- *   from whichever CJK font the OS resolved first — Microsoft YaHei's Latin on
- *   the office Windows machines — which the owner read as cramped and heavy
- *   (2026-08-19). Noto Sans is drawn by the same program as Noto Sans SC, so
- *   the two scripts sit on one visual line without shipping the CJK half.
+ * **Inter**, and specifically because the owner pointed at 4seller.com and
+ * asked for its type (2026-08-20). Measured off that site's computed styles:
+ * body, headings and buttons are all `Inter, -apple-system, …` with NO CJK
+ * webfont — their Chinese rides the system faces exactly as ours does — plus a
+ * display face (Bricolage Grotesque) used only on marketing headlines, which an
+ * ERP back office has no use for. Inter replaces BOTH previous webfonts: the
+ * body's Latin (Noto Sans) and the numeral face (Archivo) — its tabular figures
+ * are first-rate, so every `font-num`/`tabular-nums` site keeps lining up and
+ * the portal ships one font instead of two.
  *
- * `subsets: ["latin"]` on both is the whole point: digits and Latin (Spanish
- * accents included) only, self-hosted by `next/font` so the browser never talks
- * to Google.
- *
- * No `weight`, deliberately — that is what asks for the VARIABLE cut: the same
- * woff2 chunks Google serves either way (latin splits into three unicode
- * ranges), but declared once across the whole 100–900 axis instead of pinned to
- * per-weight instances. Optional axes (Archivo's `wdth`, Noto Sans's `wdth`)
- * are left out: `axes` is opt-in, so only `wght` comes down.
+ * `subsets: ["latin"]`: digits and Latin (Spanish accents included) only,
+ * self-hosted by `next/font` so the browser never talks to Google. No `weight`
+ * — that is what asks for the VARIABLE cut, one declaration across 100–900.
  */
-const archivo = Archivo({
+const inter = Inter({
   subsets: ["latin"],
-  variable: "--font-archivo",
-  display: "swap",
-});
-
-const notoSans = Noto_Sans({
-  subsets: ["latin"],
-  variable: "--font-noto",
+  variable: "--font-inter",
   display: "swap",
 });
 
@@ -103,16 +92,15 @@ export default async function LocaleLayout({
   setRequestLocale(locale);
 
   return (
-    // The font variables go on `<html>`, not on `<body>`, and that placement is
+    // The font variable goes on `<html>`, not on `<body>`, and that placement is
     // load-bearing rather than taste. `--font-num` is declared by `@theme` on
     // `:root`, and a custom property's `var()` is substituted against the element
-    // it is DECLARED on: with `--font-archivo` set one level down on `<body>`,
+    // it is DECLARED on: with `--font-inter` set one level down on `<body>`,
     // `--font-num` computes to the guaranteed-invalid value at `:root`, every
     // descendant inherits that, and `font-num` silently falls back to the body
-    // stack — the numerals would look right-ish and never be Archivo. Declaring
-    // the variables here puts them in scope for the theme block that reads them.
-    // (Next's own Tailwind example does the same.)
-    <html lang={locale} className={`${archivo.variable} ${notoSans.variable}`}>
+    // stack. Declaring the variable here puts it in scope for the theme block
+    // that reads it. (Next's own Tailwind example does the same.)
+    <html lang={locale} className={inter.variable}>
       <body>
         <NextIntlClientProvider>{children}</NextIntlClientProvider>
       </body>

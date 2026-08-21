@@ -4,32 +4,30 @@ import Link from "next/link";
 import { useId, useState, type ReactNode } from "react";
 
 /**
- * The queue card's HEADER ROW and its fold, as one client leaf.
+ * ONE order of the queue TABLE: the main `<tr>` and, when opened, the fold
+ * `<tr>` under it — a client leaf because the fold needs an open flag, and a
+ * FRAGMENT of two rows because that is the only shape a disclosure can take
+ * inside a `<tbody>` (a wrapper element between `tbody` and `tr` is invalid
+ * HTML and React would hydrate a browser-repaired tree).
  *
- * It exists because of a containment problem `<details>` cannot solve: the
- * owner's layout (2026-08-20) puts the 明细 toggle IN the right-hand control
- * cluster — one horizontal line of 明细 · 打印 · status · money — while the
- * lines it opens span the card's full width BELOW that line. A `<summary>`
- * lives inside its `<details>`, so with the native element either the toggle
- * leaves the cluster or the lines are squeezed into it. This component holds
- * the open flag instead and renders the two halves where the layout wants
- * them; everything inside the row and the fold is still server-rendered and
- * arrives as props.
+ * The owner's third pass (2026-08-20) turned the queue from cards into this
+ * table: a real `<thead>` names the columns, the cells align by column instead
+ * of by fixed-track guesswork — which is also what retired the previous
+ * round's uneven-gap complaint, since a table's columns share their widths by
+ * construction — and the 明细 toggle lost its `(7 项)` count, which is what
+ * used to wrap it onto two lines inside its track. The count was the
+ * withheld-count rule's carrier; the rule survives without it: the fold now
+ * holds everything that used to render under the card (lines, note, failure
+ * box, the action forms), and `fold == null` — nothing to show — is still the
+ * one case that draws no toggle at all.
  *
- * The toggle carries `aria-expanded`/`aria-controls`, which is the half of
- * `<details>` semantics worth keeping; the fold is plain conditional render,
- * so a closed card costs the DOM nothing — same as `<details>` pre-Chromium
- * `hidden=until-found`, and nothing on this queue is searched with Ctrl+F
- * while folded.
- *
- * The cluster is a fixed-track grid (see its note below) and the two actions
- * are BUTTONS with fills — 明细 on the dim ground, 打印 on the soft brand —
- * badge-weight beside the status chip, per the owner's second pass. The row
- * still holds two shallow stacks of card height until somebody opens it.
+ * Everything in every cell arrives server-rendered as props; this file owns
+ * the open flag and the two glyph buttons, nothing else.
  */
 export function QueueRow({
-  children,
-  lines,
+  number,
+  date,
+  client,
   toggleLabel,
   toggleAria,
   printHref,
@@ -37,49 +35,47 @@ export function QueueRow({
   printAria,
   badge,
   price,
+  fold,
 }: {
-  /** The left half: number, date, restaurant, meta — server-rendered. */
-  children: ReactNode;
-  /** The fold's content, or null when the line read came back short. */
-  lines: ReactNode;
-  /** 明细 (7 项) — also the withheld-count rule's carrier: null lines, no toggle. */
+  /** The order number cell, pre-composed (sr-label + visible figure). */
+  number: ReactNode;
+  date: ReactNode;
+  /** Restaurant name with its meta line under it. */
+  client: ReactNode;
   toggleLabel: string;
-  /** …and the same with the order number in it, for a screen reader. */
+  /** …with the order number in it, for a screen reader. */
   toggleAria: string;
   printHref: string;
   printLabel: string;
   printAria: string;
   badge: ReactNode;
   price: ReactNode;
+  /**
+   * The fold: lines, customer note, failure box and the action forms — or
+   * null when the order has none of those, which draws no toggle.
+   */
+  fold: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
   const foldId = useId();
 
   return (
     <>
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-0.5">
-          {children}
-        </div>
-
-        {/* A GRID of fixed tracks, not a flex run — the owner's alignment
-            call (2026-08-20 round two): down fifty rows, 明细 sits under 明细
-            and money under money, whatever the restaurant's name did to the
-            left half. Every cell is centred in its track; the track widths are
-            sized for the widest content either locale produces (明细（88 项）/
-            Líneas (88), the 打印 pill, 已进ERP, a four-figure euro amount).
-            An order whose lines failed to read keeps an EMPTY first cell
-            rather than sliding the other three left — the withheld-count rule
-            must not un-align the column it withheld from. */}
-        <div className="ml-auto grid shrink-0 grid-cols-[7rem_5.5rem_5rem_6rem] items-center justify-items-center gap-x-2">
-          {lines != null ? (
+      <tr className="border-t border-[#F4F0EC] align-middle transition-colors hover:bg-[#FCFBFA]">
+        <td className="py-2.5 pl-[18px] pr-3 whitespace-nowrap">{number}</td>
+        <td className="px-3 py-2.5 text-[11px] whitespace-nowrap text-muted">
+          {date}
+        </td>
+        <td className="max-w-80 px-3 py-2.5">{client}</td>
+        <td className="px-3 py-2.5">
+          {fold != null && (
             <button
               type="button"
               aria-expanded={open}
               aria-controls={foldId}
               aria-label={toggleAria}
               onClick={() => setOpen((value) => !value)}
-              className="flex h-8 items-center gap-1 rounded-lg border border-border-strong bg-surface-dim px-2.5 text-[12.5px] text-ink-soft transition-colors hover:border-brand hover:text-brand-ink"
+              className="flex h-8 items-center gap-1 rounded-lg border border-border-strong bg-surface-dim px-2.5 text-[12.5px] whitespace-nowrap text-ink-soft transition-colors hover:border-brand hover:text-brand-ink"
             >
               {/* The chevron turns to say which way the press goes. */}
               <svg
@@ -96,19 +92,17 @@ export function QueueRow({
               </svg>
               {toggleLabel}
             </button>
-          ) : (
-            <span aria-hidden />
           )}
-
+        </td>
+        <td className="px-3 py-2.5">
           {/* The A4 sheet, in a tab of its own so the queue — filter, scroll,
               an open fold — is exactly where it was when the print dialog
-              closes. The soft brand fill is the owner's "make it show" —
-              a badge-weight pill beside the status chip, not a text link. */}
+              closes. */}
           <Link
             href={printHref}
             target="_blank"
             aria-label={printAria}
-            className="flex h-8 items-center gap-1 rounded-lg bg-brand-soft px-2.5 text-[12.5px] font-medium text-brand-ink transition-colors hover:bg-brand hover:text-white"
+            className="flex h-8 w-fit items-center gap-1 rounded-lg bg-brand-soft px-2.5 text-[12.5px] font-medium whitespace-nowrap text-brand-ink transition-colors hover:bg-brand hover:text-white"
           >
             <svg
               viewBox="0 0 16 16"
@@ -126,13 +120,21 @@ export function QueueRow({
             </svg>
             {printLabel}
           </Link>
-
-          {badge}
+        </td>
+        <td className="px-3 py-2.5">{badge}</td>
+        <td className="py-2.5 pr-[18px] pl-3 text-right font-semibold whitespace-nowrap tabular-nums">
           {price}
-        </div>
-      </div>
-
-      {open && lines != null && <div id={foldId}>{lines}</div>}
+        </td>
+      </tr>
+      {open && fold != null && (
+        <tr id={foldId}>
+          {/* No border of its own: the fold reads as the tail of the row above,
+              and the NEXT main row's top border is what closes it. */}
+          <td colSpan={7} className="px-[18px] pt-0 pb-3.5">
+            {fold}
+          </td>
+        </tr>
+      )}
     </>
   );
 }

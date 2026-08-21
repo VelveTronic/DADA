@@ -81,25 +81,22 @@
   --color-brand-ink: #b31710;
   --color-brand-soft: #fdecea;
   --radius-card: 14px;
-  /* Archivo — loaded in `[locale]/layout.tsx` — is here for NUMERALS:
-     quantities, counts, money, order numbers. Tailwind turns this key into the
-     `font-num` utility. */
-  --font-num: var(--font-archivo), ui-sans-serif, sans-serif;
+  /* Inter — loaded in `[locale]/layout.tsx` — doubles as the numeral face:
+     quantities, counts, money, order numbers keep their `font-num` +
+     `tabular-nums` sites, and Inter's tabular figures are what lines them up.
+     The token survives the font swap so no call site changes. */
+  --font-num: var(--font-inter), ui-sans-serif, sans-serif;
 }
 
 body {
   background: var(--color-background);
   color: var(--color-ink);
-  /* Noto Sans (latin subset only, loaded beside Archivo in
-     `[locale]/layout.tsx`) leads the stack so the LATIN half of this bilingual
-     catalogue — Spanish product names above all — stops rendering in whatever
-     Latin glyphs the first CJK face happens to carry: Microsoft YaHei's, on the
-     office Windows machines, which the owner read as cramped and heavy
-     (2026-08-19). Chinese text falls through it untouched to the system CJK
-     faces behind it — no CJK webfont is shipped, and on the Chinese Android and
-     iOS handsets this portal is used on those are the right faces anyway. Noto
-     Sans and Noto Sans SC are drawn as one family, so on devices that have the
-     SC face the two scripts share a visual line. */
-  font-family: var(--font-noto), "PingFang SC", "Hiragino Sans GB",
+  /* Inter (latin subset only) leads the stack — the owner pointed at
+     4seller.com and asked for its type (2026-08-20), and that is measurably
+     Inter over system CJK. The Latin half of this bilingual catalogue renders
+     in it; Chinese falls through untouched to the system CJK faces behind it —
+     no CJK webfont is shipped, and on the Chinese Android and iOS handsets
+     this portal is used on those are the right faces anyway. */
+  font-family: var(--font-inter), "PingFang SC", "Hiragino Sans GB",
     "Microsoft YaHei", "Noto Sans SC", sans-serif;
 }
