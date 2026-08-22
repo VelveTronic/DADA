@@ -5,6 +5,10 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { routing } from "@/i18n/routing";
 import { assertStaff } from "@/lib/auth/assert-staff";
+import {
+  CATALOG_IMAGE_BUCKET,
+  validateCatalogImage,
+} from "@/lib/catalog-image";
 import { parseCategoryId } from "@/lib/categories";
 import { formText } from "@/lib/form-text";
 import { isUuid } from "@/lib/orders";
@@ -72,6 +76,7 @@ const text = formText;
 function revalidateProductPaths() {
   for (const locale of routing.locales) {
     revalidatePath(`/${locale}/staff/productos`);
+    revalidatePath(`/${locale}/categorias`);
     revalidatePath(`/${locale}/catalogo`);
     revalidatePath(`/${locale}/buscar`);
     revalidatePath(`/${locale}/carrito`);
@@ -264,19 +269,6 @@ export async function setProductWeighed(formData: FormData) {
  * an always-true flag behind `is_orderable`; nothing writes it any more.
  */
 
-/** The three formats the photo pipeline already produces, and nothing else. */
-const IMAGE_TYPES: Record<string, string> = {
-  "image/jpeg": "jpg",
-  "image/png": "png",
-  "image/webp": "webp",
-};
-
-/** 5 MB. A catalogue photo is ~40 KB; this is a guard, not a budget. */
-const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
-
-/** The public bucket the 2,956 imported photos already live in. */
-const IMAGE_BUCKET = "product-images";
-
 /**
  * Everything about one product that a staff member may change, in one save.
  *
@@ -355,21 +347,22 @@ export async function updateProduct(formData: FormData): Promise<void> {
   let imageUrl: string | null = null;
   const file = formData.get("image");
   if (file instanceof File && file.size > 0) {
-    const ext = IMAGE_TYPES[file.type];
-    if (!ext) return finishEdit(locale, productId, "IMAGE_TYPE");
-    if (file.size > MAX_IMAGE_BYTES) {
-      return finishEdit(locale, productId, "IMAGE_TOO_LARGE");
+    const checkedImage = validateCatalogImage(file);
+    if (!checkedImage.ok) {
+      return finishEdit(locale, productId, checkedImage.code);
     }
     const stem = codart.replace(/[^A-Za-z0-9._-]/g, "_");
-    const path = `${stem}-${Date.now()}.${ext}`;
+    const path = `${stem}-${Date.now()}.${checkedImage.extension}`;
     const upload = await admin.storage
-      .from(IMAGE_BUCKET)
+      .from(CATALOG_IMAGE_BUCKET)
       .upload(path, file, { contentType: file.type, upsert: false });
     if (upload.error) {
       console.error("updateProduct image upload:", upload.error);
       return finishEdit(locale, productId, "UPLOAD_FAILED");
     }
-    imageUrl = admin.storage.from(IMAGE_BUCKET).getPublicUrl(path).data.publicUrl;
+    imageUrl = admin.storage
+      .from(CATALOG_IMAGE_BUCKET)
+      .getPublicUrl(path).data.publicUrl;
   }
 
   // Only the keys that carry words: an empty zh on a Spanish-only product must

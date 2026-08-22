@@ -1,7 +1,6 @@
 import type { Locale } from "next-intl";
 import { getTranslations, setRequestLocale } from "next-intl/server";
 import Link from "next/link";
-import { setProductCategory } from "@/app/actions/staff-products";
 import { ProductThumb } from "@/components/product-thumb";
 import { StaffShell } from "@/components/staff-shell";
 import { ADMIN_CARD, ADMIN_TD, BTN_QUIET, FIELD_SM } from "@/components/ui";
@@ -17,27 +16,15 @@ import {
   sortCategories,
 } from "@/lib/categories";
 import { perfRun } from "@/lib/perf";
-import { createAdminClient } from "@/lib/supabase/admin";
 import type { Database } from "@/lib/supabase/database.types";
+import { createServerSupabase } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
 
 /**
- * Rows per page.
- *
- * It also bounds the heaviest thing this page renders, which is not the rows:
- * every row carries a `<select>` offering the WHOLE category list, so the option
- * nodes are `PAGE_SIZE × (CATEGORY_LIMIT + 1)` in the worst case and
- * 50 × (61 + 未分类) = 3,100 today, plus the 63 in the filter select above the
- * table — 3,163 on a full page.
- *
- * MEASURED against the real 61-category seed, in the browser: those 3,100 row
- * options are 126.3 KiB of zh markup and 138.5 KiB of es (the Spanish names are
- * longer), 128.8 / 141.3 KiB with the filter select's own 63. It compresses to
- * near nothing — the whole document is 823 KiB zh / 877 KiB es raw and 53 / 63
- * KiB gzipped — because it is the same 61 strings repeated fifty times, which is
- * exactly what a sliding window is for. The ceiling is what matters: this cost
- * is `PAGE_SIZE × CATEGORY_LIMIT` and moves only when one of those two does.
+ * Rows per page. Category assignment is read-only on this list; editing happens
+ * on the product page, so the table no longer repeats the full category select
+ * fifty times.
  */
 const PAGE_SIZE = 50;
 
@@ -95,10 +82,8 @@ const CHIP_ON_SALE = `${CHIP_BASE} bg-[#F0F4F0] text-[#4A6A4E]`;
 const CHIP_OFF_SALE = `${CHIP_BASE} bg-surface-dim text-muted`;
 
 /**
- * Exactly the columns this page renders. The six price columns are readable only
- * through the service-role client — authenticated holds no column privilege on
- * them — which is why the query below is an admin query, and why it runs only
- * after `requireStaff`.
+ * Exactly the columns this page renders. Prices deliberately stay out of this
+ * list; their read-only Wingest snapshot remains available in the editor.
  */
 type StaffProductRow = Pick<
   Database["public"]["Tables"]["products"]["Row"],
@@ -111,25 +96,7 @@ type StaffProductRow = Pick<
   | "is_available"
   | "image_url"
   | "category_id"
-  | "price_1_cents"
-  | "price_2_cents"
-  | "price_3_cents"
-  | "price_4_cents"
-  | "price_5_cents"
-  | "price_6_cents"
 >;
-
-/** How many of the six tarifa tiers actually carry a price. */
-function pricedTiers(p: StaffProductRow): number {
-  return [
-    p.price_1_cents,
-    p.price_2_cents,
-    p.price_3_cents,
-    p.price_4_cents,
-    p.price_5_cents,
-    p.price_6_cents,
-  ].filter((cents) => cents != null).length;
-}
 
 export default async function StaffProductsPage({
   params,
@@ -142,9 +109,8 @@ export default async function StaffProductsPage({
   const { q: rawQ, page: rawPage, cat: rawCat } = await searchParams;
   setRequestLocale(locale);
   const perf = perfRun(`/${locale}/staff/productos`);
-  // Sequential on purpose: the queries below are on the SERVICE-ROLE client —
-  // the six price tiers are reachable no other way — so they run only once the
-  // guard has said this caller is staff.
+  // The session guard completes before the catalogue reads; all selected
+  // columns are staff-readable under RLS and no service-role client is needed.
   const { staffUser } = await requireStaff(locale);
   const t = await getTranslations("staff");
   // Shared catalog vocabulary — control labels, the weighed badge, the pager,
@@ -156,13 +122,13 @@ export default async function StaffProductsPage({
   const page = Math.max(1, Number.parseInt(rawPage ?? "1", 10) || 1);
   const catParam = rawCat ?? "";
 
-  const admin = createAdminClient();
+  const supabase = await createServerSupabase();
 
   const productsQuery = (filter: CatFilter) => {
-    let query = admin
+    let query = supabase
       .from("products")
       .select(
-        "id, codart, name, unit, units_per_case, is_weighed, is_available, image_url, category_id, price_1_cents, price_2_cents, price_3_cents, price_4_cents, price_5_cents, price_6_cents",
+        "id, codart, name, unit, units_per_case, is_weighed, is_available, image_url, category_id",
         { count: "exact" },
       );
     if (q) {
@@ -230,7 +196,7 @@ export default async function StaffProductsPage({
   const [categoryResult, totalResult, racedProducts] = await Promise.all([
     perf.step(
       "categories",
-      admin
+        supabase
         .from("categories")
         .select("id, erp_code, name, parent_label, sort_order, is_active")
         // The same bound and the same order as `/staff/categorias` and the move
@@ -245,7 +211,7 @@ export default async function StaffProductsPage({
     wantsTotal
       ? perf.step(
           "total",
-          admin.from("products").select("id", { count: "exact", head: true }),
+          supabase.from("products").select("id", { count: "exact", head: true }),
         )
       : null,
     needsCategories
@@ -260,9 +226,7 @@ export default async function StaffProductsPage({
     console.error("staff products total count:", totalResult.error);
   }
 
-  // THE order — the customer's rail sorts with this same function, so the chips
-  // here, the options in every row's select and the rail a restaurant scrolls
-  // cannot drift apart (see `lib/categories.ts`).
+  // THE order — shared by the filter, read-only table labels and customer rail.
   const categories = sortCategories(categoryResult.data ?? [], locale);
 
   /**
@@ -333,52 +297,33 @@ export default async function StaffProductsPage({
       ? category.label
       : t("categoryHidden", { name: category.label });
 
-  /**
-   * The label of ONE row's current filing, for the `title` on its select.
-   *
-   * Built off a Map rather than a `find` per row: 50 rows against 61 categories
-   * is 3,050 comparisons a page for a lookup that is a hash. It resolves against
-   * the SAME list the options are drawn from, so an id past `CATEGORY_LIMIT`
-   * misses here exactly as it misses there and both fall back to 未分类 —
-   * whatever the box shows, the tooltip says.
-   */
+  /** One row's read-only category label, resolved in constant time. */
   const categoryById = new Map(categories.map((c) => [c.id, c]));
   const filingLabel = (categoryId: number | null) => {
     const category = categoryId === null ? null : categoryById.get(categoryId);
     return category ? optionLabel(category) : t("uncategorized");
   };
 
-  /**
-   * The category list as the customer's rail reads it — 一级 headings with
-   * their 二级 rows under them — rendered into BOTH selects as `<optgroup>`s.
-   * Same derivation (`groupCategories`, same locale) as the rail, so the
-   * grouping a staff member files under is the grouping a restaurant scrolls.
-   *
-   * Two arrays because the two selects speak different values: the filter
-   * posts `erp_code` (the URL's word) and the per-row form posts the id (the
-   * column's word) — the same split the shipped selects already documented.
-   * Built ONCE and reused: the per-row copy appears 50 times a page, and a
-   * React element is an immutable description, not a mounted node.
-   */
+  /** The same 一级/二级 grouping the customer category navigation uses. */
   const grouped = groupCategories(categories, locale);
-  const categoryOptions = (value: (c: (typeof categories)[number]) => string | number) =>
-    grouped.map((entry) =>
+  const filterOptions = grouped.map((entry) =>
       entry.kind === "group" ? (
         <optgroup key={`g:${entry.label}`} label={entry.label}>
           {entry.children.map((category) => (
-            <option key={category.id} value={value(category)}>
+            <option key={category.id} value={category.erp_code}>
               {optionLabel(category)}
             </option>
           ))}
         </optgroup>
       ) : (
-        <option key={entry.category.id} value={value(entry.category)}>
+        <option
+          key={entry.category.id}
+          value={entry.category.erp_code}
+        >
           {optionLabel(entry.category)}
         </option>
       ),
     );
-  const filterOptions = categoryOptions((category) => category.erp_code);
-  const rowOptions = categoryOptions((category) => category.id);
 
   return (
     <StaffShell
@@ -477,39 +422,33 @@ export default async function StaffProductsPage({
         <div className={`${ADMIN_CARD} mt-[18px] overflow-x-auto`}>
           {/* A real `<table>`, not the mockup's div grid: this is tabular data
               with a header per column, and the grid version gives a screen
-              reader nine unrelated boxes per row. The mockup's rhythm is kept —
+              reader unrelated boxes per row. The mockup's rhythm is kept —
               its column widths, its 42px header, its 64px rows.
 
               Every `<th>` takes `scope="col"`. This is the app's only real data
               table, so the semantics are written out rather than left to a
               browser's heuristic: `scope` is what associates each cell with its
-              header, and it is what lets a screen reader announce 分类 before
-              reading the select in that column. */}
-          <table className="w-full min-w-[900px] text-sm">
+              header, and it lets a screen reader announce 分类 before reading
+              that row's category. */}
+          <table className="w-full min-w-[820px] table-auto text-sm">
             <thead>
               <tr className="border-b border-[#EDE9E5] bg-field text-[11.5px] text-muted">
-                <th scope="col" className={`${TH} pl-[18px]`}>
+                {/* Product name is the only flexible column and owns the spare
+                    desktop width; the operational fields keep compact bounds. */}
+                <th scope="col" className={`${TH} min-w-[300px] pl-[18px]`}>
                   {t("colProduct")}
                 </th>
-                {/* 220px: the 140px select, the 6px gap and the 保存 beside it,
-                    inside the cell's own 24px of padding. A HINT, not a rule —
-                    the table is `table-layout: auto`, so the browser gives the
-                    column what its content needs and takes it off the flexible
-                    商品 column: measured at 1280 it settles at 220 in zh and 232
-                    in es, where the button reads «Guardar», and the card still
-                    does not clip. */}
-                <th scope="col" className={`${TH} w-[220px]`}>
+                <th scope="col" className={`${TH} w-[135px] whitespace-nowrap`}>
+                  {t("colSku")}
+                </th>
+                <th scope="col" className={`${TH} w-[190px]`}>
                   {t("colCategory")}
                 </th>
-                <th scope="col" className={`${TH} w-[110px]`}>
+                <th scope="col" className={`${TH} w-[105px]`}>
                   {t("colSpec")}
                 </th>
-                <th scope="col" className={`${TH} w-[110px]`}>
+                <th scope="col" className={`${TH} w-[105px]`}>
                   {t("colStatus")}
-                </th>
-                {/* A count, so it is aligned as one — with its column. */}
-                <th scope="col" className={`${TH} w-[120px] text-right`}>
-                  {t("colPrices")}
                 </th>
                 {/* Named for screen readers, blank on screen: the column holds
                     only buttons, which label themselves.
@@ -523,7 +462,7 @@ export default async function StaffProductsPage({
                     cell. */}
                 <th
                   scope="col"
-                  className={`${TH} relative w-[230px] pr-[18px] text-right`}
+                  className={`${TH} relative w-[86px] pr-[18px] text-right`}
                 >
                   <span className="sr-only">{t("colActions")}</span>
                 </th>
@@ -546,96 +485,29 @@ export default async function StaffProductsPage({
                     <td className={`${ADMIN_TD} pl-[18px]`}>
                       <div className="flex items-center gap-3">
                         <ProductThumb src={p.image_url} />
-                        <div className="min-w-0">
-                          <p className="text-[13.5px] font-semibold">{name}</p>
-                          {/* The meta line, per the mockup: the ERP's own word
-                              for the code it prints on every document. `SKU` is
-                              left untranslated deliberately — it is the same
-                              three letters in both of this portal's languages,
-                              and the mockup's Chinese screen prints it too.
-                              What used to ride here and no longer does is the
-                              unit: it has a column of its own now (规格). */}
-                          <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted">
-                            <span className="font-num">SKU {p.codart}</span>
-                            {p.is_weighed && (
-                              <span className="rounded-md bg-amber-100 px-1.5 py-0.5 text-amber-800">
-                                {tCatalog("weighed")}
-                              </span>
-                            )}
-                          </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="line-clamp-2 break-words text-[13.5px] font-semibold leading-5">
+                            {name}
+                          </p>
+                          {p.is_weighed && (
+                            <span className="mt-1 inline-flex rounded-md bg-amber-100 px-1.5 py-0.5 text-[11px] text-amber-800">
+                              {tCatalog("weighed")}
+                            </span>
+                          )}
                         </div>
                       </div>
                     </td>
 
-                    {/* THE feature. One form per row, an explicit 保存, and no
-                        client leaf: every mutation on this page is a form POST,
-                        and a select that submitted on `change` would fire a
-                        write per option as a keyboard user arrows through the
-                        62.
+                    <td className={`${ADMIN_TD} font-num text-[12.5px] text-ink-soft`}>
+                      <span className="whitespace-nowrap">{p.codart}</span>
+                    </td>
 
-                        BOTH controls are named after the product now. The select
-                        always was; the button was not, so a screen reader met
-                        fifty controls that all announced 「保存」 and nothing
-                        else — the same list of identical buttons `roleFor` /
-                        `saveRoleFor` already fixed on `/staff/usuarios`, and the
-                        pair is copied from there. */}
-                    <td className={ADMIN_TD}>
-                      <form
-                        action={setProductCategory}
-                        className="flex items-center gap-1.5"
-                      >
-                        <input type="hidden" name="product_id" value={p.id} />
-                        <select
-                          name="category"
-                          // The row's own filing, or 未分类. A `category_id`
-                          // pointing past `CATEGORY_LIMIT` would have no option
-                          // to select and the browser would fall back to the
-                          // first one — unreachable at 61 categories against a
-                          // bound of 500, and the bound is shared so that stays
-                          // true. `filing` above resolves against the same list,
-                          // so the title agrees with whatever the box shows.
-                          defaultValue={
-                            p.category_id === null ? "" : String(p.category_id)
-                          }
-                          aria-label={t("categoryFor", { name })}
-                          // The FULL filing, on hover and on focus, because the
-                          // box cannot hold it.
-                          //
-                          // The width arithmetic, MEASURED in the browser at
-                          // 12.5px: the control's chrome is 38.5px — 2px of
-                          // border, 16px of `FIELD_SM` padding and the ~20.5px
-                          // Chromium reserves for the native dropdown arrow — so
-                          // a 140px box shows 101.5px of text and the 104px this
-                          // shipped as showed 65.5px. «Especial restaurante
-                          // tailandés» is the longest name in the 61-row freepos
-                          // seed (30 characters, 167.5px), and 140px shows 17 of
-                          // them ("Especial restaura") where 104px showed 11
-                          // ("Especial re") — a name cut before its own noun,
-                          // and no room at all for the （已隐藏） marker a hidden
-                          // category carries at the END of its label. Chinese
-                          // advances a flat 12.5px per glyph, so ~8 fit.
-                          //
-                          // The pixels stop there: the column is 220px and the
-                          // 保存 beside it is the rest of them. Seventeen
-                          // characters is enough to TELL two filings apart, which
-                          // is what the column is scanned for; what recovers the
-                          // whole label is this title, and the OPEN dropdown,
-                          // which every browser lays out at the width of its
-                          // longest option rather than the width of the box.
-                          title={filing}
-                          className={`${FIELD_SM} w-[140px] text-[12.5px]`}
-                        >
-                          <option value="">{t("uncategorized")}</option>
-                          {rowOptions}
-                        </select>
-                        <button
-                          type="submit"
-                          aria-label={t("saveCategoryFor", { name })}
-                          className={`${BTN_QUIET} whitespace-nowrap`}
-                        >
-                          {t("saveCategory")}
-                        </button>
-                      </form>
+                    {/* Read-only here: category changes join all other product
+                        mutations on the dedicated editor and its single Save. */}
+                    <td className={`${ADMIN_TD} text-[12.5px] text-ink-soft`}>
+                      <span className="line-clamp-2" title={filing}>
+                        {filing}
+                      </span>
                     </td>
 
                     {/* The factor rides on the unit, exactly as the catalogue
@@ -659,12 +531,6 @@ export default async function StaffProductsPage({
                       </span>
                     </td>
 
-                    <td
-                      className={`${ADMIN_TD} text-right font-num text-[12.5px] tabular-nums`}
-                    >
-                      {pricedTiers(p)}/6
-                    </td>
-
                     {/* ONE control, where four used to be (owner, 2026-08-21:
                         「右侧按钮太多」). 停售 and 称重 became checkboxes on the
                         editor, 设为当前 stopped existing with the variant
@@ -673,6 +539,7 @@ export default async function StaffProductsPage({
                     <td className={`${ADMIN_TD} pr-[18px] text-right`}>
                       <Link
                         href={`/${locale}/staff/productos/${p.id}`}
+                        aria-label={t("editFor", { name })}
                         className={BTN_QUIET}
                       >
                         {t("edit")}

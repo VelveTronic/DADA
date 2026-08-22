@@ -52,7 +52,13 @@ export async function ProductGrid({
                   className="object-cover"
                 />
               ) : (
-                <div aria-hidden className="size-full bg-border" />
+                <Image
+                  src="/brand/dada-logo.png"
+                  alt=""
+                  fill
+                  sizes="(min-width: 1024px) 380px, calc(50vw - 54px)"
+                  className="bg-surface-dim object-contain p-[22%] opacity-50"
+                />
               )}
 
               {product.is_orderable && (

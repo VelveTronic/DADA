@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   CAT_NONE,
   CATEGORY_ERRORS,
+  CATEGORY_LIMIT,
   catNeedsCategories,
   compareCategories,
   groupCategories,
@@ -12,6 +13,7 @@ import {
   moveCategoryInTree,
   parseActiveFlag,
   parseCategoryId,
+  parseCategoryOrder,
   parseMoveDirection,
   parseVisibility,
   resequence,
@@ -387,6 +389,43 @@ describe("parseCategoryId", () => {
     [{}, null],
   ])("%o → %o", (raw, expected) => {
     expect(parseCategoryId(raw)).toBe(expected);
+  });
+});
+
+describe("parseCategoryOrder", () => {
+  it("accepts one bounded JSON array of distinct positive bigint-safe ids", () => {
+    expect(parseCategoryOrder("[7,2,61]")).toEqual([7, 2, 61]);
+  });
+
+  it.each([
+    "",
+    "not-json",
+    "null",
+    "{}",
+    "[]",
+    "[1,1]",
+    "[1,null]",
+    "[1,0]",
+    "[1,-2]",
+    "[1,1.5]",
+    "[1,9007199254740992]",
+  ])("rejects %s", (raw) => {
+    expect(parseCategoryOrder(raw)).toBeNull();
+  });
+
+  it("rejects a collection beyond the page and RPC safety ceiling", () => {
+    expect(
+      parseCategoryOrder(
+        JSON.stringify(
+          Array.from({ length: CATEGORY_LIMIT + 1 }, (_, index) => index + 1),
+        ),
+      ),
+    ).toBeNull();
+  });
+
+  it("rejects non-string form parts without coercing them", () => {
+    expect(parseCategoryOrder(null)).toBeNull();
+    expect(parseCategoryOrder({})).toBeNull();
   });
 });
 

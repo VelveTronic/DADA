@@ -3,12 +3,13 @@
 import { useTranslations } from "next-intl";
 import Image from "next/image";
 import Link from "next/link";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { signOut } from "@/app/actions/auth";
 import {
   BoxIcon,
   ClipboardIcon,
   CloseIcon,
+  GearIcon,
   GridIcon,
   HomeIcon,
   LogoutIcon,
@@ -158,6 +159,139 @@ function figure(count: number | null): string {
   return count === null ? "—" : String(count);
 }
 
+function AccountMenu({
+  locale,
+  name,
+  roleLabel,
+  collapsible,
+  onNavigate,
+}: Pick<SidebarProps, "locale" | "name" | "roleLabel"> & {
+  collapsible: boolean;
+  onNavigate?: () => void;
+}) {
+  const t = useTranslations("staff");
+  const tc = useTranslations("common");
+  const [open, setOpen] = useState(false);
+  const wrapperRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const menuId = useId();
+
+  useEffect(() => {
+    if (!open) return;
+
+    const onPointerDown = (event: PointerEvent) => {
+      if (!wrapperRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      setOpen(false);
+      triggerRef.current?.focus();
+    };
+
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open]);
+
+  const navigate = () => {
+    setOpen(false);
+    onNavigate?.();
+  };
+
+  return (
+    <div ref={wrapperRef} className="relative">
+      {open && (
+        <div
+          id={menuId}
+          role="menu"
+          aria-label={t("shell.accountMenu")}
+          className={`absolute z-50 rounded-xl border border-[#EDE9E5] bg-surface p-1.5 shadow-xl ${
+            collapsible
+              ? "bottom-0 left-[calc(100%+0.5rem)] w-56 lg:bottom-[calc(100%+0.5rem)] lg:left-0 lg:right-0 lg:w-auto"
+              : "bottom-[calc(100%+0.5rem)] left-0 right-0"
+          }`}
+        >
+          <Link
+            role="menuitem"
+            href={`/${locale}/staff/cuenta`}
+            onClick={navigate}
+            className={`${ROW} h-11 w-full`}
+          >
+            <GearIcon />
+            <span>{t("shell.personalSettings")}</span>
+          </Link>
+          <form action={signOut}>
+            <input type="hidden" name="locale" value={locale} />
+            <button
+              role="menuitem"
+              type="submit"
+              className={`${ROW} h-11 w-full`}
+            >
+              <LogoutIcon />
+              <span>{tc("logout")}</span>
+            </button>
+          </form>
+        </div>
+      )}
+
+      <div
+        className={`flex gap-1 ${
+          collapsible ? "flex-col lg:flex-row" : "flex-row"
+        }`}
+      >
+        <button
+          ref={triggerRef}
+          type="button"
+          aria-haspopup="menu"
+          aria-expanded={open}
+          aria-controls={open ? menuId : undefined}
+          aria-label={
+            open ? t("shell.closeAccountMenu") : t("shell.openAccountMenu")
+          }
+          onClick={() => setOpen((value) => !value)}
+          className="flex h-11 min-w-0 flex-1 items-center gap-2 rounded-lg p-1.5 text-left transition-colors hover:bg-black/[.045] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/35 lg:px-2"
+        >
+          <span
+            aria-hidden
+            className="inline-flex size-[30px] shrink-0 items-center justify-center rounded-full bg-surface-dim text-xs font-semibold text-ink"
+          >
+            {name.trim().charAt(0)}
+          </span>
+          <span
+            className={`min-w-0 flex-1 flex-col ${
+              collapsible ? "sr-only lg:not-sr-only lg:flex" : "flex"
+            }`}
+          >
+            <span className="truncate text-[12.5px] font-semibold">{name}</span>
+            {roleLabel && (
+              <span className="truncate text-[11px] text-muted">{roleLabel}</span>
+            )}
+          </span>
+          <span
+            aria-hidden
+            className={collapsible ? "hidden text-muted lg:block" : "text-muted"}
+          >
+            {open ? "⌃" : "⌄"}
+          </span>
+        </button>
+
+        <Link
+          href={`/${locale}/staff/cuenta`}
+          aria-label={t("shell.personalSettings")}
+          onClick={navigate}
+          className={ICON_BTN}
+        >
+          <GearIcon />
+        </Link>
+      </div>
+    </div>
+  );
+}
+
 /**
  * The sidebar's contents, drawn identically into the desktop rail and into the
  * phone's drawer.
@@ -187,7 +321,6 @@ function SidebarBody({
   onNavigate?: () => void;
 }) {
   const t = useTranslations("staff");
-  const tc = useTranslations("common");
   const pathname = usePathname();
 
   // `home` is a prefix of every other path, so it is the one entry that has to
@@ -378,47 +511,13 @@ function SidebarBody({
       </div>
 
       <div className="border-t border-[#EDE9E5] p-2">
-        {/* Who is signed in. Hidden outright on the rail rather than made
-            sr-only: it is a caption, not a control, and an icon-wide column has
-            nowhere to put two lines of it. The drawer and the full sidebar both
-            show it, so it is never unreachable. The mockup ends this row with a
-            ⌄ that opens an account menu; there is no such menu — the one thing
-            it would hold is the 退出登录 already sitting below. */}
-        <div
-          className={`flex items-center gap-2.5 px-3 pb-2 ${
-            collapsible ? "hidden lg:flex" : ""
-          }`}
-        >
-          {/* Decorative: the letter is the first character of the name printed
-              beside it, so a screen reader saying it twice adds nothing. A blank
-              name leaves the disc empty rather than substituting a letter that
-              would stand for nobody. */}
-          <span
-            aria-hidden
-            className="inline-flex size-[30px] shrink-0 items-center justify-center rounded-full bg-surface-dim text-xs font-semibold text-ink"
-          >
-            {name.trim().charAt(0)}
-          </span>
-          <span className="flex min-w-0 flex-col">
-            <span className="truncate text-[12.5px] font-semibold">{name}</span>
-            {roleLabel && (
-              <span className="truncate text-[11px] text-muted">{roleLabel}</span>
-            )}
-          </span>
-        </div>
-
-        <form action={signOut}>
-          <input type="hidden" name="locale" value={locale} />
-          <button
-            type="submit"
-            className={`${ROW} ${height} w-full ${
-              collapsible ? "justify-center lg:justify-start" : ""
-            }`}
-          >
-            <LogoutIcon />
-            <span className={label}>{tc("logout")}</span>
-          </button>
-        </form>
+        <AccountMenu
+          locale={locale}
+          name={name}
+          roleLabel={roleLabel}
+          collapsible={collapsible}
+          onNavigate={onNavigate}
+        />
       </div>
     </>
   );

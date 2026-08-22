@@ -1,9 +1,8 @@
 import type { Locale } from "next-intl";
 import { getTranslations, setRequestLocale } from "next-intl/server";
 import { redirect } from "next/navigation";
-import { setStaffRole, setUserActive } from "@/app/actions/staff-users";
 import { StaffShell } from "@/components/staff-shell";
-import { ADMIN_CARD, BTN_QUIET, FIELD_SM } from "@/components/ui";
+import { ADMIN_CARD } from "@/components/ui";
 import { requireStaff } from "@/lib/auth/guards";
 import { groupAccountsByCompany } from "@/lib/company-accounts";
 import { madridMonthStartIso } from "@/lib/orders";
@@ -17,7 +16,6 @@ import {
   canManageUsers,
   isStaffRole,
   isUserAdminError,
-  STAFF_ROLES,
   USER_ADMIN_ERRORS,
   type StaffRole,
   type UserAdminError,
@@ -25,6 +23,7 @@ import {
 import { CreateCustomerForm, type CompanyOption } from "./create-customer-form";
 import { CreateStaffForm } from "./create-staff-form";
 import { CreateUserDialog } from "./create-user-dialog";
+import { EditUserDialog, type EditAccountLabels } from "./edit-user-dialog";
 
 export const dynamic = "force-dynamic";
 
@@ -126,12 +125,9 @@ const ROW =
 const ROW_X = "px-[18px]";
 
 /** Active = the account can sign in; inactive is this app's delete. */
-const BADGE = "rounded-md px-1.5 py-0.5 text-xs";
+const BADGE = "whitespace-nowrap rounded-md px-1.5 py-0.5 text-xs";
 const BADGE_ON = `${BADGE} bg-green-100 text-green-800`;
 const BADGE_OFF = `${BADGE} bg-amber-100 text-amber-800`;
-/** The row controls, which the actor's own row renders disabled. */
-const ROW_BTN = `${BTN_QUIET} h-[30px] px-2.5 text-[12.5px] disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-border-strong disabled:hover:text-ink`;
-
 /**
  * How many orders each restaurant has placed THIS MONTH, tallied in memory.
  *
@@ -325,12 +321,11 @@ export default async function StaffUsersPage({
           .select("id, display_name, is_active, role")
           .order("created_at")
       : Promise.resolve(null),
-    // Only active companies are offered to a NEW account: a login under a
-    // deactivated company is refused at `requireCompanyUser` anyway.
+    // Owners need the complete company set when repairing an existing account;
+    // the create form below still receives only active choices.
     admin
       .from("companies")
-      .select("id, name, codcli")
-      .eq("is_active", true)
+      .select("id, name, codcli, is_active")
       .order("name"),
     perf.step(
       "counts",
@@ -367,7 +362,10 @@ export default async function StaffUsersPage({
   }
   const customers: CustomerRow[] = customerResult.data ?? [];
   const staff: StaffRow[] = staffResult?.data ?? [];
-  const companies: CompanyOption[] = companyResult.data ?? [];
+  const allCompanies = companyResult.data ?? [];
+  const companies: CompanyOption[] = allCompanies.filter(
+    (company) => company.is_active,
+  );
 
   // Both counts read and logged by the shared half (`lib/shell-counts.ts`),
   // which prints `staff users <name> count (status <n>)` — the scope string is
@@ -459,6 +457,35 @@ export default async function StaffUsersPage({
   const errorLabels = Object.fromEntries(
     USER_ADMIN_ERRORS.map((code) => [code, t(`results.${code}`)]),
   ) as Record<UserAdminError, string>;
+
+  const editLabels: EditAccountLabels = {
+    edit: t("edit"),
+    editFor: t("editFor", { name: "" }),
+    title: t("editTitle"),
+    close: t("closeDialog"),
+    email: t("email"),
+    displayName: t("displayName"),
+    company: t("company"),
+    role: t("role"),
+    status: t("colStatus"),
+    active: t("active"),
+    inactive: t("inactive"),
+    save: t("saveAccount"),
+    passwordTitle: t("passwordTitle"),
+    password: t("password"),
+    confirmPassword: t("confirmPassword"),
+    passwordHint: t("passwordHint"),
+    savePassword: t("savePassword"),
+    showPassword: tLogin("showPassword"),
+    hidePassword: tLogin("hidePassword"),
+    saving: t("saving"),
+    results: { ok: t("results.ok"), ...errorLabels },
+  };
+
+  const editCompanies = allCompanies.map((company) => ({
+    id: company.id,
+    label: `${company.name}${company.is_active ? "" : ` · ${t("companyInactive")}`}`,
+  }));
 
   /**
    * The accounts, under their restaurants. Ordered by NAME through the reader's
@@ -761,33 +788,25 @@ export default async function StaffUsersPage({
                           </span>
                         </td>
                         <td className="py-2.5 pl-3 pr-[18px] text-right">
-                          <form action={setUserActive} className="inline-block">
-                            <input
-                              type="hidden"
-                              name="locale"
-                              value={locale}
+                          {owner && (
+                            <EditUserDialog
+                              locale={locale}
+                              account={{
+                                id: row.id,
+                                kind: "customer",
+                                email: emails.get(row.id) ?? "",
+                                displayName: row.display_name ?? "",
+                                active: row.is_active,
+                                companyId: row.company_id,
+                              }}
+                              companies={editCompanies}
+                              roleLabels={roleLabels}
+                              labels={{
+                                ...editLabels,
+                                editFor: t("editFor", { name: accountName }),
+                              }}
                             />
-                            <input type="hidden" name="kind" value="customer" />
-                            <input type="hidden" name="user_id" value={row.id} />
-                            <input
-                              type="hidden"
-                              name="active"
-                              value={row.is_active ? "0" : "1"}
-                            />
-                            <button
-                              type="submit"
-                              // One 停用 per row would tell a screen reader
-                              // nothing about which account it belongs to.
-                              aria-label={
-                                row.is_active
-                                  ? t("deactivateFor", { name: accountName })
-                                  : t("activateFor", { name: accountName })
-                              }
-                              className={ROW_BTN}
-                            >
-                              {row.is_active ? t("deactivate") : t("activate")}
-                            </button>
-                          </form>
+                          )}
                         </td>
                       </tr>
                     );
@@ -850,60 +869,25 @@ export default async function StaffUsersPage({
                       <span className="text-xs text-muted">{t("selfRow")}</span>
                     )}
 
-                    <form
-                      action={setStaffRole}
-                      className="flex items-center gap-1"
-                    >
-                      <input type="hidden" name="locale" value={locale} />
-                      <input type="hidden" name="user_id" value={row.id} />
-                      <select
-                        name="role"
-                        defaultValue={row.role}
-                        disabled={self}
-                        aria-label={t("roleFor", { name })}
-                        title={self ? t("self") : undefined}
-                        className={`${FIELD_SM} h-[30px] text-[12.5px] disabled:cursor-not-allowed disabled:opacity-40`}
-                      >
-                        {STAFF_ROLES.map((role) => (
-                          <option key={role} value={role}>
-                            {roleLabels[role]}
-                          </option>
-                        ))}
-                      </select>
-                      <button
-                        type="submit"
-                        disabled={self}
-                        aria-label={t("saveRoleFor", { name })}
-                        title={self ? t("self") : undefined}
-                        className={ROW_BTN}
-                      >
-                        {t("saveRole")}
-                      </button>
-                    </form>
-
-                    <form action={setUserActive}>
-                      <input type="hidden" name="locale" value={locale} />
-                      <input type="hidden" name="kind" value="staff" />
-                      <input type="hidden" name="user_id" value={row.id} />
-                      <input
-                        type="hidden"
-                        name="active"
-                        value={row.is_active ? "0" : "1"}
+                    {!self && isStaffRole(row.role) && (
+                      <EditUserDialog
+                        locale={locale}
+                        account={{
+                          id: row.id,
+                          kind: "staff",
+                          email: emails.get(row.id) ?? "",
+                          displayName: row.display_name ?? "",
+                          active: row.is_active,
+                          role: row.role,
+                        }}
+                        companies={editCompanies}
+                        roleLabels={roleLabels}
+                        labels={{
+                          ...editLabels,
+                          editFor: t("editFor", { name }),
+                        }}
                       />
-                      <button
-                        type="submit"
-                        disabled={self}
-                        aria-label={
-                          row.is_active
-                            ? t("deactivateFor", { name })
-                            : t("activateFor", { name })
-                        }
-                        title={self ? t("self") : undefined}
-                        className={ROW_BTN}
-                      >
-                        {row.is_active ? t("deactivate") : t("activate")}
-                      </button>
-                    </form>
+                    )}
                   </li>
                 );
               })}

@@ -341,7 +341,8 @@ export type TreeMoveResult =
  * makes the derived tree of the new numbers equal the intended tree: after
  * one write every group's children are contiguous, the group's position IS
  * its first child's number, and later moves change only the two blocks that
- * swapped (the caller writes only changed rows, as ever). On a legacy list —
+ * swapped logically (the atomic RPC writes the complete normalized sequence).
+ * On a legacy list —
  * scattered children, freepos ties — the FIRST move rewrites nearly
  * everything, once, exactly as the flat `resequence` always did.
  *
@@ -552,6 +553,46 @@ export function parseCategoryId(value: unknown): number | null {
   return Number.isSafeInteger(id) && id > 0 ? id : null;
 }
 
+/**
+ * The drag editor's flattened category order, before the database compares it
+ * with the locked table and verifies every parent group is contiguous.
+ *
+ * JSON is used because a single hidden field can progressively enhance a
+ * regular Server Action form. This parser proves only the wire shape and keeps
+ * it bounded; the RPC is deliberately the authority for membership and tree
+ * relationships, since a client can forge any array that passes this function.
+ */
+export function parseCategoryOrder(value: unknown): number[] | null {
+  if (typeof value !== "string" || value.length > CATEGORY_LIMIT * 24) {
+    return null;
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    return null;
+  }
+  if (
+    !Array.isArray(parsed) ||
+    parsed.length === 0 ||
+    parsed.length > CATEGORY_LIMIT
+  ) {
+    return null;
+  }
+
+  const ids: number[] = [];
+  const seen = new Set<number>();
+  for (const value of parsed) {
+    if (!Number.isSafeInteger(value) || value <= 0 || seen.has(value)) {
+      return null;
+    }
+    seen.add(value);
+    ids.push(value);
+  }
+  return ids;
+}
+
 /** The ↑/↓ buttons' own field, read as a closed pair. */
 export function parseMoveDirection(value: unknown): MoveDirection | null {
   const raw = text(value);
@@ -593,6 +634,13 @@ export const CATEGORY_ERRORS = [
   "NOT_FOUND",
   /** ↑ on the first row, or ↓ on the last one. */
   "EDGE",
+  /** The category collection changed while a drag order was being edited. */
+  "ORDER_STALE",
+  /** The selected category has no product photo to use as its recommendation. */
+  "NO_IMAGE",
+  "IMAGE_TYPE",
+  "IMAGE_TOO_LARGE",
+  "UPLOAD_FAILED",
   "DB_ERROR",
 ] as const;
 

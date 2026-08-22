@@ -3,17 +3,18 @@
 import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { CartNavLink } from "@/components/cart/cart-nav-link";
-import { SearchIcon, ShopIcon } from "@/components/icons";
+import { GridIcon, ShopIcon } from "@/components/icons";
 import { UserMenu } from "@/components/user-menu";
 import { ICON_BTN, ICON_BTN_ACTIVE } from "@/components/ui";
 import { usePathname } from "@/i18n/navigation";
 import { activeTab } from "@/lib/nav-tabs";
 
 /**
- * The storefront header's right-hand side: 商店, 搜索, 购物车, 用户 — icons only,
+ * The storefront header's right-hand side: 商店, 分类, 购物车, 用户 — icons only,
  * at 44px each, and on the DESKTOP only. Below `lg` the shell hides this row
  * and the bottom `TabBar` is the navigation (see `app-shell.tsx`); the four
- * icons and the four tabs point at the same four screens.
+ * icons and the four tabs point at the same four screens. Search remains the
+ * first control inside 商店 and opens `/buscar` from there.
  *
  * A Client Component for ONE reason: `usePathname`. The active-route accent is
  * the only thing on this row a Server Component could not work out for itself,
@@ -59,18 +60,16 @@ export function StorefrontNav({
         <ShopIcon />
       </Link>
 
-      {/* The loupe goes where the search BOX goes: `/buscar`, the screen that
-          owns the keyboard, the recent terms and the result list. It used to
-          point at `/catalogo?focus=search` — a parameter nothing has read since
-          the catalogue's own box became a link — so the icon and the box are
-          one control in two places again. */}
+      {/* 分类 has its own image-led browser. Search did not disappear: the
+          catalogue's field still opens `/buscar`, which activeTab treats as a
+          child of 商店 rather than spending a permanent navigation slot on it. */}
       <Link
-        href={`/${locale}/buscar`}
-        aria-label={t("search")}
-        aria-current={tab === "search" ? "page" : undefined}
-        className={tab === "search" ? ICON_BTN_ACTIVE : ICON_BTN}
+        href={`/${locale}/categorias`}
+        aria-label={t("categories")}
+        aria-current={tab === "categories" ? "page" : undefined}
+        className={tab === "categories" ? ICON_BTN_ACTIVE : ICON_BTN}
       >
-        <SearchIcon />
+        <GridIcon />
       </Link>
 
       <CartNavLink locale={locale} active={tab === "cart"} />

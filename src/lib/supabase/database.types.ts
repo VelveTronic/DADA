@@ -40,6 +40,7 @@ export type Database = {
           created_at: string
           erp_code: string
           id: number
+          image_url: string | null
           is_active: boolean
           name: Json
           parent_label: Json | null
@@ -51,6 +52,7 @@ export type Database = {
           created_at?: string
           erp_code: string
           id?: never
+          image_url?: string | null
           is_active?: boolean
           name: Json
           parent_label?: Json | null
@@ -62,6 +64,7 @@ export type Database = {
           created_at?: string
           erp_code?: string
           id?: never
+          image_url?: string | null
           is_active?: boolean
           name?: Json
           parent_label?: Json | null
@@ -685,6 +688,10 @@ export type Database = {
         Args: { p_order_id: string; p_reason?: string }
         Returns: boolean
       }
+      staff_bulk_confirm_orders: {
+        Args: { p_order_ids: string[] }
+        Returns: Json
+      }
       staff_confirm_order: {
         Args: { p_order_id: string; p_staff_note?: string }
         Returns: boolean
@@ -712,6 +719,10 @@ export type Database = {
         Args: { p_order_id: string }
         Returns: boolean
       }
+      staff_reorder_categories: {
+        Args: { p_locale: string; p_order: number[] }
+        Returns: boolean
+      }
       staff_set_customer_active: {
         Args: { p_active: boolean; p_user_id: string }
         Returns: boolean
@@ -722,6 +733,28 @@ export type Database = {
       }
       staff_set_staff_role: {
         Args: { p_role: string; p_user_id: string }
+        Returns: boolean
+      }
+      staff_update_customer_account: {
+        Args: {
+          p_active: boolean
+          p_company_id: string
+          p_display_name: string
+          p_user_id: string
+        }
+        Returns: boolean
+      }
+      staff_update_own_display_name: {
+        Args: { p_display_name: string }
+        Returns: boolean
+      }
+      staff_update_staff_account: {
+        Args: {
+          p_active: boolean
+          p_display_name: string
+          p_role: string
+          p_user_id: string
+        }
         Returns: boolean
       }
       staff_update_order_line: {

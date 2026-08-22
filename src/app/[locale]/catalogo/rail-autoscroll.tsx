@@ -6,7 +6,7 @@ import { useEffect } from "react";
  * Scrolls the category rail to the entry the page is showing, once, on mount.
  *
  * The rail is a 61-entry column in an 88px gutter, so most of it is off screen:
- * a customer who lands on `/catalogo?cat=…` — from a bookmark, a shared link, a
+ * a customer who lands on `/catalogo?category=…` — from a bookmark, a shared link, a
  * reload, or the browser's back button after a hard navigation — gets the rail
  * at scrollTop 0, with the entry that is actually lit somewhere below the fold.
  * The screen then says "全部" on the left and a category's products on the

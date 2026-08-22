@@ -9,7 +9,9 @@ import { ACCOUNT_PATHS, activeTab, type TabKey } from "./nav-tabs";
 describe("activeTab", () => {
   const cases: Array<[string, TabKey | null]> = [
     ["/catalogo", "catalog"],
-    ["/buscar", "search"],
+    // Search is entered from 商店/Tienda and therefore keeps that tab lit.
+    ["/buscar", "catalog"],
+    ["/categorias", "categories"],
     ["/carrito", "cart"],
     ["/cuenta", "account"],
     ["/pedidos", "account"],
@@ -18,9 +20,11 @@ describe("activeTab", () => {
     // Sub-paths belong to their tab: an order's own page is still 我的.
     ["/pedidos/1234", "account"],
     ["/catalogo/", "catalog"],
+    ["/categorias/aceites", "categories"],
     // …and a path that merely STARTS with one of the words is not it.
     ["/catalogofalso", null],
     ["/buscar-algo", null],
+    ["/categoriasfalso", null],
     // Outside the customer shell, or nowhere at all.
     ["/", null],
     ["", null],

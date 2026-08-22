@@ -12,6 +12,149 @@ export function isUuid(value: string): boolean {
   return UUID.test(value);
 }
 
+/** One queue page is the largest selection the bulk-confirm RPC accepts. */
+export const BULK_CONFIRM_LIMIT = 50;
+
+/**
+ * Validate and de-duplicate the untrusted ids posted by the queue.  The raw
+ * length is bounded before de-duplication to mirror the database contract; a
+ * crafted request cannot hide a large payload behind the same UUID repeated.
+ */
+export function normalizeBulkConfirmIds(
+  values: readonly unknown[],
+): string[] | null {
+  if (values.length < 1 || values.length > BULK_CONFIRM_LIMIT) return null;
+
+  const ids: string[] = [];
+  const seen = new Set<string>();
+  for (const value of values) {
+    if (typeof value !== "string" || !isUuid(value)) return null;
+    const normalized = value.toLowerCase();
+    if (!seen.has(normalized)) {
+      seen.add(normalized);
+      ids.push(normalized);
+    }
+  }
+  return ids;
+}
+
+/** Strictly validated JSON returned by `staff_bulk_confirm_orders`. */
+export interface BulkConfirmResult {
+  requestedCount: number;
+  confirmedCount: number;
+  skippedCount: number;
+  confirmedIds: string[];
+  skippedIds: string[];
+}
+
+export type BulkConfirmActionOutcome =
+  | "idle"
+  | "ok"
+  | "partial"
+  | "wrong-state"
+  | "invalid"
+  | "error";
+
+/** The serializable state React's `useActionState` receives from the action. */
+export interface BulkConfirmActionState {
+  outcome: BulkConfirmActionOutcome;
+  requestedCount: number;
+  confirmedCount: number;
+  skippedCount: number;
+}
+
+function integerField(
+  record: Record<string, unknown>,
+  key: string,
+): number | null {
+  const value = record[key];
+  return typeof value === "number" &&
+    Number.isSafeInteger(value) &&
+    value >= 0
+    ? value
+    : null;
+}
+
+function uuidArrayField(
+  record: Record<string, unknown>,
+  key: string,
+): string[] | null {
+  const value = record[key];
+  if (!Array.isArray(value)) return null;
+
+  const result: string[] = [];
+  for (const item of value) {
+    if (typeof item !== "string" || !isUuid(item)) return null;
+    result.push(item.toLowerCase());
+  }
+  return result;
+}
+
+/**
+ * Treat an RPC reply as hostile input even though it came from our database.
+ * Besides shape/count checks, the two returned arrays must be an ordered,
+ * disjoint partition of exactly the ids the action sent.  A stale migration or
+ * accidental function change therefore becomes a visible generic failure, not
+ * a misleading "all confirmed" banner.
+ */
+export function parseBulkConfirmResult(
+  value: unknown,
+  expectedIds: readonly string[],
+): BulkConfirmResult | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+
+  const requestedCount = integerField(record, "requested_count");
+  const confirmedCount = integerField(record, "confirmed_count");
+  const skippedCount = integerField(record, "skipped_count");
+  const confirmedIds = uuidArrayField(record, "confirmed_ids");
+  const skippedIds = uuidArrayField(record, "skipped_ids");
+  const normalizedExpected = expectedIds.map((id) => id.toLowerCase());
+
+  if (
+    requestedCount === null ||
+    confirmedCount === null ||
+    skippedCount === null ||
+    confirmedIds === null ||
+    skippedIds === null ||
+    requestedCount !== normalizedExpected.length ||
+    confirmedCount !== confirmedIds.length ||
+    skippedCount !== skippedIds.length ||
+    requestedCount !== confirmedCount + skippedCount
+  ) {
+    return null;
+  }
+
+  const confirmed = new Set(confirmedIds);
+  const skipped = new Set(skippedIds);
+  if (
+    confirmed.size !== confirmedIds.length ||
+    skipped.size !== skippedIds.length ||
+    confirmedIds.some((id) => skipped.has(id))
+  ) {
+    return null;
+  }
+
+  const expectedConfirmed = normalizedExpected.filter((id) => confirmed.has(id));
+  const expectedSkipped = normalizedExpected.filter((id) => skipped.has(id));
+  if (
+    expectedConfirmed.length !== confirmedIds.length ||
+    expectedSkipped.length !== skippedIds.length ||
+    expectedConfirmed.some((id, index) => id !== confirmedIds[index]) ||
+    expectedSkipped.some((id, index) => id !== skippedIds[index])
+  ) {
+    return null;
+  }
+
+  return {
+    requestedCount,
+    confirmedCount,
+    skippedCount,
+    confirmedIds,
+    skippedIds,
+  };
+}
+
 /**
  * The civil day in Madrid as `YYYY-MM-DD` — the calendar `create_order` judges a
  * delivery date against (`now() at time zone 'Europe/Madrid'`). `en-CA` is the

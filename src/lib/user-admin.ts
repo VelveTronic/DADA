@@ -61,6 +61,7 @@ export type UserKind = (typeof USER_KINDS)[number];
 export const USER_ADMIN_ERRORS = [
   "BAD_EMAIL",
   "BAD_PASSWORD",
+  "PASSWORD_MISMATCH",
   "BAD_NAME",
   "BAD_COMPANY",
   "BAD_CODCLI",
@@ -318,6 +319,109 @@ export interface NewStaffInput {
   password: string;
   displayName: string;
   role: StaffRole;
+}
+
+/** Result held independently by each owner-only edit form. */
+export type ManagedAccountState = {
+  result: "ok" | UserAdminError | null;
+};
+
+export const EMPTY_MANAGED_ACCOUNT_STATE: ManagedAccountState = { result: null };
+
+export interface RawManagedAccountInput {
+  targetId?: unknown;
+  kind?: unknown;
+  email?: unknown;
+  displayName?: unknown;
+  active?: unknown;
+  companyId?: unknown;
+  role?: unknown;
+}
+
+export type ManagedAccountInput =
+  | {
+      kind: "customer";
+      targetId: string;
+      email: string;
+      displayName: string;
+      active: boolean;
+      companyId: string;
+    }
+  | {
+      kind: "staff";
+      targetId: string;
+      email: string;
+      displayName: string;
+      active: boolean;
+      role: StaffRole;
+    };
+
+/**
+ * The editable account facts, excluding the password. Password changes are a
+ * separate operation because GoTrue and Postgres cannot share a transaction;
+ * a failed profile write must never leave an unknowable password half-applied.
+ */
+export function validateManagedAccount(
+  raw: RawManagedAccountInput,
+): Validated<ManagedAccountInput> {
+  const kind = parseUserKind(raw.kind);
+  if (!kind.ok) return kind;
+
+  const targetId = text(raw.targetId);
+  if (!isUuid(targetId)) return fail("BAD_TARGET");
+
+  const email = text(raw.email).toLowerCase();
+  if (!email || email.length > MAX_EMAIL_LENGTH || !EMAIL.test(email)) {
+    return fail("BAD_EMAIL");
+  }
+
+  const displayName = text(raw.displayName);
+  if (!displayName || displayName.length > MAX_NAME_LENGTH) {
+    return fail("BAD_NAME");
+  }
+
+  const active = parseActiveFlag(raw.active);
+  if (!active.ok) return active;
+
+  if (kind.value === "customer") {
+    const companyId = text(raw.companyId);
+    return isUuid(companyId)
+      ? {
+          ok: true,
+          value: {
+            kind: "customer",
+            targetId,
+            email,
+            displayName,
+            active: active.value,
+            companyId,
+          },
+        }
+      : fail("BAD_COMPANY");
+  }
+
+  const role = parseStaffRole(raw.role);
+  if (!role.ok) return role;
+  return {
+    ok: true,
+    value: {
+      kind: "staff",
+      targetId,
+      email,
+      displayName,
+      active: active.value,
+      role: role.value,
+    },
+  };
+}
+
+/** A superadministrator-set password, never trimmed and never echoed back. */
+export function validateManagedPassword(value: unknown): Validated<string> {
+  const password = typeof value === "string" ? value : "";
+  return password.length >= MIN_PASSWORD_LENGTH &&
+    passwordByteLength(password) <= MAX_PASSWORD_BYTES
+    ? { ok: true, value: password }
+    : fail("BAD_PASSWORD");
 }
 
 /**

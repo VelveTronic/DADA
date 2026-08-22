@@ -7,6 +7,7 @@ import { updateProduct } from "@/app/actions/staff-products";
 import { StaffShell } from "@/components/staff-shell";
 import { ADMIN_CARD, BTN_PRIMARY, BTN_QUIET, FIELD_SM } from "@/components/ui";
 import { requireStaff } from "@/lib/auth/guards";
+import { CATALOG_IMAGE_ACCEPT } from "@/lib/catalog-image";
 import { CATEGORY_LIMIT, groupCategories, sortCategories } from "@/lib/categories";
 import { formatEuros } from "@/lib/money";
 import { perfRun } from "@/lib/perf";
@@ -63,8 +64,10 @@ export default async function StaffProductEditPage({
   const { result: rawResult } = await searchParams;
   setRequestLocale(locale);
   const perf = perfRun(`/${locale}/staff/productos/[id]`);
-  // Sequential, exactly as the list page is: these are service-role reads and
-  // they run only once the guard has said this caller is staff.
+  // Sequential, exactly as the list page is: the guard answers first and the
+  // reads follow, so a caller who turns out not to be staff never reaches them.
+  // (Both pages dropped the service-role client on 2026-08-22 — neither reads
+  // the six price columns any more.)
   const { staffUser } = await requireStaff(locale);
   const t = await getTranslations("staff");
   const tEdit = await getTranslations("staff.productEdit");
@@ -314,7 +317,7 @@ export default async function StaffProductEditPage({
                 <input
                   type="file"
                   name="image"
-                  accept="image/jpeg,image/png,image/webp"
+                  accept={CATALOG_IMAGE_ACCEPT}
                   className="text-[12.5px] text-ink file:mr-3 file:rounded-lg file:border file:border-border-strong file:bg-surface file:px-3 file:py-1.5 file:text-[12.5px] file:text-ink-soft"
                 />
               </label>

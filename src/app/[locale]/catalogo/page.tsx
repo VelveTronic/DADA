@@ -8,6 +8,7 @@ import { SearchIcon } from "@/components/icons";
 import { ProductGrid } from "@/components/product-grid";
 import { ProductRow } from "@/components/product-row";
 import { beginCompanyUser, finishCompanyUser } from "@/lib/auth/guards";
+import { resolveCatalogCategory } from "@/lib/category-browser";
 import {
   groupCategories,
   hiddenCategoryIds,
@@ -48,11 +49,18 @@ export default async function CatalogPage({
   searchParams: Promise<{
     tab?: string;
     page?: string;
+    category?: string;
+    /** Legacy ERP-code bookmarks, retained as a read-only compatibility path. */
     cat?: string;
   }>;
 }) {
   const { locale } = await params;
-  const { tab: rawTab, page: rawPage, cat: rawCat } = await searchParams;
+  const {
+    tab: rawTab,
+    page: rawPage,
+    category: rawCategory,
+    cat: rawCat,
+  } = await searchParams;
   setRequestLocale(locale);
   const perf = perfRun(`/${locale}/catalogo`);
   const { supabase, pendingUser } = await beginCompanyUser(locale);
@@ -112,10 +120,10 @@ export default async function CatalogPage({
   // list THIS function produces, so both screens import one function rather than
   // keeping two sorts in step by hand.
   // The visibility split, made ONCE and used three ways: the rail draws only
-  // `visibleCategories`, `?cat=` resolves only against them (a hidden shelf's
-  // erp_code in the URL answers as "no such filter", not a 404 and not the
-  // shelf), and `hiddenIds` is what keeps the hidden shelves' PRODUCTS out of
-  // the pane below.
+  // `visibleCategories`, either category URL resolves only against them (a
+  // hidden shelf's id or legacy erp_code answers as "no such filter", not a 404
+  // and not the shelf), and `hiddenIds` is what keeps the hidden shelves'
+  // PRODUCTS out of the pane below.
   const allCategories = categoryRows ?? [];
   const hiddenIds = hiddenCategoryIds(allCategories, allowedIds);
   const hiddenIdSet = new Set(hiddenIds);
@@ -123,10 +131,15 @@ export default async function CatalogPage({
     allCategories.filter((row) => !hiddenIdSet.has(row.id)),
     locale,
   );
-  // The whole validation of ?cat=: an erp_code that is not an active, VISIBLE
-  // category resolves to nothing and the page renders unfiltered, never a
-  // failed query.
-  const activeCategory = categories.find((c) => c.erp_code === rawCat) ?? null;
+  // `?category=<id>` is the public link emitted by the image browser. Old
+  // `?cat=<erp_code>` bookmarks remain readable, but every link rendered below
+  // canonicalises onto the numeric id. Either kind must name an active VISIBLE
+  // category; malformed, stale or hidden values render unfiltered.
+  const activeCategory = resolveCatalogCategory(
+    rawCategory,
+    rawCat,
+    categories,
+  );
 
   // Customers read the priced VIEW only: it carries exactly one price column,
   // resolved server-side from this company's tarifa.
@@ -158,9 +171,10 @@ export default async function CatalogPage({
 
   // ROUND TWO. The favourites are the one read that needed the profile — they
   // are keyed by the restaurant's company — and the page of products is the one
-  // read that needed the categories, for `?cat=`. Both are answered now, and on
-  // an ordinary catalogue load they are answered TOGETHER: the star on a row and
-  // the row itself have nothing to say to each other either.
+  // read that needed the categories, for `?category=` / legacy `?cat=`. Both
+  // are answered now, and on an ordinary catalogue load they are answered
+  // TOGETHER: the star on a row and the row itself have nothing to say to each
+  // other either.
   //
   // The favourites TAB is the single shape where they cannot go out side by
   // side, because there the id list IS the filter. Only that tab pays a third
@@ -188,7 +202,12 @@ export default async function CatalogPage({
   const totalPages = Math.max(1, Math.ceil((count ?? 0) / PAGE_SIZE));
   perf.end();
 
-  const href = (p: { tab?: string; page?: number; cat?: string }) => {
+  const href = (p: {
+    tab?: string;
+    page?: number;
+    /** null clears the filter; undefined inherits this render's category. */
+    category?: number | null;
+  }) => {
     const sp = new URLSearchParams();
     const tt = p.tab ?? tab;
     // Every rail entry passes BOTH halves of the filter, so picking one clears
@@ -197,9 +216,10 @@ export default async function CatalogPage({
     // the pane beside it is showing. The pager is the only caller that passes
     // neither and inherits both. Everything that changes the filter passes
     // page: 1, so a narrower result set never lands on a page past its end.
-    const cc = p.cat ?? activeCategory?.erp_code ?? "";
+    const categoryId =
+      p.category === undefined ? (activeCategory?.id ?? null) : p.category;
     if (tt !== "all") sp.set("tab", tt);
-    if (cc) sp.set("cat", cc);
+    if (categoryId !== null) sp.set("category", String(categoryId));
     if ((p.page ?? 1) > 1) sp.set("page", String(p.page));
     const s = sp.toString();
     return `/${locale}/catalogo${s ? `?${s}` : ""}`;
@@ -249,7 +269,7 @@ export default async function CatalogPage({
   const entryOf = (c: (typeof categories)[number], child: boolean) => ({
     id: c.id,
     label: c.label,
-    href: href({ tab: "all", cat: c.erp_code, page: 1 }),
+    href: href({ tab: "all", category: c.id, page: 1 }),
     active: tab === "all" && activeCategory?.id === c.id,
     child,
   });
@@ -257,13 +277,13 @@ export default async function CatalogPage({
     {
       id: "all",
       label: t("railAll"),
-      href: href({ tab: "all", cat: "", page: 1 }),
+      href: href({ tab: "all", category: null, page: 1 }),
       active: tab === "all" && !activeCategory,
     },
     {
       id: "favoritos",
       label: t("railFavorites"),
-      href: href({ tab: "favoritos", cat: "", page: 1 }),
+      href: href({ tab: "favoritos", category: null, page: 1 }),
       active: tab === "favoritos",
       count: favoriteIds.size,
     },
@@ -298,7 +318,7 @@ export default async function CatalogPage({
       <p className="text-muted">{t("noResults")}</p>
       {filtered && (
         <Link
-          href={href({ tab: "all", cat: "", page: 1 })}
+          href={href({ tab: "all", category: null, page: 1 })}
           className="inline-flex h-11 items-center rounded-lg px-3 text-sm text-brand-ink underline underline-offset-4 transition-colors hover:bg-brand-soft"
         >
           {t("clearFilters")}
@@ -379,7 +399,7 @@ export default async function CatalogPage({
             has to survive the press; `rail-autoscroll.tsx` only nudges the lit
             entry into view, once, on mount. */}
         <div
-          key={`${tab}|${activeCategory?.erp_code ?? ""}|${page}`}
+          key={`${tab}|${activeCategory?.id ?? ""}|${page}`}
           className="min-w-0 flex-1 overflow-y-auto bg-surface"
         >
           {/* Sticky inside the pane, not the page: it names the filter the rail

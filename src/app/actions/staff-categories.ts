@@ -5,6 +5,10 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { routing } from "@/i18n/routing";
 import { assertStaff } from "@/lib/auth/assert-staff";
+import {
+  CATALOG_IMAGE_BUCKET,
+  validateCatalogImage,
+} from "@/lib/catalog-image";
 import type { CategoryError, CategoryFormState } from "@/lib/categories";
 import {
   CATEGORY_LIMIT,
@@ -13,40 +17,23 @@ import {
   moveCategoryInTree,
   parseActiveFlag,
   parseCategoryId,
+  parseCategoryOrder,
   parseMoveDirection,
   parseVisibility,
   resolveParentLabel,
   SORT_STEP,
   validateCategoryName,
 } from "@/lib/categories";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { createServerSupabase } from "@/lib/supabase/server";
 
 /**
- * 分类管理's five writes — and the only writes in this app that a staff member
- * performs with their OWN credentials.
- *
- * **Why there is no RPC here, and no service-role client.** `public.categories`
- * is the one table the security hardening left open to an authenticated staff
- * session: the three write policies gate on `private.is_staff()`
- * (`supabase/migrations/20260815101406_security_order_integrity.sql:156-164`),
- * the table grant carries `insert, update, delete … to authenticated` (:688) and
- * the identity sequence is usable by the same role (:719). `category_companies`
- * (migration 20260820190000) was cut to the same shape on purpose — staff
- * policy, per-role grants, no RPC. So the DATABASE is the gate on every
- * statement below, under the caller's own JWT, and no new SECURITY DEFINER
- * function exists — which is why the accepted security-advisor baseline in
- * CLAUDE.md is unchanged by any of it.
- *
- * `assertStaff` (`lib/auth/assert-staff.ts`, shared with the products and orders
- * actions) is not that gate. It is the early, kinder half: a Server Action is
- * its own POST endpoint, reachable by anyone who knows the action id without
- * ever rendering the page, and a caller who gets that far should be stopped
- * here rather than one round trip later. If it were ever removed, RLS would
- * still refuse every statement in this file.
- *
- * Products are the deliberate contrast: `staff-products.ts` writes with the
- * SERVICE-ROLE client because the six price columns are revoked from
- * authenticated outright. Do not move a write between the two mechanisms.
+ * Category metadata writes use the caller's session and the staff-only RLS
+ * policy. Ordering is intentionally narrower: authenticated cannot update
+ * `sort_order` directly, so both drag saves and the progressive ↑/↓ fallback
+ * call one SECURITY DEFINER RPC that rechecks staff, locks the collection and
+ * validates the complete tree. Image bytes use the admin Storage client only
+ * after `assertStaff`; the category URL itself is still written through RLS.
  */
 
 /** The locale arrives in a form field, so it is never trusted as a path segment. */
@@ -67,21 +54,31 @@ function safeLocale(value: FormDataEntryValue | null) {
  * the restaurant's — a rename in the zh back office has to reach the es rail.
  *
  * `/staff/productos` is on the list because that page draws this table too: its
- * 分类 column is a `<select>` of every category, so a rename changes the option
- * labels and a hide/show moves the （已隐藏） marker on one of them. Nothing
- * there is invalidated by a MOVE, but the four writes share one revalidation
- * for the same reason they share one file — a caller that had to pick would
- * eventually pick wrong.
+ * 分类 FILTER is a `<select>` of every category, so a rename changes the option
+ * labels and a hide/show moves the （已隐藏） marker on one of them. (The per-ROW
+ * category select that used to be the reason is gone — 2026-08-22 moved filing
+ * into the product editor — but the filter above the table still has to be
+ * redrawn.) Nothing there is invalidated by a MOVE, but the writes share one
+ * revalidation for the same reason they share one file — a caller that had to
+ * pick would eventually pick wrong.
  */
 function revalidateCategoryPaths() {
   for (const locale of routing.locales) {
     revalidatePath(`/${locale}/staff/categorias`);
     revalidatePath(`/${locale}/staff/productos`);
+    revalidatePath(`/${locale}/categorias`);
     revalidatePath(`/${locale}/catalogo`);
     // Search filters by the same visibility the catalogue does (owner,
     // 2026-08-20), so a grant change has to clear its cached copy too.
     revalidatePath(`/${locale}/buscar`);
   }
+}
+
+/** A stale/forged full order is actionable; an infrastructure failure is not. */
+function reorderError(error: { message: string }): CategoryError {
+  return error.message.includes("BAD_ORDER") || error.message.includes("BAD_TREE")
+    ? "ORDER_STALE"
+    : "DB_ERROR";
 }
 
 /**
@@ -409,69 +406,121 @@ export async function setCategoryActive(formData: FormData): Promise<void> {
 }
 
 /**
- * Move one entry of the category TREE: a 一级 group among the top-level
- * entries, a standalone category among the same, or a 二级 row within its
- * group (owner, 2026-08-21 — the flat arrows could not reorder groups).
+ * Replace, recommend, or clear the artwork used by the customer category grid.
  *
- * The form sends ONE of two targets: `group` (the 一级 label, for a group
- * heading's arrows) or `id` (for every category row — `moveCategoryInTree`
- * itself answers whether that id is a top-level standalone or a child, so the
- * form does not have to know which the grouping made it). Reads the WHOLE
- * list first because a tree move re-derives the whole tree: which entry is
- * "the one above" is a question `groupCategories` answers, and only the full
- * list can feed it. `is_active` is not read because hidden rows sit in the
- * SAME sequence — they simply are not drawn on the customer's rail.
- *
- * **Written one statement per changed row, on purpose.** `upsert` cannot be used
- * here: `categories.id` is `generated always as identity`
- * (`supabase/migrations/0002_catalog.sql:3`), which Postgres refuses to accept a
- * value for, and the generated types say so too (`id?: never` on Insert/Update)
- * — an upsert would have to send whole rows, name and erp_code included, to
- * change one integer. The loop is bounded by the number of categories, 61 today;
- * the FIRST move on a list whose children were never contiguous rewrites nearly
- * all of them, and every move after that writes only the blocks that swapped —
- * two rows for a child move, the two adjacent blocks for a group move.
- *
- * **Written TAIL FIRST, and that is the whole reason for the `.reverse()`.**
- * `sort_order` carries no unique index, so no intermediate state is illegal and
- * the next successful move heals whatever this one left — but "not illegal" is
- * not "harmless", and the direction the loop runs decides which. Consider the
- * first-ever move on the freepos seed, where dozens of rows still sit on 0 and
- * the NAME is what orders them: head-first, a failure three rows in leaves rows
- * 1-3 carrying 10/20/30 and every UNWRITTEN row still on 0 — and 0 sorts AHEAD
- * of 10, so the rail comes back with the untouched tail hoisted to the top. The
- * whole customer-facing order rotates because one UPDATE failed.
- *
- * Tail-first inverts exactly that. The rows that get written are the ones at the
- * BOTTOM, and the un-written head keeps its 0 — which sorts to the FRONT, broken
- * by name, which is the order those rows were already in. Work it through on the
- * seed above and the partial states are only ever two: while the un-written head
- * still contains both of the swapped rows, their names put them back and the
- * list reads exactly as it did before the press; once the head is short enough
- * that it no longer holds both, the list reads exactly as it would have if every
- * write had landed. There is no third order. In steady state (every row already
- * numbered, so `changed` is only the swapped blocks) a failure mid-loop leaves
- * some rows sharing numbers, the comparator settles those by name, and the move
- * simply did not fully take — the next successful one renumbers everything.
- *
- * The DB_ERROR paths revalidate like every other, which is deliberate: a write
- * loop that stopped halfway still changed rows, and leaving the pre-press order
- * in the Router Cache would draw a list the database no longer holds. (On the
- * read failure nothing changed, and the same revalidate just redraws an
- * unchanged list.)
- *
- * **Two staff members moving at once: last write wins.** Both read the same base
- * list and both compute a FULL re-sequence of it, so their statements interleave
- * onto a coherent permutation rather than a corrupt one — every row still ends
- * up with exactly one number, and the list still reads top to bottom. In steady
- * state each mover writes only its own swapped pair, so two moves on disjoint
- * pairs both land; only where the writes overlap (the same pair, or the
- * un-numbered seed above, where `changed` is the whole list) do the later writes
- * override the earlier, and a move can silently fail to take, with no conflict
- * shown to either mover. That is the same trade `createCategory` documents for
- * its read-then-write `sort_order`, and it is accepted for the same reason —
- * this is a two-person back office reordering a 61-row rail by hand, not a
- * contended queue.
+ * A recommendation URL never comes from a hidden field. The action looks up a
+ * product that is still filed under this category and copies its stored URL;
+ * otherwise a forged POST could turn the public category tile into an arbitrary
+ * remote-image request. Uploads share the exact validator and public bucket used
+ * by `updateProduct`.
+ */
+export async function updateCategoryImage(formData: FormData): Promise<void> {
+  await assertStaff();
+  const locale = safeLocale(formData.get("locale"));
+  const view = viewState(formData);
+  const id = parseCategoryId(formData.get("id"));
+  const rawMode = formData.get("mode");
+  const mode =
+    rawMode === "upload" || rawMode === "recommended" || rawMode === "clear"
+      ? rawMode
+      : null;
+  if (id === null || mode === null) return finish(locale, "BAD_INPUT", view);
+
+  const supabase = await createServerSupabase();
+  const category = await supabase
+    .from("categories")
+    .select("id")
+    .eq("id", id)
+    .maybeSingle();
+  if (category.error) {
+    console.error("updateCategoryImage category lookup:", category.error);
+    return finish(locale, "DB_ERROR", view);
+  }
+  if (!category.data) return finish(locale, "NOT_FOUND", view);
+
+  let imageUrl: string | null = null;
+  if (mode === "recommended") {
+    const recommendation = await supabase
+      .from("products")
+      .select("image_url")
+      .eq("category_id", id)
+      .not("image_url", "is", null)
+      .order("codart")
+      .limit(1)
+      .maybeSingle();
+    if (recommendation.error) {
+      console.error("updateCategoryImage recommendation:", recommendation.error);
+      return finish(locale, "DB_ERROR", view);
+    }
+    imageUrl = recommendation.data?.image_url ?? null;
+    if (!imageUrl) return finish(locale, "NO_IMAGE", view);
+  }
+
+  if (mode === "upload") {
+    const file = formData.get("image");
+    if (!(file instanceof File) || file.size === 0) {
+      return finish(locale, "BAD_INPUT", view);
+    }
+    const checkedImage = validateCatalogImage(file);
+    if (!checkedImage.ok) {
+      return finish(locale, checkedImage.code, view);
+    }
+
+    const path = `categories/${id}-${Date.now()}.${checkedImage.extension}`;
+    const admin = createAdminClient();
+    const upload = await admin.storage
+      .from(CATALOG_IMAGE_BUCKET)
+      .upload(path, file, { contentType: file.type, upsert: false });
+    if (upload.error) {
+      console.error("updateCategoryImage upload:", upload.error);
+      return finish(locale, "UPLOAD_FAILED", view);
+    }
+    imageUrl = admin.storage
+      .from(CATALOG_IMAGE_BUCKET)
+      .getPublicUrl(path).data.publicUrl;
+  }
+
+  const { data, error } = await supabase
+    .from("categories")
+    .update({ image_url: imageUrl })
+    .eq("id", id)
+    .select("id");
+  if (error) {
+    console.error("updateCategoryImage update:", error);
+    return finish(locale, "DB_ERROR", view);
+  }
+  if ((data ?? []).length === 0) return finish(locale, "NOT_FOUND", view);
+  return finish(locale, "ok", view);
+}
+
+/** Persist the drag editor's complete flattened tree in one database statement. */
+export async function reorderCategoriesAction(
+  formData: FormData,
+): Promise<void> {
+  await assertStaff();
+  const locale = safeLocale(formData.get("locale"));
+  const view = viewState(formData);
+  const order = parseCategoryOrder(formData.get("order"));
+  if (order === null) return finish(locale, "BAD_INPUT", view);
+
+  const supabase = await createServerSupabase();
+  const { data, error } = await supabase.rpc("staff_reorder_categories", {
+    p_order: order,
+    p_locale: locale,
+  });
+  if (error) {
+    console.error("reorderCategoriesAction:", error);
+    return finish(locale, reorderError(error), view);
+  }
+  if (data !== true) return finish(locale, "DB_ERROR", view);
+  return finish(locale, "ok", view);
+}
+
+/**
+ * Progressive enhancement for the sorter's ↑/↓ buttons. With JavaScript the
+ * component applies the step locally and the explicit Save posts once; without
+ * JavaScript this action derives the same full flattened tree server-side and
+ * persists it through the atomic reorder RPC.
  */
 export async function moveCategoryAction(formData: FormData): Promise<void> {
   await assertStaff();
@@ -520,24 +569,15 @@ export async function moveCategoryAction(formData: FormData): Promise<void> {
   // a row or group the list no longer holds. Both are refresh-and-look codes.
   if (!moved.ok) return finish(locale, moved.code, view);
 
-  const before = new Map(categories.map((row) => [row.id, row.sort_order]));
-  const changed = moved.sorts.filter(
-    (row) => before.get(row.id) !== row.sort_order,
-  );
-
-  // Bottom of the list upwards — see the note above. `changed` comes back in
-  // rail order, so this copy is reversed rather than iterated backwards by
-  // index, which keeps the loop body reading as "for each row".
-  for (const row of [...changed].reverse()) {
-    const result = await supabase
-      .from("categories")
-      .update({ sort_order: row.sort_order })
-      .eq("id", row.id);
-    if (result.error) {
-      console.error("moveCategoryAction write:", result.error);
-      return finish(locale, "DB_ERROR", view);
-    }
+  const result = await supabase.rpc("staff_reorder_categories", {
+    p_order: moved.sorts.map((row) => row.id),
+    p_locale: locale,
+  });
+  if (result.error) {
+    console.error("moveCategoryAction write:", result.error);
+    return finish(locale, reorderError(result.error), view);
   }
+  if (result.data !== true) return finish(locale, "DB_ERROR", view);
 
   return finish(locale, "ok", view);
 }

@@ -17,11 +17,99 @@ import {
   parseUserKind,
   passwordByteLength,
   STAFF_ROLES,
+  validateManagedAccount,
+  validateManagedPassword,
   validateNewCustomer,
   validateNewStaff,
   type RawCustomerInput,
   type RawStaffInput,
 } from "./user-admin";
+
+describe("managed account edits", () => {
+  it("normalizes and validates a customer edit", () => {
+    expect(
+      validateManagedAccount({
+        targetId: ` ${UUID.toUpperCase()} `,
+        kind: "customer",
+        email: " OWNER@Example.COM ",
+        displayName: " 陈老板 ",
+        active: "1",
+        companyId: OTHER_UUID,
+      }),
+    ).toEqual({
+      ok: true,
+      value: {
+        targetId: UUID.toUpperCase(),
+        kind: "customer",
+        email: "owner@example.com",
+        displayName: "陈老板",
+        active: true,
+        companyId: OTHER_UUID,
+      },
+    });
+  });
+
+  it("validates the staff-only role branch", () => {
+    expect(
+      validateManagedAccount({
+        targetId: UUID,
+        kind: "staff",
+        email: "staff@example.com",
+        displayName: "Marta",
+        active: "0",
+        role: "manager",
+      }),
+    ).toEqual({
+      ok: true,
+      value: {
+        targetId: UUID,
+        kind: "staff",
+        email: "staff@example.com",
+        displayName: "Marta",
+        active: false,
+        role: "manager",
+      },
+    });
+  });
+
+  it("does not let malformed branch data fall through", () => {
+    expect(
+      validateManagedAccount({
+        targetId: UUID,
+        kind: "customer",
+        email: "customer@example.com",
+        displayName: "Customer",
+        active: "1",
+        companyId: "not-a-company",
+      }),
+    ).toEqual({ ok: false, error: "BAD_COMPANY" });
+    expect(
+      validateManagedAccount({
+        targetId: UUID,
+        kind: "staff",
+        email: "staff@example.com",
+        displayName: "Staff",
+        active: "1",
+        role: "admin",
+      }),
+    ).toEqual({ ok: false, error: "BAD_ROLE" });
+  });
+
+  it("checks managed passwords in bytes without trimming", () => {
+    expect(validateManagedPassword("12345678")).toEqual({
+      ok: true,
+      value: "12345678",
+    });
+    expect(validateManagedPassword("short")).toEqual({
+      ok: false,
+      error: "BAD_PASSWORD",
+    });
+    expect(validateManagedPassword("长".repeat(25))).toEqual({
+      ok: false,
+      error: "BAD_PASSWORD",
+    });
+  });
+});
 
 /** A uuid the shape `portal_users.company_id` and `auth.users.id` really are. */
 const UUID = "11111111-1111-4111-8111-111111111111";

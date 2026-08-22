@@ -3,7 +3,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set search_path = public, extensions;
 
-select plan(88);
+select plan(89);
 
 -- Grants and policies: authenticated keeps legitimate reads but has no direct
 -- company/customer write path. Every public management RPC is authenticated-
@@ -778,8 +778,10 @@ select throws_ok(
   'a customer auth id cannot also receive a staff profile'
 );
 
--- Customer activation is manager+, staff activation/role are owner-only, and
--- missing targets report false rather than a misleading success.
+-- Customer activation joined staff activation/role as OWNER-ONLY on
+-- 2026-08-22 (migration 20260822120425_staff_account_management), when account
+-- editing was restricted to the superadministrator; missing targets still
+-- report false rather than a misleading success.
 select set_config(
   'request.jwt.claims',
   '{"sub":"20000000-0000-0000-0000-000000000003","role":"authenticated"}',
@@ -791,7 +793,7 @@ select throws_ok(
       false
     )$$,
   '42501',
-  'MANAGER_ONLY',
+  'OWNER_ONLY',
   'plain staff cannot change customer active state'
 );
 
@@ -806,13 +808,31 @@ select throws_ok(
       false
     )$$,
   '42501',
-  'MANAGER_ONLY',
+  'OWNER_ONLY',
   'customer cannot change another customer active state'
 );
 
 select set_config(
   'request.jwt.claims',
   '{"sub":"20000000-0000-0000-0000-000000000002","role":"authenticated"}',
+  true
+);
+-- The manager is the role this endpoint LOST on 2026-08-22, so the denial is
+-- pinned here rather than left to the new suite: this file is where a reader
+-- greps for who may deactivate a restaurant.
+select throws_ok(
+  $$select public.staff_set_customer_active(
+      '20000000-0000-0000-0000-000000000009',
+      false
+    )$$,
+  '42501',
+  'OWNER_ONLY',
+  'a manager may no longer change customer active state'
+);
+
+select set_config(
+  'request.jwt.claims',
+  '{"sub":"20000000-0000-0000-0000-000000000001","role":"authenticated"}',
   true
 );
 select is(
@@ -829,7 +849,7 @@ select is(
     false
   ),
   true,
-  'manager deactivates a customer'
+  'owner deactivates a customer'
 );
 select is(
   (

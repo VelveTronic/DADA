@@ -25,11 +25,13 @@ export function DisplayNameForm({
   locale,
   displayName,
   labels,
+  action = updateDisplayName,
 }: {
   locale: string;
   /** The current value, or "" when the row has none and the header falls back. */
   displayName: string;
   labels: { displayName: string; displayNameHint: string; save: string };
+  action?: (formData: FormData) => Promise<void>;
 }) {
   return (
     // The card this sits in pads its own ROWS rather than its box (design 07's
@@ -37,7 +39,7 @@ export function DisplayNameForm({
     // rules), so the form carries the gutter and the rule that separates it from
     // the row above. Class names only — nothing about the submit changed.
     <form
-      action={updateDisplayName}
+      action={action}
       className="border-t border-border px-4 py-4"
     >
       <input type="hidden" name="locale" value={locale} />
@@ -75,6 +77,7 @@ export function DisplayNameForm({
 export function PasswordForm({
   locale,
   labels,
+  action = changePassword,
 }: {
   locale: string;
   labels: {
@@ -86,6 +89,7 @@ export function PasswordForm({
     showPassword: string;
     hidePassword: string;
   };
+  action?: (formData: FormData) => Promise<void>;
 }) {
   const eyes = { show: labels.showPassword, hide: labels.hidePassword };
 
@@ -101,7 +105,7 @@ export function PasswordForm({
     // 384px `DisplayNameForm` puts on its own input, spent on one wrapper here
     // because `PasswordInput` owns the input's class string and there are three
     // of them.
-    <form action={changePassword} className="border-t border-border px-4 py-4">
+    <form action={action} className="border-t border-border px-4 py-4">
       <input type="hidden" name="locale" value={locale} />
 
       <div className="grid max-w-sm gap-3">

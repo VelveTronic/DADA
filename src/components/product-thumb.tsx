@@ -50,13 +50,13 @@ export const THUMB_LG_PX = 50;
 export type ThumbSize = typeof THUMB_PX | typeof THUMB_LG_PX;
 
 /**
- * The box itself, shared by the photo and the empty slot so a product without
- * one keeps its row aligned with every other row. The classes ARE the two
+ * The box itself, shared by the photo and the fallback mark so a product
+ * without one keeps its row aligned with every other row. The classes ARE the two
  * constants above — Tailwind cannot read them, so the pairs are kept next to
  * each other, and the numbers 44 and 50 appear nowhere else in the portal: a
  * caller that wants the large one imports `THUMB_LG_PX` rather than retyping it.
  */
-const THUMB_BOX = "shrink-0 rounded-lg border border-border bg-border";
+const THUMB_BOX = "shrink-0 overflow-hidden rounded-lg border border-border bg-border";
 const THUMB_BOX_SIZE: Record<ThumbSize, string> = {
   [THUMB_PX]: "size-11",
   [THUMB_LG_PX]: "size-[50px]",
@@ -72,10 +72,23 @@ export function ProductThumb({
 }) {
   const box = `${THUMB_BOX} ${THUMB_BOX_SIZE[size]}`;
 
-  // A plain neutral square for the handful of products the freepos library has
-  // no file for. Deliberately wordless: an "sin imagen" label would be one more
-  // string to carry in both languages for something the empty box already says.
-  if (!src) return <div className={box} />;
+  // Missing photos still identify the supplier: the DADA mark sits lightly in
+  // the same fixed box instead of leaving a neutral square that can look like a
+  // loading failure. The product name beside it remains the accessible label,
+  // so the decorative mark keeps an empty alt just like a real product photo.
+  if (!src) {
+    return (
+      <span className={`${box} flex items-center justify-center bg-surface-dim`}>
+        <Image
+          src="/brand/dada-logo.png"
+          alt=""
+          width={size}
+          height={size}
+          className="size-full object-contain p-1.5 opacity-50"
+        />
+      </span>
+    );
+  }
 
   return (
     <Image

@@ -5,10 +5,16 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { routing } from "@/i18n/routing";
 import { assertStaff } from "@/lib/auth/assert-staff";
-import type { LineEditResult, QueueTab } from "@/lib/orders";
+import type {
+  BulkConfirmActionState,
+  LineEditResult,
+  QueueTab,
+} from "@/lib/orders";
 import {
   isUuid,
   mapLineEditError,
+  normalizeBulkConfirmIds,
+  parseBulkConfirmResult,
   safeQueueTab,
   validateLineQty,
 } from "@/lib/orders";
@@ -106,6 +112,89 @@ export async function confirmOrder(formData: FormData) {
     });
     return { data, error };
   });
+}
+
+/**
+ * submitted[] → confirmed[] in one database transaction.
+ *
+ * The web app deliberately stops at `confirmed`.  The on-premise bridge is the
+ * only component with Wingest credentials and will claim these rows on its next
+ * run; moving that import into this Server Action would collapse the project's
+ * credential boundary back into the public web tier.
+ *
+ * Unlike the single-row form this action returns state to `useActionState`
+ * instead of redirecting.  The database reports both applied and skipped rows,
+ * so a concurrent confirmation is visible as a partial result rather than being
+ * guessed away.  A database error is transaction-wide: no successful prefix is
+ * possible because the UPDATE and audit INSERT live in one RPC transaction.
+ */
+export async function confirmOrdersBulk(
+  _previous: BulkConfirmActionState,
+  formData: FormData,
+): Promise<BulkConfirmActionState> {
+  // A Server Action is an independent POST endpoint.  The page guard and a
+  // disabled button are UI only; authorization is repeated here and again by
+  // the security-definer RPC.
+  await assertStaff();
+
+  const locale = safeLocale(formData.get("locale"));
+  const ids = normalizeBulkConfirmIds(formData.getAll("order_id"));
+  if (!ids) {
+    return {
+      outcome: "invalid",
+      requestedCount: 0,
+      confirmedCount: 0,
+      skippedCount: 0,
+    };
+  }
+
+  const supabase = await createServerSupabase();
+  try {
+    const { data, error } = await supabase.rpc("staff_bulk_confirm_orders", {
+      p_order_ids: ids,
+    });
+    if (error) {
+      console.error("staff bulk confirm:", error);
+      return {
+        outcome: "error",
+        requestedCount: ids.length,
+        confirmedCount: 0,
+        skippedCount: 0,
+      };
+    }
+
+    const result = parseBulkConfirmResult(data, ids);
+    if (!result) {
+      console.error("staff bulk confirm: malformed RPC result");
+      return {
+        outcome: "error",
+        requestedCount: ids.length,
+        confirmedCount: 0,
+        skippedCount: 0,
+      };
+    }
+
+    revalidatePath(`/${locale}/staff/pedidos`);
+    return {
+      outcome:
+        result.confirmedCount === result.requestedCount
+          ? "ok"
+          : result.confirmedCount === 0
+            ? "wrong-state"
+            : "partial",
+      requestedCount: result.requestedCount,
+      confirmedCount: result.confirmedCount,
+      skippedCount: result.skippedCount,
+    };
+  } catch (cause) {
+    console.error("staff bulk confirm:", cause);
+    return {
+      outcome: "error",
+      requestedCount: ids.length,
+      confirmedCount: 0,
+      skippedCount: 0,
+    };
+  }
 }
 
 /** submitted → cancelled, with an optional reason (stored as an event detail). */

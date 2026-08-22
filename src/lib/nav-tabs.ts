@@ -1,8 +1,8 @@
 /**
  * WHICH TAB IS LIT — the one rule, for every navigation surface the customer
  * shell draws: the phone's bottom `TabBar`, the desktop header's icon row
- * (`storefront-nav.tsx`) and the demand bar, which shows itself on the two
- * screens where goods are picked and nowhere else (`cart/cart-bar.tsx`).
+ * (`storefront-nav.tsx`) and the demand bar, which shows itself on the shop and
+ * its search child and nowhere else (`cart/cart-bar.tsx`).
  *
  * A pure module with NO imports, deliberately. Both callers are client
  * components and this is what they share; a shared list living in either of
@@ -18,7 +18,7 @@
  * catalogue's. Anything unrecognised (`/`, `/login`, `/staff/...`) answers
  * null: those screens are outside the customer shell entirely.
  */
-export type TabKey = "catalog" | "search" | "cart" | "account";
+export type TabKey = "catalog" | "categories" | "cart" | "account";
 
 /**
  * The pages behind 我的 — the tab, and the header's 用户 menu, which stays lit
@@ -34,7 +34,10 @@ export const ACCOUNT_PATHS = [
 
 const TAB_BY_SEGMENT: Record<string, TabKey> = {
   "/catalogo": "catalog",
-  "/buscar": "search",
+  // Search remains a child of the shop: it is reached from the catalogue's
+  // search field after its old navigation slot became the categories screen.
+  "/buscar": "catalog",
+  "/categorias": "categories",
   "/carrito": "cart",
   ...Object.fromEntries(ACCOUNT_PATHS.map((path) => [path, "account" as const])),
 };

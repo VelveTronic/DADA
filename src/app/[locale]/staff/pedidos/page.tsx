@@ -7,6 +7,7 @@ import {
   requeueOrder,
 } from "@/app/actions/staff-orders";
 import { OrderStatusBadge } from "@/components/order-status-badge";
+import { ProductThumb, THUMB_LG_PX } from "@/components/product-thumb";
 import { StaffShell } from "@/components/staff-shell";
 import { ADMIN_CARD, FIELD_SM } from "@/components/ui";
 import { beginStaff, finishStaff } from "@/lib/auth/guards";
@@ -27,7 +28,13 @@ import type { Database } from "@/lib/supabase/database.types";
 import type { PublicOrder } from "@/lib/supabase/public.types";
 import { PUBLIC_ORDER_COLUMNS } from "@/lib/supabase/public.types";
 import { LineQtyForm } from "./line-qty-form";
+import {
+  BulkConfirmAllCheckbox,
+  BulkConfirmCheckbox,
+  BulkConfirmScope,
+} from "./bulk-confirm-controls";
 import { QueueRow } from "./queue-row";
+import { TransitionSubmitButton } from "./transition-submit-button";
 
 export const dynamic = "force-dynamic";
 
@@ -40,25 +47,13 @@ export const dynamic = "force-dynamic";
 const PAGE_SIZE = 50;
 
 /**
- * The ceiling on the lines read below — asked for here rather than left to the
- * server, so the number lives beside the reasoning that shapes the query.
- *
- * PostgREST truncates any response at `max_rows` (1000 —
- * `supabase/config.toml:18`, and the same default on the cloud project) whether
- * or not a query asks for a limit, so this IS the bound either way.
- *
- * The arithmetic on THIS page: the queue draws at most `PAGE_SIZE` = 50 orders,
- * so 1000 rows is an average of 20 lines per order — and orders that size are
- * ordinary here, since `create_order` accepts up to 200 lines (TOO_MANY_LINES).
- * Fifty full restaurant orders therefore reach the cap, and what a truncated
- * read looks like on screen is decided by the sort below, not by luck.
- *
- * The `items.length === LINES_LIMIT` detection below holds only while this
- * number EQUALS the server's `max_rows`: lower the cloud cap under it and the
- * response stops at `max_rows` instead, the equality never fires, and the check
- * goes silent rather than loud. Move the two together.
+ * PostgREST caps one response at 1000 rows.  Details must be complete rather
+ * than whichever first thousand happened to arrive, so the queue reads stable
+ * pages until a short page.  `create_order` accepts at most 200 lines and this
+ * screen at most 50 orders; 10,000 is therefore the largest legal aggregate.
  */
-const LINES_LIMIT = 1000;
+const LINES_PAGE_SIZE = 1000;
+const MAX_QUEUE_LINES = PAGE_SIZE * 200;
 
 /**
  * The tab chips, per the mockup's filter row: active is its ink swatch with
@@ -103,7 +98,15 @@ const ACTION =
  * Notes go IN through the RPCs and are read back with service-role tooling.
  */
 type QueueOrder = PublicOrder & {
-  companies: { name: string; codcli: number | null } | null;
+  companies: {
+    name: string;
+    codcli: number | null;
+    cif: string | null;
+    phone: string | null;
+    address: string | null;
+    address_city: string | null;
+    postal_code: string | null;
+  } | null;
 };
 
 /**
@@ -137,7 +140,9 @@ type QueueItem = Pick<
   | "unit_price_cents"
   | "line_total_cents"
   | "is_weighed"
-> & { products: { is_weighed: boolean } | null };
+> & {
+  products: { is_weighed: boolean; image_url: string | null } | null;
+};
 
 /**
  * The three sortable columns, `?orden=` value → orders column. A whitelist
@@ -223,8 +228,8 @@ export default async function StaffOrdersPage({
     // hypothetical.
     .select(
       q && numericQ === null
-        ? `${PUBLIC_ORDER_COLUMNS}, companies:company_id!inner(name, codcli)`
-        : `${PUBLIC_ORDER_COLUMNS}, companies:company_id(name, codcli)`,
+        ? `${PUBLIC_ORDER_COLUMNS}, companies:company_id!inner(name, codcli, cif, phone, address, address_city, postal_code)`
+        : `${PUBLIC_ORDER_COLUMNS}, companies:company_id(name, codcli, cif, phone, address, address_city, postal_code)`,
     )
     .order(QUEUE_SORTS[sort], { ascending: dir === "asc" })
     .limit(PAGE_SIZE);
@@ -339,44 +344,71 @@ export default async function StaffOrdersPage({
   const [itemResult, failureResult] = await Promise.all([
     orderIds.length === 0
       ? Promise.resolve(null)
-      : perf.step(
-          "orderItems",
-          supabase
-            .from("order_items")
-            // One string literal, never a concatenation: supabase-js types the
-            // row from the literal, and `"a, " + "b"` widens to `string` and
-            // loses it. The embed is the product's live `is_weighed`, joined
-            // through the line's own FK column exactly as the orders query
-            // joins `companies` — one more join on the same round trip, rather
-            // than a second query per card.
-            .select(
-              "id, order_id, codart, name, qty, unit, units_per_case, unit_price_cents, line_total_cents, is_weighed, products:product_id(is_weighed)",
-            )
-            .in("order_id", orderIds)
-            // `order_id` FIRST, and the explicit `LINES_LIMIT`, are ONE
-            // decision: what a TRUNCATED read is allowed to look like on this
-            // screen. The cap applies whether or not it is asked for (see
-            // `LINES_LIMIT`), and fifty orders averaging twenty lines already
-            // reach it.
-            //
-            // Under a global `sort_order` the rows that fall off the end are
-            // the deepest lines of EVERY order at once: fifty cards each
-            // quietly missing their tail, each one wrong, and the totals under
-            // them — which are the ORDER's own `subtotal_cents`, not a sum of
-            // what is drawn — still right, so nothing on screen disagrees with
-            // anything. Grouping by `order_id` first makes the cut fall BETWEEN
-            // orders instead: every order before it carries all its lines, at
-            // most ONE straddles the boundary, and the rest have none at all.
-            // The trade is that `order_id` is a uuid, so WHICH orders end up
-            // past the cut is arbitrary rather than the oldest — acceptable
-            // because an order with no lines at all is the loud case, not the
-            // quiet one (see the log below). The secondary `sort_order` keeps
-            // each order's own lines in the order the customer built them,
-            // which is the order the ERP receives them in.
-            .order("order_id", { ascending: true })
-            .order("sort_order", { ascending: true })
-            .limit(LINES_LIMIT),
-        ),
+      : (async () => {
+          const gathered: QueueItem[] = [];
+          let offset = 0;
+          let page = 1;
+
+          while (offset <= MAX_QUEUE_LINES) {
+            const result = await perf.step(
+              page === 1 ? "orderItems" : `orderItems.${page}`,
+              supabase
+                .from("order_items")
+                // Count is exact so pagination remains correct even if the
+                // project's max_rows is lowered below our requested 1000.
+                .select(
+                  "id, order_id, codart, name, qty, unit, units_per_case, unit_price_cents, line_total_cents, is_weighed, products:product_id(is_weighed, image_url)",
+                  { count: "exact" },
+                )
+                .in("order_id", orderIds)
+                // Three stable keys: sort_order is allowed to tie, so `id`
+                // prevents a row moving across range boundaries between pages.
+                .order("order_id", { ascending: true })
+                .order("sort_order", { ascending: true })
+                .order("id", { ascending: true })
+                .range(offset, offset + LINES_PAGE_SIZE - 1),
+            );
+
+            if (result.error || result.count === null) {
+              return {
+                data: [] as QueueItem[],
+                error: result.error ?? new Error("missing order-item count"),
+                complete: false,
+              };
+            }
+            if (result.count > MAX_QUEUE_LINES) {
+              return {
+                data: [] as QueueItem[],
+                error: new Error(
+                  `order-item count ${result.count} exceeds legal queue maximum ${MAX_QUEUE_LINES}`,
+                ),
+                complete: false,
+              };
+            }
+
+            const rows: QueueItem[] = result.data ?? [];
+            gathered.push(...rows);
+            if (gathered.length >= result.count) {
+              return { data: gathered, error: null, complete: true };
+            }
+            if (rows.length === 0) {
+              return {
+                data: [] as QueueItem[],
+                error: new Error("order-item pagination made no progress"),
+                complete: false,
+              };
+            }
+
+            offset += rows.length;
+            page += 1;
+          }
+
+          return {
+            data: [] as QueueItem[],
+            error: new Error("order-item pagination exceeded its bound"),
+            complete: false,
+          };
+        })(),
     failedOrderIds.length === 0
       ? Promise.resolve(null)
       : perf.step(
@@ -391,26 +423,10 @@ export default async function StaffOrdersPage({
   if (itemResult) {
     if (itemResult.error)
       console.error("staff order items query:", itemResult.error);
-    items = itemResult.data ?? [];
-    // The customer's version of this read logs nothing here, and that is the
-    // right call THERE: a card whose lines were cut renders the documented
-    // no-counts state (`hasLines` in `order-card.tsx:99`), so the screen itself
-    // says it does not know. This page now takes the SAME position, in the same
-    // shape: the `<details>` block below is drawn only when the order has lines,
-    // because 明细（0 项）for an order that cannot legally have zero lines
-    // (`create_order` refuses EMPTY_ORDER —
-    // `20260816161500_bridge_caja_units.sql:203`) is not a degraded summary, it
-    // is a false statement in front of the staff member about to confirm it.
-    // That covers BOTH ways this array can come back short — a truncated read
-    // and a query error that leaves it empty — so what the screen loses is the
-    // line count, never the truth. The count being WITHHELD is not itself
-    // visible, which is why the log below still has work to do: it is the only
-    // place the reason is recorded.
-    if (items.length === LINES_LIMIT) {
-      console.error(
-        `staff order items query: ${LINES_LIMIT} rows for ${orderIds.length} orders — the read may be truncated and trailing orders may be missing lines`,
-      );
-    }
+    // Never render a successful-looking partial order.  Pagination either
+    // reaches the exact count or withholds every line and the dialog says the
+    // read failed.
+    if (itemResult.complete) items = itemResult.data;
   }
 
   const failuresByOrder = new Map<string, OrderBridgeFailure>();
@@ -474,6 +490,18 @@ export default async function StaffOrdersPage({
     bridge_failed: t("tabBridgeFailed"),
     all: t("tabAll"),
   };
+  // Bulk confirmation is deliberately scoped to the pending view.  The `all`
+  // tab remains a read/audit surface and never mixes selectable submitted rows
+  // with already-confirmed ones in one control.
+  const bulkEnabled = tab === "submitted";
+  const bulkEligibleIds = bulkEnabled
+    ? orders
+        .filter(
+          (order) =>
+            order.status === "submitted" && linesByOrder.has(order.id),
+        )
+        .map((order) => order.id)
+    : [];
 
   return (
     <StaffShell
@@ -613,11 +641,35 @@ export default async function StaffOrdersPage({
            in a `<tfoot>` of the same table. `overflow-x-auto` on its own
            wrapper: the drawer-width fallback is a sideways scroll INSIDE the
            card, never a page that scrolls sideways. */
-        <div className={`${ADMIN_CARD} mt-[18px] overflow-hidden`}>
+        <BulkConfirmScope
+          key={tab}
+          enabled={bulkEnabled}
+          eligibleIds={bulkEligibleIds}
+          locale={locale}
+          labels={{
+            selected: t("bulk.selected"),
+            confirm: t("bulk.confirm"),
+            confirming: t("bulk.confirming"),
+            bridgeNotice: t("bulk.bridgeNotice"),
+            resultOk: t("bulk.resultOk"),
+            resultPartial: t("bulk.resultPartial"),
+            resultWrongState: t("bulk.resultWrongState"),
+            resultInvalid: t("bulk.resultInvalid"),
+            resultError: t("bulk.resultError"),
+            confirmed: t("bulk.confirmed"),
+            skipped: t("bulk.skipped"),
+          }}
+        >
+          <div className={`${ADMIN_CARD} mt-[18px] overflow-hidden`}>
           <div className="overflow-x-auto">
             <table className="w-full text-[13px]">
               <thead>
                 <tr className="text-left text-[11.5px] text-ink-soft">
+                  {bulkEnabled && (
+                    <th className="py-2.5 pl-[18px] pr-1 text-center font-medium">
+                      <BulkConfirmAllCheckbox label={t("bulk.selectAll")} />
+                    </th>
+                  )}
                   <th
                     className="py-2.5 pl-[18px] pr-3 font-medium whitespace-nowrap"
                     aria-sort={
@@ -654,10 +706,18 @@ export default async function StaffOrdersPage({
                       {sort === "fecha" && (dir === "desc" ? " ▼" : " ▲")}
                     </Link>
                   </th>
-                  <th className="px-3 py-2.5 font-medium">{t("colClient")}</th>
-                  <th className="px-3 py-2.5 font-medium">{t("lines")}</th>
-                  <th className="px-3 py-2.5 font-medium">{t("print.link")}</th>
-                  <th className="px-3 py-2.5 font-medium">{t("colStatus")}</th>
+                  <th className="px-3 py-2.5 font-medium whitespace-nowrap">
+                    {t("colClient")}
+                  </th>
+                  <th className="px-3 py-2.5 font-medium whitespace-nowrap">
+                    {t("lines")}
+                  </th>
+                  <th className="px-3 py-2.5 font-medium whitespace-nowrap">
+                    {t("print.link")}
+                  </th>
+                  <th className="px-3 py-2.5 font-medium whitespace-nowrap">
+                    {t("colStatus")}
+                  </th>
                   <th
                     className="py-2.5 pl-3 pr-[18px] text-right font-medium whitespace-nowrap"
                     aria-sort={
@@ -740,6 +800,13 @@ export default async function StaffOrdersPage({
                   ? t("albaran", { n: order.numalb })
                   : null,
               ].filter((part): part is string => part !== null);
+              const address = [
+                order.companies?.address,
+                order.companies?.address_city,
+                order.companies?.postal_code,
+              ]
+                .filter(Boolean)
+                .join(", ");
               /**
                * The fold behind the row's 明细 toggle. The count lives on that
                * toggle, which is why the mockup's 种类 column is not on the row
@@ -759,8 +826,12 @@ export default async function StaffOrdersPage({
                */
               const linesFold =
                 lines.length > 0 ? (
-                  <ul className="mt-2 space-y-1 text-sm">
-                    {lines.map((line) => {
+                  <section>
+                    <h3 className="text-sm font-bold text-ink">
+                      {t("orderLines", { n: lines.length })}
+                    </h3>
+                    <ul className="mt-2 space-y-2">
+                      {lines.map((line) => {
                       // The live flag, with the line's own snapshot as the
                       // fallback — the same coalesce the RPC makes, so the box
                       // this row draws and the rule that judges it agree. Saving
@@ -780,88 +851,218 @@ export default async function StaffOrdersPage({
                         locale,
                       );
                       const name = localizedName(line.name, locale);
-                      return (
-                        <li
-                          key={line.id}
-                          className="flex flex-wrap items-center gap-x-2 gap-y-0.5"
-                        >
-                          <span className="font-mono text-xs text-muted">
-                            {line.codart}
-                          </span>
-                          {/* The name is the order's own snapshot, not the
-                              product's — a renamed article still reads the way
-                              the customer ordered it. */}
-                          <span className="min-w-0 flex-1 truncate">{name}</span>
-                          {/* Why this line's box takes decimals, said once, in
-                              the vocabulary the catalogue already uses. */}
-                          {weighed && (
-                            <span className="rounded-md bg-amber-100 px-1.5 py-0.5 text-xs text-amber-800">
-                              {tCatalog("weighed")}
-                            </span>
-                          )}
-                          {editable ? (
-                            <>
-                              <LineQtyForm
-                                orderId={order.id}
-                                itemId={line.id}
-                                qty={line.qty}
-                                isWeighed={weighed}
-                                locale={locale}
-                                tab={tab}
-                                labels={{
-                                  save: t("saveQty"),
-                                  saveFor: t("saveQtyFor", { name }),
-                                  qtyFor: t("lineQtyFor", { name }),
-                                  kg: t("kg"),
-                                }}
-                              />
-                              {/* The packaging fact the read-only row states,
-                                  kept on the editable one: `CAJA×24` is what
-                                  makes the price beside it legible, and 待确认
-                                  is the tab where somebody is deciding a
-                                  quantity against it. */}
-                              <span className="text-xs text-muted tabular-nums">
-                                {unitLabel(line.unit, line.units_per_case)} ×{" "}
-                                {perCase}
-                              </span>
-                            </>
-                          ) : (
-                            <span className="text-xs text-muted tabular-nums">
-                              {line.qty}{" "}
-                              {unitLabel(line.unit, line.units_per_case)} ×{" "}
-                              {perCase}
-                            </span>
-                          )}
-                          <span className="w-20 text-right tabular-nums">
-                            {formatEuros(line.line_total_cents, locale)}
-                          </span>
-                        </li>
-                      );
-                    })}
-                  </ul>
+                        return (
+                          <li
+                            key={line.id}
+                            className="flex gap-3 rounded-xl border border-border bg-surface-dim p-3"
+                          >
+                            <ProductThumb
+                              src={line.products?.image_url ?? null}
+                              size={THUMB_LG_PX}
+                            />
+                            <div className="min-w-0 flex-1">
+                              {/* The name is the order's own snapshot, not the
+                                  product's — a renamed article still reads the
+                                  way the customer ordered it. */}
+                              <p className="break-words text-[13.5px] font-semibold leading-snug">
+                                {name || line.codart}
+                              </p>
+                              <p className="mt-0.5 font-mono text-[11px] text-muted">
+                                {t("detail.sku")}: {line.codart}
+                              </p>
+
+                              <div className="mt-2 flex flex-wrap items-center gap-2">
+                                {editable ? (
+                                  <LineQtyForm
+                                    orderId={order.id}
+                                    itemId={line.id}
+                                    qty={line.qty}
+                                    isWeighed={weighed}
+                                    locale={locale}
+                                    tab={tab}
+                                    labels={{
+                                      save: t("saveQty"),
+                                      saveFor: t("saveQtyFor", { name }),
+                                      qtyFor: t("lineQtyFor", { name }),
+                                      kg: t("kg"),
+                                    }}
+                                  />
+                                ) : (
+                                  <span className="text-sm font-semibold tabular-nums">
+                                    {t("detail.quantity")}: {line.qty}{" "}
+                                    {weighed
+                                      ? t("kg")
+                                      : unitLabel(
+                                          line.unit,
+                                          line.units_per_case,
+                                        )}
+                                  </span>
+                                )}
+                                {weighed && (
+                                  <span className="rounded-md bg-amber-100 px-1.5 py-0.5 text-xs text-amber-800">
+                                    {tCatalog("weighed")}
+                                  </span>
+                                )}
+                              </div>
+
+                              <dl className="mt-2 grid grid-cols-1 gap-1 text-xs text-muted sm:grid-cols-2">
+                                <div>
+                                  <dt className="inline">{t("detail.unitPrice")}: </dt>
+                                  <dd className="inline tabular-nums">
+                                    {perCase}
+                                    {unitLabel(
+                                      line.unit,
+                                      line.units_per_case,
+                                    ) && (
+                                      <>
+                                        {" · "}
+                                        {unitLabel(
+                                          line.unit,
+                                          line.units_per_case,
+                                        )}
+                                      </>
+                                    )}
+                                  </dd>
+                                </div>
+                                <div className="sm:text-right">
+                                  <dt className="inline">{t("detail.lineSubtotal")}: </dt>
+                                  <dd className="inline font-semibold text-ink tabular-nums">
+                                    {formatEuros(
+                                      line.line_total_cents,
+                                      locale,
+                                    )}
+                                  </dd>
+                                </div>
+                              </dl>
+                            </div>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </section>
                 ) : null;
-              /**
-               * Everything that used to render UNDER the card row, now the
-               * content of the fold `<tr>`: the lines, the customer's note,
-               * the failure box and the action forms. `null` when the order
-               * has none of them — which is also the no-toggle case, so a row
-               * with nothing to open never grows a dead button. The action
-               * forms moving in here is deliberate: on 待确认 the staff member
-               * opens the fold to CHECK THE LINES before confirming anyway,
-               * and the one row the table shows stays one row tall.
-               */
-              const fold =
-                linesFold !== null ||
-                order.customer_note ||
-                order.status === "bridge_failed" ||
-                cancellable ? (
-                  <div>
-                    {linesFold}
-                    {order.customer_note && (
-                    <p className="mt-2 text-[12.5px]">
-                      {t("customerNote")}: {order.customer_note}
-                    </p>
-                  )}
+              /** Every order gets a detail window, including a degraded read. */
+              const orderDetail = (
+                <div>
+                     <dl className="grid grid-cols-2 gap-x-4 gap-y-3 rounded-xl border border-border bg-surface-dim p-3 text-sm sm:grid-cols-4">
+                       <div>
+                         <dt className="text-xs text-muted">
+                           {t("detail.orderNumber")}
+                         </dt>
+                         <dd className="mt-0.5 font-num font-semibold tabular-nums">
+                           {order.order_number}
+                         </dd>
+                       </div>
+                       <div>
+                         <dt className="text-xs text-muted">
+                           {t("detail.createdAt")}
+                         </dt>
+                         <dd className="mt-0.5">
+                           {formatOrderDate(order.created_at, locale)}
+                         </dd>
+                       </div>
+                       <div>
+                         <dt className="text-xs text-muted">
+                           {t("detail.deliveryDate")}
+                         </dt>
+                         <dd className="mt-0.5">
+                           {order.delivery_date
+                             ? formatOrderDate(order.delivery_date, locale)
+                             : "—"}
+                         </dd>
+                       </div>
+                       <div>
+                         <dt className="text-xs text-muted">
+                           {t("detail.status")}
+                         </dt>
+                         <dd className="mt-0.5 whitespace-nowrap">
+                           <OrderStatusBadge status={order.status} />
+                         </dd>
+                       </div>
+                       <div className="col-span-2">
+                         <dt className="text-xs text-muted">
+                           {t("detail.client")}
+                         </dt>
+                         <dd className="mt-0.5 break-words font-semibold">
+                           {order.companies?.name ?? "—"}
+                         </dd>
+                       </div>
+                       <div>
+                         <dt className="text-xs text-muted">
+                           {t("detail.customerCode")}
+                         </dt>
+                         <dd className="mt-0.5 font-num tabular-nums">
+                           {order.companies?.codcli ?? "—"}
+                         </dd>
+                       </div>
+                       <div>
+                         <dt className="text-xs text-muted">
+                           {t("detail.subtotal")}
+                         </dt>
+                         <dd className="mt-0.5 font-semibold tabular-nums">
+                           {formatEuros(order.subtotal_cents, locale)}
+                         </dd>
+                       </div>
+                       <div className="col-span-2 sm:col-span-4">
+                         <dt className="text-xs text-muted">
+                           {t("detail.address")}
+                         </dt>
+                         <dd className="mt-0.5 break-words">{address || "—"}</dd>
+                       </div>
+                       <div className="col-span-2 sm:col-span-1">
+                         <dt className="text-xs text-muted">
+                           {t("detail.phone")}
+                         </dt>
+                         <dd className="mt-0.5 break-words">
+                           {order.companies?.phone ?? "—"}
+                         </dd>
+                       </div>
+                       <div className="col-span-2 sm:col-span-1">
+                         <dt className="text-xs text-muted">
+                           {t("detail.cif")}
+                         </dt>
+                         <dd className="mt-0.5 break-words">
+                           {order.companies?.cif ?? "—"}
+                         </dd>
+                       </div>
+                       <div>
+                         <dt className="text-xs text-muted">
+                           {t("detail.wingestOrder")}
+                         </dt>
+                         <dd className="mt-0.5 font-num tabular-nums">
+                           {order.numped ?? "—"}
+                         </dd>
+                       </div>
+                       <div>
+                         <dt className="text-xs text-muted">
+                           {t("detail.albaran")}
+                         </dt>
+                         <dd className="mt-0.5 font-num tabular-nums">
+                           {order.numalb ?? "—"}
+                         </dd>
+                       </div>
+                     </dl>
+
+                     {linesFold ? (
+                       <div className="mt-5">{linesFold}</div>
+                     ) : (
+                       <p
+                         role="alert"
+                         className="mt-4 rounded-xl border border-red-200 bg-red-50 px-3 py-2.5 text-sm text-red-800"
+                       >
+                         {t("detail.linesUnavailable")}
+                       </p>
+                     )}
+                     {order.customer_note && (
+                       <div className="mt-4 rounded-xl border border-border px-3 py-2.5 text-[13px]">
+                         <p className="text-xs font-semibold text-muted">
+                           {t("customerNote")}
+                         </p>
+                         <p className="mt-1 whitespace-pre-wrap break-words">
+                           {order.customer_note}
+                         </p>
+                       </div>
+                     )}
 
                   {order.status === "bridge_failed" && (
                     <div className="mt-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-900">
@@ -904,7 +1105,7 @@ export default async function StaffOrdersPage({
 
                   {cancellable && (
                     <div className="mt-3 flex flex-wrap items-start gap-x-4 gap-y-2">
-                      {confirmable && (
+                       {confirmable && lines.length > 0 && (
                         <form
                           action={confirmOrder}
                           className="flex flex-wrap items-center gap-1"
@@ -933,15 +1134,14 @@ export default async function StaffOrdersPage({
                           {/* The one accent on the row, and the press this
                               queue exists for: it keeps the solid brand fill it
                               shipped with. */}
-                          <button
-                            type="submit"
-                            aria-label={t("confirmFor", {
-                              n: order.order_number,
-                            })}
-                            className={`${ACTION} bg-brand font-semibold text-white hover:bg-brand/90`}
-                          >
-                            {t("confirm")}
-                          </button>
+                           <TransitionSubmitButton
+                             label={t("confirm")}
+                             pendingLabel={t("actionPending")}
+                             ariaLabel={t("confirmFor", {
+                               n: order.order_number,
+                             })}
+                             className={`${ACTION} bg-brand font-semibold text-white hover:bg-brand/90`}
+                           />
                         </form>
                       )}
 
@@ -963,13 +1163,14 @@ export default async function StaffOrdersPage({
                         />
                         {/* Cancelling is destructive, not the accent: it keeps the
                             semantic red it has always had. */}
-                        <button
-                          type="submit"
-                          aria-label={t("cancelFor", { n: order.order_number })}
-                          className={`${ACTION} border border-red-300 text-red-700 hover:bg-red-50`}
-                        >
-                          {t("cancel")}
-                        </button>
+                         <TransitionSubmitButton
+                           label={t("cancel")}
+                           pendingLabel={t("actionPending")}
+                           ariaLabel={t("cancelFor", {
+                             n: order.order_number,
+                           })}
+                           className={`${ACTION} border border-red-300 text-red-700 hover:bg-red-50`}
+                         />
                       </form>
                     </div>
                   )}
@@ -982,21 +1183,33 @@ export default async function StaffOrdersPage({
                       <input type="hidden" name="order_id" value={order.id} />
                       <input type="hidden" name="locale" value={locale} />
                       <input type="hidden" name="estado" value={tab} />
-                      <button
-                        type="submit"
-                        aria-label={t("requeueFor", { n: order.order_number })}
-                        className={`${ACTION} border border-amber-400 bg-amber-50 font-medium text-amber-900 hover:bg-amber-100`}
-                      >
-                        {t("requeue")}
-                      </button>
+                       <TransitionSubmitButton
+                         label={t("requeue")}
+                         pendingLabel={t("actionPending")}
+                         ariaLabel={t("requeueFor", {
+                           n: order.order_number,
+                         })}
+                         className={`${ACTION} border border-amber-400 bg-amber-50 font-medium text-amber-900 hover:bg-amber-100`}
+                       />
                     </form>
                   )}
-                  </div>
-                ) : null;
+                </div>
+              );
 
               return (
                 <QueueRow
                   key={order.id}
+                  selectionColumn={bulkEnabled}
+                  selection={
+                    bulkEnabled && lines.length > 0 ? (
+                      <BulkConfirmCheckbox
+                        id={order.id}
+                        label={t("bulk.selectOrder", {
+                          n: order.order_number,
+                        })}
+                      />
+                    ) : undefined
+                  }
                   number={
                     <span className="font-num text-[12.5px] font-semibold">
                       {order.order_number}
@@ -1017,6 +1230,10 @@ export default async function StaffOrdersPage({
                   }
                   toggleLabel={t("lines")}
                   toggleAria={t("orderLinesFor", { n: order.order_number })}
+                  detailsTitle={t("detail.title", {
+                    n: order.order_number,
+                  })}
+                  closeLabel={t("detail.close")}
                   printHref={`/${locale}/staff/pedidos/${order.id}/imprimir`}
                   printLabel={t("print.link")}
                   printAria={t("print.linkFor", { n: order.order_number })}
@@ -1027,7 +1244,7 @@ export default async function StaffOrdersPage({
                       {formatEuros(order.subtotal_cents, locale)}
                     </>
                   }
-                  fold={fold}
+                  detail={orderDetail}
                 />
               );
             })}
@@ -1047,7 +1264,7 @@ export default async function StaffOrdersPage({
                 <tfoot>
                   <tr className="border-t border-[#F4F0EC]">
                     <td
-                      colSpan={7}
+                      colSpan={bulkEnabled ? 8 : 7}
                       className="px-[18px] py-3.5 text-xs text-muted"
                     >
                       {q ? (
@@ -1077,7 +1294,8 @@ export default async function StaffOrdersPage({
               )}
             </table>
           </div>
-        </div>
+          </div>
+        </BulkConfirmScope>
       )}
     </StaffShell>
   );

@@ -59,3 +59,10 @@ next-env.d.ts
 # 0002c revokes from authenticated readers. It lands next to the export script
 # when the owner runs it; it must never be committed. Delete it after merging.
 scripts/wingest/prices.csv
+
+# Ad-hoc diagnostic scripts. They routinely hold a real login while a bug is
+# being chased, and one was left in the tree on 2026-08-22 carrying a live
+# customer password. Name a throwaway `*.tmp.*` and git will not see it.
+*.tmp.mjs
+*.tmp.ts
+*.tmp.js

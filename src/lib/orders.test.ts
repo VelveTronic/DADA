@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   ACTIVE_ORDER_STATUSES,
   addDays,
+  BULK_CONFIRM_LIMIT,
   CUSTOMER_ORDER_TABS,
   formatOrderDate,
   isCustomerOrderTab,
@@ -18,9 +19,11 @@ import {
   mapLineEditError,
   mapOrderError,
   MAX_LINE_QTY,
+  normalizeBulkConfirmIds,
   ORDER_STATUSES,
   orderUnits,
   parseOrderBridgeFailures,
+  parseBulkConfirmResult,
   parseOrderNumber,
   parseReorderCount,
   QUEUE_TABS,
@@ -28,6 +31,126 @@ import {
   statusesForTab,
   validateLineQty,
 } from "./orders";
+
+const BULK_ID_A = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+const BULK_ID_B = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+const BULK_ID_C = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+
+describe("bulk confirmation result boundary", () => {
+  it("normalizes UUID case and removes duplicates in first-request order", () => {
+    expect(
+      normalizeBulkConfirmIds([
+        BULK_ID_B.toUpperCase(),
+        BULK_ID_A,
+        BULK_ID_B,
+      ]),
+    ).toEqual([BULK_ID_B, BULK_ID_A]);
+  });
+
+  it("rejects empty, oversized and malformed raw selections", () => {
+    expect(normalizeBulkConfirmIds([])).toBeNull();
+    expect(
+      normalizeBulkConfirmIds(Array(BULK_CONFIRM_LIMIT + 1).fill(BULK_ID_A)),
+    ).toBeNull();
+    expect(normalizeBulkConfirmIds(["not-a-uuid"])).toBeNull();
+    expect(normalizeBulkConfirmIds([BULK_ID_A, null])).toBeNull();
+  });
+
+  it("accepts an ordered, disjoint partition of exactly the request", () => {
+    expect(
+      parseBulkConfirmResult(
+        {
+          requested_count: 3,
+          confirmed_count: 2,
+          skipped_count: 1,
+          confirmed_ids: [BULK_ID_A, BULK_ID_C],
+          skipped_ids: [BULK_ID_B],
+        },
+        [BULK_ID_A, BULK_ID_B, BULK_ID_C],
+      ),
+    ).toEqual({
+      requestedCount: 3,
+      confirmedCount: 2,
+      skippedCount: 1,
+      confirmedIds: [BULK_ID_A, BULK_ID_C],
+      skippedIds: [BULK_ID_B],
+    });
+  });
+
+  it("accepts the all-skipped race outcome", () => {
+    expect(
+      parseBulkConfirmResult(
+        {
+          requested_count: 2,
+          confirmed_count: 0,
+          skipped_count: 2,
+          confirmed_ids: [],
+          skipped_ids: [BULK_ID_A, BULK_ID_B],
+        },
+        [BULK_ID_A, BULK_ID_B],
+      ),
+    ).toMatchObject({ confirmedCount: 0, skippedCount: 2 });
+  });
+
+  it.each([
+    ["not an object", "bad"],
+    ["missing fields", { requested_count: 1 }],
+    [
+      "wrong counts",
+      {
+        requested_count: 2,
+        confirmed_count: 2,
+        skipped_count: 0,
+        confirmed_ids: [BULK_ID_A],
+        skipped_ids: [],
+      },
+    ],
+    [
+      "unexpected id",
+      {
+        requested_count: 1,
+        confirmed_count: 1,
+        skipped_count: 0,
+        confirmed_ids: [BULK_ID_C],
+        skipped_ids: [],
+      },
+    ],
+    [
+      "overlapping partitions",
+      {
+        requested_count: 2,
+        confirmed_count: 1,
+        skipped_count: 1,
+        confirmed_ids: [BULK_ID_A],
+        skipped_ids: [BULK_ID_A],
+      },
+    ],
+    [
+      "duplicate reply ids",
+      {
+        requested_count: 2,
+        confirmed_count: 2,
+        skipped_count: 0,
+        confirmed_ids: [BULK_ID_A, BULK_ID_A],
+        skipped_ids: [],
+      },
+    ],
+    [
+      "partition order changed",
+      {
+        requested_count: 3,
+        confirmed_count: 2,
+        skipped_count: 1,
+        confirmed_ids: [BULK_ID_C, BULK_ID_A],
+        skipped_ids: [BULK_ID_B],
+      },
+    ],
+  ])("rejects %s", (_name, value) => {
+    expect(
+      parseBulkConfirmResult(value, [BULK_ID_A, BULK_ID_B, BULK_ID_C]),
+    ).toBeNull();
+  });
+});
 
 describe("madridDay", () => {
   it("reads the civil day in Madrid, not in UTC", () => {

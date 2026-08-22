@@ -17,10 +17,13 @@ import {
   parseActiveFlag,
   parseStaffRole,
   parseUserKind,
+  validateManagedAccount,
+  validateManagedPassword,
   validateNewCustomer,
   validateNewStaff,
   type CreateAccountState,
   type CreateFormValues,
+  type ManagedAccountState,
   type NewCustomerInput,
   type NewStaffInput,
   type UserAdminError,
@@ -461,6 +464,216 @@ export async function createStaffAccount(
   return finish(locale, "ok");
 }
 
+function managedResult(result: "ok" | UserAdminError): ManagedAccountState {
+  return { result };
+}
+
+function revalidateManagedAccounts(): void {
+  for (const locale of routing.locales) {
+    revalidatePath(`/${locale}/staff/usuarios`);
+  }
+}
+
+/**
+ * Edit one customer's or staff member's public profile and login email.
+ *
+ * The two systems cannot share a transaction. Email is changed first; if the
+ * role-checked profile RPC then fails, the old email is restored. An uncertain
+ * network outcome is named in the server log for manual verification rather
+ * than silently presented as an atomic success.
+ */
+export async function updateManagedAccount(
+  _previous: ManagedAccountState,
+  formData: FormData,
+): Promise<ManagedAccountState> {
+  const locale = safeLocale(formData.get("locale"));
+  const { user, staffUser, supabase } = await requireRpcStaff(locale);
+  if (!canManageStaff(staffUser.role)) throw new Error("FORBIDDEN");
+
+  const checked = validateManagedAccount({
+    targetId: formData.get("user_id"),
+    kind: formData.get("kind"),
+    email: formData.get("email"),
+    displayName: formData.get("display_name"),
+    active: formData.get("active"),
+    companyId: formData.get("company_id"),
+    role: formData.get("role"),
+  });
+  if (!checked.ok) return managedResult(checked.error);
+
+  const input = checked.value;
+  if (input.kind === "staff") {
+    const target = assertNotSelf(user.id, input.targetId);
+    if (!target.ok) return managedResult(target.error);
+  }
+
+  const admin = createAdminClient();
+  const [authResult, profileResult] = await Promise.all([
+    admin.auth.admin.getUserById(input.targetId),
+    input.kind === "customer"
+      ? admin
+          .from("portal_users")
+          .select("display_name, company_id, is_active")
+          .eq("id", input.targetId)
+          .maybeSingle()
+      : admin
+          .from("staff_users")
+          .select("display_name, role, is_active")
+          .eq("id", input.targetId)
+          .maybeSingle(),
+  ]);
+
+  if (authResult.error) {
+    console.error("updateManagedAccount auth lookup:", describeDbError(authResult.error));
+    return managedResult("AUTH_ERROR");
+  }
+  if (profileResult.error) {
+    console.error("updateManagedAccount profile lookup:", describeDbError(profileResult.error));
+    return managedResult(classifyDbError(profileResult.error));
+  }
+  const authUser = authResult.data.user;
+  const previousProfile = profileResult.data;
+  if (!authUser || !previousProfile) return managedResult("NOT_FOUND");
+
+  const previousEmail = authUser.email ?? "";
+  const emailChanged = previousEmail.toLowerCase() !== input.email;
+  if (emailChanged) {
+    try {
+      const { data, error } = await admin.auth.admin.updateUserById(input.targetId, {
+        email: input.email,
+        email_confirm: true,
+      });
+      if (error || data.user?.id !== input.targetId) {
+        console.error(
+          "updateManagedAccount email:",
+          describeDbError(error) || "invalid auth success payload",
+        );
+        if (!hasDefinitiveAuthRejection(error)) {
+          console.error(
+            `MANUAL CLEANUP CHECK NEEDED: verify the login email for auth user ${input.targetId}`,
+          );
+        }
+        return managedResult(classifyCreateUserError(error));
+      }
+    } catch (cause) {
+      console.error("updateManagedAccount email:", describeDbError(cause));
+      console.error(
+        `MANUAL CLEANUP CHECK NEEDED: verify the login email for auth user ${input.targetId}`,
+      );
+      return managedResult("AUTH_ERROR");
+    }
+  }
+
+  let failure: UserAdminError | null = null;
+  let rpcError: unknown = null;
+  try {
+    const reply =
+      input.kind === "customer"
+        ? await supabase.rpc("staff_update_customer_account", {
+            p_user_id: input.targetId,
+            p_display_name: input.displayName,
+            p_company_id: input.companyId,
+            p_active: input.active,
+          })
+        : await supabase.rpc("staff_update_staff_account", {
+            p_user_id: input.targetId,
+            p_display_name: input.displayName,
+            p_role: input.role,
+            p_active: input.active,
+          });
+    rpcError = reply.error;
+    failure = classifyBooleanRpcReply(reply.data, reply.error);
+  } catch (cause) {
+    rpcError = cause;
+    failure = "DB_ERROR";
+  }
+
+  if (failure) {
+    console.error("updateManagedAccount profile:", describeDbError(rpcError));
+    if (rpcError && !hasDefinitiveDatabaseErrorCode(rpcError)) {
+      console.error(
+        `MANUAL CLEANUP CHECK NEEDED: verify the public profile for auth user ${input.targetId}`,
+      );
+    }
+    if (emailChanged && previousEmail) {
+      await cleanUp(`restore login email for auth user ${input.targetId}`, async () => {
+        const { error } = await admin.auth.admin.updateUserById(input.targetId, {
+          email: previousEmail,
+          email_confirm: true,
+        });
+        if (error) throw error;
+      });
+    }
+    return managedResult(failure);
+  }
+
+  revalidateManagedAccounts();
+  return managedResult("ok");
+}
+
+/** Set a new password for another account. The password never enters state/logs. */
+export async function updateManagedPassword(
+  _previous: ManagedAccountState,
+  formData: FormData,
+): Promise<ManagedAccountState> {
+  const locale = safeLocale(formData.get("locale"));
+  const { user, staffUser } = await requireRpcStaff(locale);
+  if (!canManageStaff(staffUser.role)) throw new Error("FORBIDDEN");
+
+  const kind = parseUserKind(formData.get("kind"));
+  if (!kind.ok) return managedResult(kind.error);
+  const rawTarget = formData.get("user_id");
+  if (!isUuid(rawTarget)) return managedResult("BAD_TARGET");
+  const targetId = String(rawTarget).trim();
+  if (kind.value === "staff") {
+    const target = assertNotSelf(user.id, targetId);
+    if (!target.ok) return managedResult(target.error);
+  }
+
+  const password = validateManagedPassword(formData.get("password"));
+  if (!password.ok) return managedResult(password.error);
+  if (password.value !== formData.get("confirm_password")) {
+    return managedResult("PASSWORD_MISMATCH");
+  }
+
+  const admin = createAdminClient();
+  const profile =
+    kind.value === "customer"
+      ? await admin.from("portal_users").select("id").eq("id", targetId).maybeSingle()
+      : await admin.from("staff_users").select("id").eq("id", targetId).maybeSingle();
+  if (profile.error) {
+    console.error("updateManagedPassword profile lookup:", describeDbError(profile.error));
+    return managedResult(classifyDbError(profile.error));
+  }
+  if (!profile.data) return managedResult("NOT_FOUND");
+
+  try {
+    const { data, error } = await admin.auth.admin.updateUserById(targetId, {
+      password: password.value,
+    });
+    if (error || data.user?.id !== targetId) {
+      console.error(
+        "updateManagedPassword:",
+        describeDbError(error) || "invalid auth success payload",
+      );
+      if (!hasDefinitiveAuthRejection(error)) {
+        console.error(
+          `MANUAL CLEANUP CHECK NEEDED: verify the password outcome for auth user ${targetId}`,
+        );
+      }
+      return managedResult(classifyCreateUserError(error));
+    }
+  } catch (cause) {
+    console.error("updateManagedPassword:", describeDbError(cause));
+    console.error(
+      `MANUAL CLEANUP CHECK NEEDED: verify the password outcome for auth user ${targetId}`,
+    );
+    return managedResult("AUTH_ERROR");
+  }
+
+  return managedResult("ok");
+}
+
 /**
  * Move a staff member between 普通员工 / 经理 / 超级管理员. Owner only.
  *
@@ -501,7 +714,8 @@ export async function setStaffRole(formData: FormData): Promise<void> {
 }
 
 /**
- * 停用 / 启用 an account. Customer rows are manager+, staff rows are owner-only.
+ * Legacy one-button status endpoint. Account editing is owner-only for both
+ * customer and staff rows; the database replacement repeats that boundary.
  *
  * Deactivating is this app's delete: `requireCompanyUser` and `requireStaff`
  * both bounce an inactive row to `?error=inactive`, and the RLS helpers stop
@@ -513,20 +727,10 @@ export async function setUserActive(formData: FormData): Promise<void> {
   const locale = safeLocale(formData.get("locale"));
   const { user, staffUser, supabase } = await requireRpcStaff(locale);
 
-  // The FLOOR first: a plain staff member may not touch either table, so they
-  // are turned away before the request is even parsed. Without this line a
-  // caller with no permissions could tell a malformed request (`BAD_KIND` in the
-  // URL) from a well-formed one (a thrown FORBIDDEN) and learn the field names
-  // of an action they can never run.
-  if (!canManageUsers(staffUser.role)) throw new Error("FORBIDDEN");
+  if (!canManageStaff(staffUser.role)) throw new Error("FORBIDDEN");
 
   const kind = parseUserKind(formData.get("kind"));
-  // The kind is read next because it decides which of the two gates applies:
-  // customer rows are manager+, staff rows are the owner's alone.
   if (!kind.ok) return finish(locale, kind.error);
-  if (kind.value === "staff" && !canManageStaff(staffUser.role)) {
-    throw new Error("FORBIDDEN");
-  }
 
   const active = parseActiveFlag(formData.get("active"));
   if (!active.ok) return finish(locale, active.error);

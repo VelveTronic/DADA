@@ -7,7 +7,7 @@ import { usePathname } from "@/i18n/navigation";
 import { activeTab, type TabKey } from "@/lib/nav-tabs";
 
 /**
- * The phone's bottom TAB BAR: 分类 · 搜索 · 购物车 · 我的, the four screens this
+ * The phone's bottom TAB BAR: 商店 · 分类 · 购物车 · 我的, the four screens this
  * portal is, one press apart at the bottom of the glass.
  *
  * It is the design's answer to a header the customer had to reach the top
@@ -43,7 +43,7 @@ import { activeTab, type TabKey } from "@/lib/nav-tabs";
  * is the tab's name.
  *
  * All four carry a `Tab` prefix, and that is what the split above costs in
- * names: `icons.tsx` draws its own loupe and basket-adjacent glyphs on the
+ * names: `icons.tsx` draws its own shop, grid and basket-adjacent glyphs on the
  * 24-unit grid, and two glyphs of one name in one repo — one exported, one
  * local — would be told apart only by which import a file happened to have.
  * The prefix says which vocabulary a glyph belongs to at every use site.
@@ -58,10 +58,10 @@ const ICON = {
 /**
  * All four are drawn in ONE style — 1.7px strokes, round caps — because the
  * first cut mixed a filled grid with three outline glyphs, and the owner read
- * the odd ones as broken (a loupe with no handle is "a circle", shoulders with
- * no head are "a headless person"). Each mark now carries the part that names
- * it: the handle on the loupe, the handle and taper on the basket, the head on
- * the person. Redrawn on the owner's review, 2026-08-19.
+ * the odd ones as broken. Each mark now carries the part that names it: the
+ * awning on the shop, four shelves on categories, the handle and taper on the
+ * basket, and the head on the person. Redrawn on the owner's review,
+ * 2026-08-19; shop/categories updated with the navigation split on 2026-08-22.
  */
 const STROKE = {
   fill: "none",
@@ -71,6 +71,17 @@ const STROKE = {
   strokeLinejoin: "round",
 } as const;
 
+/** 商店 — the catalogue's awning, in the same outline style as the other tabs. */
+function TabShopIcon() {
+  return (
+    <svg {...ICON} {...STROKE}>
+      <path d="M1.7 6.7 2.8 2.2h11.4l1.1 4.5" />
+      <path d="M1.7 6.7a2.2 2.2 0 0 0 4.2.8 2.2 2.2 0 0 0 4.2 0 2.2 2.2 0 0 0 4.2-.8" />
+      <path d="M2.8 8.2v6.5h11.4V8.2M7 14.7v-4h3v4" />
+    </svg>
+  );
+}
+
 /** 分类 — the 2×2 grid every catalogue in this market uses. */
 function TabGridIcon() {
   return (
@@ -79,16 +90,6 @@ function TabGridIcon() {
       <rect x="9.8" y="1.1" width="6.1" height="6.1" rx="1.7" />
       <rect x="1.1" y="9.8" width="6.1" height="6.1" rx="1.7" />
       <rect x="9.8" y="9.8" width="6.1" height="6.1" rx="1.7" />
-    </svg>
-  );
-}
-
-/** 搜索 — the loupe: lens up and left, handle down to the corner. */
-function TabLoupeIcon() {
-  return (
-    <svg {...ICON} {...STROKE}>
-      <circle cx="7.3" cy="7.3" r="4.9" />
-      <path d="m11.1 11.1 4.2 4.2" />
     </svg>
   );
 }
@@ -120,8 +121,13 @@ function TabPersonIcon() {
  * compile error against the message file rather than a raw key on the glass.
  */
 const TABS = [
-  { key: "catalog", path: "catalogo", label: "tabCatalog", Icon: TabGridIcon },
-  { key: "search", path: "buscar", label: "tabSearch", Icon: TabLoupeIcon },
+  { key: "catalog", path: "catalogo", label: "tabShop", Icon: TabShopIcon },
+  {
+    key: "categories",
+    path: "categorias",
+    label: "tabCategories",
+    Icon: TabGridIcon,
+  },
   { key: "cart", path: "carrito", label: "tabCart", Icon: TabBasketIcon },
   { key: "account", path: "cuenta", label: "tabAccount", Icon: TabPersonIcon },
 ] as const satisfies ReadonlyArray<{

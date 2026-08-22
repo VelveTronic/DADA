@@ -52,7 +52,7 @@ import { CART_COOKIE, parseCart } from "@/lib/cart";
  * Staff pages render `StaffShell` — a persistent left sidebar — and this file
  * kept only the half it is actually about: the DADA mark and the way to every
  * other screen. That way is now TWO controls for two devices, and exactly one
- * of them is ever on screen: the header's icon row (商店, 搜索, 购物车, 用户,
+ * of them is ever on screen: the header's icon row (商店, 分类, 购物车, 用户,
  * the last of which opens the account menu holding 我的订单 and the way out) on
  * `lg` and up, and the bottom tab bar below it. The word 订货平台 is gone from
  * the header: a storefront header carries the BRAND, and the app's full name

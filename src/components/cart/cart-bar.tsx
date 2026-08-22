@@ -17,10 +17,11 @@ import { useCart } from "./cart-provider";
  * rather than the bar itself, and the bar's own black is what keeps it from
  * competing with the row of red `+` buttons it floats over.
  *
- * **Where it shows: 分类 and 搜索, and nowhere else.** Those are the two screens
- * where goods are picked and where a running total is the number a restaurant is
- * actually watching. On `/carrito` it would be a link to the page it is on; on
- * 我的 there is nothing to add to and the design draws none (screen 05).
+ * **Where it shows: 商店 and its 搜索 child, and nowhere else.** Those are the
+ * two screens where goods are picked and where a running total is the number a
+ * restaurant is actually watching. `activeTab` deliberately maps both routes
+ * to `catalog`. On `/carrito` it would be a link to the page it is on; on 分类
+ * and 我的 there is nothing to add to and the design draws none (screen 05).
  *
  * **The subtotal is the page's own arithmetic or nothing.** The provider adds up
  * the prices the SERVER rendered on this page (`cartSubtotalCents` returns null
@@ -61,7 +62,7 @@ export function CartBar({
   // next-intl strips the locale prefix, so this is `/catalogo`, not `/zh/catalogo`.
   const tab = activeTab(usePathname());
 
-  if (count === 0 || (tab !== "catalog" && tab !== "search")) return null;
+  if (count === 0 || tab !== "catalog") return null;
 
   return (
     <div className="fixed inset-x-3.5 bottom-[calc(3.5rem+env(safe-area-inset-bottom)+0.5rem)] z-40 flex h-[50px] items-center justify-between rounded-xl bg-ink pl-4 pr-1.5 shadow-[0_10px_24px_-8px_rgba(28,25,23,.5)] lg:hidden">

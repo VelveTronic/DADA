@@ -1,16 +1,18 @@
 import type { Locale } from "next-intl";
 import { getTranslations, setRequestLocale } from "next-intl/server";
+import Image from "next/image";
 import Link from "next/link";
 import {
-  moveCategoryAction,
   renameCategory,
   setCategoryActive,
   setCategoryVisibility,
+  updateCategoryImage,
 } from "@/app/actions/staff-categories";
 import { ProductThumb } from "@/components/product-thumb";
 import { StaffShell } from "@/components/staff-shell";
 import { ADMIN_CARD, BTN_PRIMARY, BTN_QUIET, FIELD_SM } from "@/components/ui";
 import { beginStaff, finishStaff } from "@/lib/auth/guards";
+import { CATALOG_IMAGE_ACCEPT } from "@/lib/catalog-image";
 import { localizedName } from "@/lib/catalog/display";
 import type { CategoryError } from "@/lib/categories";
 import {
@@ -29,6 +31,7 @@ import {
   scanWindowCount,
 } from "@/lib/scan-windows";
 import type { createServerSupabase } from "@/lib/supabase/server";
+import { CategorySorter, type SorterEntry } from "./category-sorter";
 import { CreateCategoryForm } from "./create-category-form";
 
 export const dynamic = "force-dynamic";
@@ -39,18 +42,19 @@ export const dynamic = "force-dynamic";
  *
  * **Everything here rides the SESSION client.** Categories and products are both
  * fully readable by a staff session under RLS (`categories_read` and
- * `products_read` name `private.is_staff()` first), and the four writes behind
- * the buttons are the same — `public.categories` is the one table the hardening
- * round left open to an authenticated staff member, which is why this whole
- * feature needed no migration and no new RPC. The mechanism, with its migration
- * line numbers, is documented once in `app/actions/staff-categories.ts`.
+ * `products_read` name `private.is_staff()` first). Ordinary metadata edits use
+ * that same session path. Sort order is the exception: authenticated no longer
+ * owns that column directly, and the complete drag order goes through one
+ * atomic RPC that validates the locked category set and its parent groups.
  *
  * That is also why the reads below are RACED with the guard, the way
- * `/staff/pedidos` races its queue and unlike `/staff/productos`, which reads
- * price columns with the service-role client and must wait: a session read
- * answers under the caller's own RLS, so a request that turns out not to be
- * staff learns nothing it could not have read anyway — and `finishStaff`
- * redirects out of the `Promise.all` before a row is rendered.
+ * `/staff/pedidos` races its queue does: a session read answers under the
+ * caller's own RLS, so a request that turns out not to be staff learns nothing
+ * it could not have read anyway — and `finishStaff` redirects out of the
+ * `Promise.all` before a row is rendered. (`/staff/productos` used to be the
+ * counter-example here, waiting on the guard because it read the six price
+ * columns with the service-role client. It no longer reads them, and no longer
+ * waits — see its own header.)
  */
 
 /** The card's own head rule, in the same one-off shade as `ADMIN_CARD`. */
@@ -66,15 +70,6 @@ const CARD_HEAD =
  * storefront.
  */
 const ROW = "flex items-center gap-3 border-t border-[#F4F0EC] px-[18px] py-[13px]";
-
-/**
- * The ↑/↓ pair. 32px targets, which is the mockup's admin control size and the
- * floor this portal uses for a button that sits inside a row (the catalogue's
- * stepper squares are the same 32). Disabled at the ends of the list rather than
- * hidden, so the column does not reflow row by row.
- */
-const MOVE_BTN =
-  "inline-flex size-8 items-center justify-center rounded-lg border border-border-strong bg-surface text-xs leading-none text-ink-soft transition-colors hover:border-brand hover:text-brand-ink disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-border-strong disabled:hover:text-ink-soft";
 
 /** How many products the detail pane lists before it says how many are left. */
 const DETAIL_LIMIT = 50;
@@ -189,7 +184,7 @@ export default async function StaffCategoriesPage({
       supabase
         .from("categories")
         .select(
-          "id, erp_code, name, parent_label, visibility, sort_order, is_active",
+          "id, erp_code, name, parent_label, visibility, sort_order, is_active, image_url",
         )
         // Ordered so the 500 rows this reads are the SAME 500 the move action
         // reads (`staff-categories.ts`, same bound, same order). Not the display
@@ -262,8 +257,8 @@ export default async function StaffCategoriesPage({
    * The 一级/二级 TREE — the same derivation the customer's rail and both
    * product-page selects draw (`groupCategories`), so the list a staff member
    * reorders here is, entry for entry, the list a restaurant scrolls. The
-   * arrows move entries of THIS tree (owner, 2026-08-21): a 一级 group among
-   * the top-level entries, a 二级 row within its group.
+   * drag editor and its keyboard/touch arrows move entries of THIS tree: a 一级
+   * group among the top-level entries, a 二级 row within its group.
    */
   const tree = groupCategories(categoryResult.data ?? [], locale);
 
@@ -293,7 +288,7 @@ export default async function StaffCategoriesPage({
   // The grants read rides the same round — it is about the same selected row —
   // and under the staff RLS policy it sees the whole allowlist, not one
   // company's slice of it.
-  const [detail, grantResult] = selected
+  const [detail, grantResult, recommendationResult] = selected
     ? await Promise.all([
         perf.step(
           "categoryProducts",
@@ -311,8 +306,19 @@ export default async function StaffCategoriesPage({
             .select("company_id")
             .eq("category_id", selected.id),
         ),
+        perf.step(
+          "categoryImageRecommendation",
+          supabase
+            .from("products")
+            .select("image_url")
+            .eq("category_id", selected.id)
+            .not("image_url", "is", null)
+            .order("codart")
+            .limit(1)
+            .maybeSingle(),
+        ),
       ])
-    : [null, null];
+    : [null, null, null];
   perf.end();
   if (detail?.error) {
     console.error("staff categories products query:", detail.error);
@@ -320,7 +326,14 @@ export default async function StaffCategoriesPage({
   if (grantResult?.error) {
     console.error("staff categories grants query:", grantResult.error);
   }
+  if (recommendationResult?.error) {
+    console.error(
+      "staff categories image recommendation:",
+      recommendationResult.error,
+    );
+  }
   const detailProducts = detail?.data ?? [];
+  const recommendedImageUrl = recommendationResult?.data?.image_url ?? null;
   const grantedCompanyIds = new Set(
     (grantResult?.data ?? []).map((row) => row.company_id),
   );
@@ -423,96 +436,6 @@ export default async function StaffCategoriesPage({
   const selectedSecond = selected ? secondName(selected.name) : null;
 
   /**
-   * One category row of the tree — a 二级 line under its group heading
-   * (`child`, drawn indented) or a top-level standalone. The caller says
-   * where the arrows die: children stop at their GROUP's ends, because
-   * crossing the boundary would be a refiling and the 一级分类 field on the
-   * edit form owns that; top-level rows stop at the list's.
-   *
-   * Two forms, not one with two submit buttons: the direction travels as a
-   * hidden field, and a form whose meaning depends on WHICH button was
-   * pressed is a form that means nothing when the browser submits it with
-   * Enter.
-   */
-  const categoryRow = (
-    category: (typeof categories)[number],
-    opts: { child: boolean; upEdge: boolean; downEdge: boolean },
-  ) => {
-    const isSelected = selected?.id === category.id;
-    const second = secondName(category.name);
-    return (
-      <li
-        key={category.id}
-        className={`${ROW} ${
-          isSelected ? "bg-brand-soft text-brand-ink" : "hover:bg-[#FCFBFA]"
-        }`}
-      >
-        {/* The 二级 indent: a spacer, not padding arithmetic — `ROW`'s
-            `px-[18px]` stays untouched and un-fought. */}
-        {opts.child && <span aria-hidden className="w-2.5 flex-none" />}
-        <div className="flex flex-none items-center gap-0.5">
-          {(["up", "down"] as const).map((dir) => (
-            <form key={dir} action={moveCategoryAction}>
-              <input type="hidden" name="locale" value={locale} />
-              <input type="hidden" name="id" value={category.id} />
-              <input type="hidden" name="dir" value={dir} />
-              <input type="hidden" name="cat" value={selected?.id ?? ""} />
-              {keepCreating}
-              {keepOpen}
-              <button
-                type="submit"
-                disabled={dir === "up" ? opts.upEdge : opts.downEdge}
-                // One ↑ per row would tell a screen reader nothing about
-                // which category it moves.
-                aria-label={t(dir === "up" ? "moveUp" : "moveDown", {
-                  name: category.label,
-                })}
-                className={MOVE_BTN}
-              >
-                <span aria-hidden>{dir === "up" ? "↑" : "↓"}</span>
-              </button>
-            </form>
-          ))}
-        </div>
-
-        <Link
-          href={pageHref({ cat: category.id })}
-          aria-current={isSelected ? "page" : undefined}
-          className="flex min-w-0 flex-1 items-center gap-2"
-        >
-          <span className="min-w-0 flex-1">
-            <span
-              className={`block truncate text-[13.5px] ${
-                isSelected ? "font-bold" : ""
-              }`}
-            >
-              {category.label}
-            </span>
-            {second && (
-              <span className="block truncate text-[11px] text-muted">
-                {second}
-              </span>
-            )}
-          </span>
-          {!category.is_active && (
-            <span className="flex-none rounded-md bg-surface-dim px-1.5 py-0.5 text-[11px] text-muted">
-              {t("hiddenChip")}
-            </span>
-          )}
-          {category.visibility === "selected" && (
-            <span className="flex-none rounded-md bg-amber-100 px-1.5 py-0.5 text-[11px] text-amber-800">
-              {t("visLimitedChip")}
-            </span>
-          )}
-          <span className="flex-none font-num text-xs text-muted tabular-nums">
-            {t("productCount", { n: countOf(category.id) })}
-          </span>
-        </Link>
-      </li>
-    );
-  };
-
-  /**
    * Every 一级分类 already in the table, in THIS locale, for the datalist under
    * the parent field: filing a category under an existing group is a pick, not
    * a retype — and picking is what makes `resolveParentLabel` reuse the stored
@@ -525,6 +448,28 @@ export default async function StaffCategoriesPage({
         .filter((label) => label !== ""),
     ),
   ];
+
+  const sorterCategory = (
+    category: (typeof categories)[number],
+  ) => ({
+    id: category.id,
+    label: category.label,
+    secondName: secondName(category.name),
+    href: pageHref({ cat: category.id }),
+    isActive: category.is_active,
+    limited: category.visibility === "selected",
+    productCount: t("productCount", { n: countOf(category.id) }),
+  });
+  const sorterEntries: SorterEntry[] = tree.map((entry) =>
+    entry.kind === "group"
+      ? {
+          kind: "group",
+          label: entry.label,
+          countLabel: t("groupCount", { n: entry.children.length }),
+          children: entry.children.map(sorterCategory),
+        }
+      : { kind: "category", category: sorterCategory(entry.category) },
+  );
 
   return (
     <StaffShell
@@ -588,104 +533,27 @@ export default async function StaffCategoriesPage({
                only the OUTER list's top rule doubles the card head's — a
                group's first child keeps its rule, which is what separates it
                from the heading above it. */
-            <ul className="lg:max-h-[calc(100vh-13rem)] lg:overflow-y-auto [&>li:first-child]:border-t-0">
-              {tree.map((entry, topIndex) => {
-                const upEdge = topIndex === 0;
-                const downEdge = topIndex === tree.length - 1;
-                if (entry.kind === "category") {
-                  return categoryRow(entry.category, {
-                    child: false,
-                    upEdge,
-                    downEdge,
-                  });
-                }
-                const isOpen = openGroup === entry.label;
-                return (
-                  <li
-                    key={`group:${entry.label}`}
-                    className="border-t border-[#F4F0EC]"
-                  >
-                    {/* A 一级 heading: its arrows move the WHOLE group among
-                        the top-level entries, and the row itself is the
-                        disclosure — a link, so expanding survives a reload and
-                        can be sent to somebody, exactly like the selected
-                        category and the create card. `bg-field` is the same
-                        wash the table headers sit on: a heading, not a row. */}
-                    <div className="flex items-center gap-3 bg-field px-[18px] py-[13px]">
-                      <div className="flex flex-none items-center gap-0.5">
-                        {(["up", "down"] as const).map((dir) => (
-                          <form key={dir} action={moveCategoryAction}>
-                            <input type="hidden" name="locale" value={locale} />
-                            <input
-                              type="hidden"
-                              name="group"
-                              value={entry.label}
-                            />
-                            <input type="hidden" name="dir" value={dir} />
-                            <input
-                              type="hidden"
-                              name="cat"
-                              value={selected?.id ?? ""}
-                            />
-                            {keepCreating}
-                            {keepOpen}
-                            <button
-                              type="submit"
-                              disabled={dir === "up" ? upEdge : downEdge}
-                              aria-label={t(
-                                dir === "up" ? "moveGroupUp" : "moveGroupDown",
-                                { name: entry.label },
-                              )}
-                              className={MOVE_BTN}
-                            >
-                              <span aria-hidden>
-                                {dir === "up" ? "↑" : "↓"}
-                              </span>
-                            </button>
-                          </form>
-                        ))}
-                      </div>
-                      <Link
-                        href={pageHref({
-                          open: isOpen ? "" : entry.label,
-                        })}
-                        aria-expanded={isOpen}
-                        aria-label={t(
-                          isOpen ? "collapseGroup" : "expandGroup",
-                          { name: entry.label },
-                        )}
-                        className="flex min-w-0 flex-1 items-center gap-2"
-                      >
-                        <span
-                          aria-hidden
-                          className="w-3 flex-none text-[10px] text-muted"
-                        >
-                          {isOpen ? "▾" : "▸"}
-                        </span>
-                        <span className="min-w-0 flex-1 truncate text-[13.5px] font-bold">
-                          {entry.label}
-                        </span>
-                        <span className="flex-none font-num text-xs text-muted tabular-nums">
-                          {t("groupCount", { n: entry.children.length })}
-                        </span>
-                      </Link>
-                    </div>
-                    {isOpen && (
-                      <ul>
-                        {entry.children.map((category, childIndex) =>
-                          categoryRow(category, {
-                            child: true,
-                            upEdge: childIndex === 0,
-                            downEdge:
-                              childIndex === entry.children.length - 1,
-                          }),
-                        )}
-                      </ul>
-                    )}
-                  </li>
-                );
-              })}
-            </ul>
+            <CategorySorter
+              entries={sorterEntries}
+              locale={locale}
+              selectedId={selected?.id ?? null}
+              creating={creating}
+              initialOpenGroup={openGroup}
+              labels={{
+                moveUp: t("moveUp", { name: "__NAME__" }),
+                moveDown: t("moveDown", { name: "__NAME__" }),
+                moveGroupUp: t("moveGroupUp", { name: "__NAME__" }),
+                moveGroupDown: t("moveGroupDown", { name: "__NAME__" }),
+                dragHandle: t("dragHandle", { name: "__NAME__" }),
+                expandGroup: t("expandGroup", { name: "__NAME__" }),
+                collapseGroup: t("collapseGroup", { name: "__NAME__" }),
+                hiddenChip: t("hiddenChip"),
+                limitedChip: t("visLimitedChip"),
+                saveOrder: t("saveOrder"),
+                orderHint: t("orderSavedHint"),
+                unchanged: t("orderUnchanged"),
+              }}
+            />
           )}
         </section>
 
@@ -806,6 +674,110 @@ export default async function StaffCategoriesPage({
                       </button>
                     </div>
                   </form>
+
+                  <section className="border-t border-[#F4F0EC] pt-4">
+                    <h3 className="text-[13px] font-bold">{t("imageHead")}</h3>
+                    <div className="mt-3 grid gap-4 sm:grid-cols-[128px_1fr]">
+                      <div className="flex flex-col gap-2">
+                        <p className="text-[11px] text-muted">
+                          {selected.image_url
+                            ? t("imageCurrent")
+                            : t("imageMissing")}
+                        </p>
+                        {selected.image_url ? (
+                          <Image
+                            src={selected.image_url}
+                            alt={t("imageCurrent")}
+                            width={112}
+                            height={112}
+                            className="size-28 rounded-xl border border-border bg-field object-cover"
+                          />
+                        ) : (
+                          <div className="flex size-28 items-center justify-center rounded-xl border border-dashed border-border-strong bg-field px-3 text-center text-[11px] text-muted">
+                            {t("imageMissing")}
+                          </div>
+                        )}
+                        {selected.image_url && (
+                          <form action={updateCategoryImage}>
+                            <input type="hidden" name="locale" value={locale} />
+                            <input type="hidden" name="id" value={selected.id} />
+                            <input type="hidden" name="cat" value={selected.id} />
+                            <input type="hidden" name="mode" value="clear" />
+                            {keepCreating}
+                            {keepOpen}
+                            <button type="submit" className={BTN_QUIET}>
+                              {t("imageClear")}
+                            </button>
+                          </form>
+                        )}
+                      </div>
+
+                      <div className="flex min-w-0 flex-col gap-4">
+                        <form
+                          action={updateCategoryImage}
+                          className="flex flex-col items-start gap-2"
+                        >
+                          <input type="hidden" name="locale" value={locale} />
+                          <input type="hidden" name="id" value={selected.id} />
+                          <input type="hidden" name="cat" value={selected.id} />
+                          <input type="hidden" name="mode" value="upload" />
+                          {keepCreating}
+                          {keepOpen}
+                          <label className="flex w-full flex-col gap-1 text-xs text-muted">
+                            {t("imageUpload")}
+                            <input
+                              type="file"
+                              name="image"
+                              required
+                              accept={CATALOG_IMAGE_ACCEPT}
+                              className="max-w-full text-[12.5px] text-ink file:mr-3 file:rounded-lg file:border file:border-border-strong file:bg-surface file:px-3 file:py-1.5 file:text-[12.5px] file:text-ink-soft"
+                            />
+                          </label>
+                          <p className="text-[11px] text-muted">
+                            {t("imageHint")}
+                          </p>
+                          <button type="submit" className={BTN_QUIET}>
+                            {t("imageUploadButton")}
+                          </button>
+                        </form>
+
+                        {!selected.image_url && recommendedImageUrl && (
+                          <div className="border-t border-[#F4F0EC] pt-4">
+                            <p className="text-xs font-bold">
+                              {t("imageRecommended")}
+                            </p>
+                            <p className="mt-1 text-[11px] text-muted">
+                              {t("imageRecommendedHint")}
+                            </p>
+                            <div className="mt-2 flex flex-wrap items-center gap-3">
+                              <Image
+                                src={recommendedImageUrl}
+                                alt={t("imageRecommended")}
+                                width={80}
+                                height={80}
+                                className="size-20 rounded-lg border border-border bg-field object-cover"
+                              />
+                              <form action={updateCategoryImage}>
+                                <input type="hidden" name="locale" value={locale} />
+                                <input type="hidden" name="id" value={selected.id} />
+                                <input type="hidden" name="cat" value={selected.id} />
+                                <input
+                                  type="hidden"
+                                  name="mode"
+                                  value="recommended"
+                                />
+                                {keepCreating}
+                                {keepOpen}
+                                <button type="submit" className={BTN_QUIET}>
+                                  {t("imageUseRecommended")}
+                                </button>
+                              </form>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </section>
 
                   <div className="flex flex-wrap items-center gap-3 border-t border-[#F4F0EC] pt-4">
                     <form action={setCategoryActive}>
